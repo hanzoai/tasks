@@ -22,6 +22,7 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/namespace"
+	"go.temporal.io/server/common/testing/await"
 	"go.temporal.io/server/common/testing/historyrequire"
 	"go.temporal.io/server/common/testing/taskpoller"
 	"go.temporal.io/server/common/testing/testhooks"
@@ -286,6 +287,20 @@ func (e *TestEnv) T() *testing.T {
 
 func (e *TestEnv) Tv() *testvars.TestVars {
 	return e.tv
+}
+
+// Await polls condition until it succeeds or the timeout expires.
+// The condition receives an *await.T for assertions — use require.* with it,
+// not s.T() or suite methods.
+func (e *TestEnv) Await(condition func(*await.T), timeout, pollInterval time.Duration) {
+	e.t.Helper()
+	await.Require(e.t, condition, timeout, pollInterval)
+}
+
+// Awaitf is like Await but includes a formatted message on timeout.
+func (e *TestEnv) Awaitf(condition func(*await.T), timeout, pollInterval time.Duration, msg string, args ...any) {
+	e.t.Helper()
+	await.Requiref(e.t, condition, timeout, pollInterval, msg, args...)
 }
 
 // Context returns the test-level timeout context with RPC version headers already included.
