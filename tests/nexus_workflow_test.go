@@ -1322,82 +1322,33 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationCancelBeforeStarted_Cancelati
 	})
 	s.NoError(err)
 
+	callerWF := func(ctx workflow.Context) error {
+		opCtx, cancel := workflow.WithCancel(ctx)
+		c := workflow.NewNexusClient(endpointName, "service")
+		fut := c.ExecuteOperation(opCtx, "operation", "input", workflow.NexusOperationOptions{})
+		// Sleep to force a new workflow task, ensuring the operation is scheduled before cancel.
+		_ = workflow.Sleep(ctx, time.Millisecond)
+		cancel()
+		return fut.Get(ctx, nil)
+	}
+
+	w := worker.New(s.SdkClient(), taskQueue, worker.Options{})
+	w.RegisterWorkflow(callerWF)
+	s.NoError(w.Start())
+	defer w.Stop()
+
 	run, err := s.SdkClient().ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		TaskQueue: taskQueue,
-	}, "workflow")
+	}, callerWF)
 	s.NoError(err)
 
-	pollResp, err := s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-		Namespace: s.Namespace().String(),
-		TaskQueue: &taskqueuepb.TaskQueue{
-			Name: taskQueue,
-			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-		},
-		Identity: "test",
-	})
-	s.NoError(err)
-	_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-		Identity:  "test",
-		TaskToken: pollResp.TaskToken,
-		Commands: []*commandpb.Command{
-			{
-				CommandType: enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
-				Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
-					ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
-						Endpoint:  endpointName,
-						Service:   "service",
-						Operation: "operation",
-						Input:     testcore.MustToPayload(s.T(), "input"),
-					},
-				},
-			},
-			// Also wake the workflow up so it can cancel the operation.
-			{
-				CommandType: enumspb.COMMAND_TYPE_START_TIMER,
-				Attributes: &commandpb.Command_StartTimerCommandAttributes{
-					StartTimerCommandAttributes: &commandpb.StartTimerCommandAttributes{
-						TimerId:            "1",
-						StartToFireTimeout: durationpb.New(time.Millisecond),
-					},
-				},
-			},
-		},
-	})
-	s.NoError(err)
-
-	// Poll and cancel the operation.
-	pollResp, err = s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-		Namespace: s.Namespace().String(),
-		TaskQueue: &taskqueuepb.TaskQueue{
-			Name: taskQueue,
-			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-		},
-		Identity: "test",
-	})
-	s.NoError(err)
-
-	// Get the scheduleEventId to issue the cancel command.
-	scheduledEventIdx := slices.IndexFunc(pollResp.History.Events, func(e *historypb.HistoryEvent) bool {
-		return e.GetNexusOperationScheduledEventAttributes() != nil
-	})
-	s.Positive(scheduledEventIdx)
-	scheduledEventID := pollResp.History.Events[scheduledEventIdx].EventId
-
-	_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-		Identity:  "test",
-		TaskToken: pollResp.TaskToken,
-		Commands: []*commandpb.Command{
-			{
-				CommandType: enumspb.COMMAND_TYPE_REQUEST_CANCEL_NEXUS_OPERATION,
-				Attributes: &commandpb.Command_RequestCancelNexusOperationCommandAttributes{
-					RequestCancelNexusOperationCommandAttributes: &commandpb.RequestCancelNexusOperationCommandAttributes{
-						ScheduledEventId: scheduledEventID,
-					},
-				},
-			},
-		},
-	})
-	s.NoError(err)
+	// Wait for the cancel to be requested before unblocking the start.
+	s.EventuallyWithT(func(t *assert.CollectT) {
+		desc, err := s.SdkClient().DescribeWorkflowExecution(ctx, run.GetID(), run.GetRunID())
+		require.NoError(t, err)
+		require.Len(t, desc.PendingNexusOperations, 1)
+		require.NotNil(t, desc.PendingNexusOperations[0].CancellationInfo)
+	}, time.Second*10, time.Millisecond*100)
 
 	canStartCh <- struct{}{}
 	s.WaitForChannel(ctx, cancelSentCh)
@@ -1406,7 +1357,7 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationCancelBeforeStarted_Cancelati
 	err = s.SdkClient().TerminateWorkflow(ctx, run.GetID(), run.GetRunID(), "test")
 	s.NoError(err)
 
-	// Assert that we did not send a cancel request until after the operation was started.
+	// Assert that cancel was requested before the operation started.
 	hist := s.GetHistory(s.Namespace().String(), &commonpb.WorkflowExecution{
 		WorkflowId: run.GetID(),
 		RunId:      run.GetRunID(),
