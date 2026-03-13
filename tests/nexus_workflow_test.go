@@ -939,61 +939,27 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationAsyncFailure() {
 	})
 	s.NoError(err)
 
+	callerWF := func(ctx workflow.Context) error {
+		c := workflow.NewNexusClient(endpointName, "service")
+		fut := c.ExecuteOperation(ctx, "operation", "input", workflow.NexusOperationOptions{})
+		return fut.Get(ctx, nil)
+	}
+
+	w := worker.New(s.SdkClient(), taskQueue, worker.Options{})
+	w.RegisterWorkflow(callerWF)
+	s.NoError(w.Start())
+	defer w.Stop()
+
 	run, err := s.SdkClient().ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		TaskQueue: taskQueue,
-	}, "workflow")
+	}, callerWF)
 	s.NoError(err)
 
+	// Wait for the handler to be called by checking for the NexusOperationStarted event.
 	s.EventuallyWithT(func(t *assert.CollectT) {
-		pollResp, err := s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-			Namespace: s.Namespace().String(),
-			TaskQueue: &taskqueuepb.TaskQueue{
-				Name: taskQueue,
-				Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-			},
-			Identity: "test",
-		})
-		require.NoError(t, err)
-		_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-			Identity:  "test",
-			TaskToken: pollResp.TaskToken,
-			Commands: []*commandpb.Command{
-				{
-					CommandType: enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
-					Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
-						ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
-							Endpoint:  endpointName,
-							Service:   "service",
-							Operation: "operation",
-							Input:     testcore.MustToPayload(s.T(), "input"),
-						},
-					},
-				},
-			},
-		})
-		require.NoError(t, err)
-	}, time.Second*20, time.Millisecond*200)
-
-	// Poll and verify that the "started" event was recorded.
-	pollResp, err := s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-		Namespace: s.Namespace().String(),
-		TaskQueue: &taskqueuepb.TaskQueue{
-			Name: taskQueue,
-			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-		},
-		Identity: "test",
-	})
-	s.NoError(err)
-	_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-		Identity:  "test",
-		TaskToken: pollResp.TaskToken,
-	})
-	s.NoError(err)
-
-	startedEventIdx := slices.IndexFunc(pollResp.History.Events, func(e *historypb.HistoryEvent) bool {
-		return e.GetNexusOperationStartedEventAttributes() != nil
-	})
-	s.Positive(startedEventIdx)
+		hist := s.GetHistory(s.Namespace().String(), &commonpb.WorkflowExecution{WorkflowId: run.GetID()})
+		historyrequire.New(t).RequireSingleHistoryEvent(hist, enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED)
+	}, time.Second*10, time.Millisecond*200)
 
 	// Send a valid - failed completion request.
 	completion := nexusrpc.CompleteOperationOptions{
@@ -1005,38 +971,8 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationAsyncFailure() {
 	s.Len(snap["nexus_completion_requests"], 1)
 	s.Subset(snap["nexus_completion_requests"][0].Tags, map[string]string{"namespace": s.Namespace().String(), "outcome": "success"})
 
-	// Poll again and verify the completion is recorded and triggers workflow progress.
-	pollResp, err = s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-		Namespace: s.Namespace().String(),
-		TaskQueue: &taskqueuepb.TaskQueue{
-			Name: taskQueue,
-			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-		},
-		Identity: "test",
-	})
-	s.NoError(err)
-	completedEventIdx := slices.IndexFunc(pollResp.History.Events, func(e *historypb.HistoryEvent) bool {
-		return e.GetNexusOperationFailedEventAttributes() != nil
-	})
-	s.Positive(completedEventIdx)
-
-	_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-		Identity:  "test",
-		TaskToken: pollResp.TaskToken,
-		Commands: []*commandpb.Command{
-			{
-				CommandType: enumspb.COMMAND_TYPE_FAIL_WORKFLOW_EXECUTION,
-				Attributes: &commandpb.Command_FailWorkflowExecutionCommandAttributes{
-					FailWorkflowExecutionCommandAttributes: &commandpb.FailWorkflowExecutionCommandAttributes{
-						Failure: pollResp.History.Events[completedEventIdx].GetNexusOperationFailedEventAttributes().Failure,
-					},
-				},
-			},
-		},
-	})
-	s.NoError(err)
-	var result string
-	err = run.Get(ctx, &result)
+	// Wait for the workflow to complete and verify the error.
+	err = run.Get(ctx, nil)
 	var wee *temporal.WorkflowExecutionError
 	s.ErrorAs(err, &wee)
 
