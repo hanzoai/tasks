@@ -410,12 +410,8 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationAsyncCompletion() {
 	testClusterInfo, err := s.FrontendClient().GetClusterInfo(ctx, &workflowservice.GetClusterInfoRequest{})
 	s.NoError(err)
 
-	run, err := s.SdkClient().ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-		TaskQueue: taskQueue,
-	}, "workflow")
-	s.NoError(err)
-
 	var callbackToken, publicCallbackURL string
+	var run client.WorkflowRun
 
 	handlerLink := &commonpb.Link_WorkflowEvent{
 		Namespace:  "handler-ns",
@@ -495,62 +491,30 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationAsyncCompletion() {
 	})
 	s.NoError(err)
 
-	pollResp, err := s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-		Namespace: s.Namespace().String(),
-		TaskQueue: &taskqueuepb.TaskQueue{
-			Name: taskQueue,
-			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-		},
-		Identity: "test",
-	})
-	s.NoError(err)
-	_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-		Identity:  "test",
-		TaskToken: pollResp.TaskToken,
-		Commands: []*commandpb.Command{
-			{
-				CommandType: enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
-				Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
-					ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
-						Endpoint:  endpointName,
-						Service:   "service",
-						Operation: "operation",
-						Input:     testcore.MustToPayload(s.T(), "input"),
-					},
-				},
-			},
-		},
-	})
+	callerWF := func(ctx workflow.Context) (string, error) {
+		c := workflow.NewNexusClient(endpointName, "service")
+		fut := c.ExecuteOperation(ctx, "operation", "input", workflow.NexusOperationOptions{})
+		var result string
+		err := fut.Get(ctx, &result)
+		return result, err
+	}
+
+	// Start the workflow before the worker so that `run` is assigned before the handler closure can read it
+	run, err = s.SdkClient().ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		TaskQueue: taskQueue,
+	}, callerWF)
 	s.NoError(err)
 
-	// Poll and verify that the "started" event was recorded.
-	pollResp, err = s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-		Namespace: s.Namespace().String(),
-		TaskQueue: &taskqueuepb.TaskQueue{
-			Name: taskQueue,
-			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-		},
-		Identity: "test",
-	})
-	s.NoError(err)
-	_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-		Identity:  "test",
-		TaskToken: pollResp.TaskToken,
-	})
-	s.NoError(err)
+	w := worker.New(s.SdkClient(), taskQueue, worker.Options{})
+	w.RegisterWorkflow(callerWF)
+	s.NoError(w.Start())
+	defer w.Stop()
 
-	// Remember the workflow task completed event ID (next after the last WFT started), we'll use it to test reset
-	// below.
-	wftCompletedEventID := int64(len(pollResp.History.Events))
-
-	startedEventIdx := slices.IndexFunc(pollResp.History.Events, func(e *historypb.HistoryEvent) bool {
-		return e.GetNexusOperationStartedEventAttributes() != nil
-	})
-	s.Positive(startedEventIdx)
-
-	s.Len(pollResp.History.Events[startedEventIdx].Links, 1)
-	l := pollResp.History.Events[startedEventIdx].Links[0].GetWorkflowEvent()
-	protorequire.ProtoEqual(s.T(), handlerLink, l)
+	// Wait for the handler to be called by checking for the NexusOperationStarted event.
+	s.EventuallyWithT(func(t *assert.CollectT) {
+		hist := s.GetHistory(s.Namespace().String(), &commonpb.WorkflowExecution{WorkflowId: run.GetID()})
+		historyrequire.New(t).RequireSingleHistoryEvent(hist, enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED)
+	}, time.Second*10, time.Millisecond*200)
 
 	// Completion request fails if the result payload is too large.
 	largeCompletion := nexusrpc.CompleteOperationOptions{
@@ -642,72 +606,47 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationAsyncCompletion() {
 	s.Len(snap["nexus_completion_requests"], 1)
 	s.Subset(snap["nexus_completion_requests"][0].Tags, map[string]string{"namespace": s.Namespace().String(), "outcome": "error_not_found"})
 
-	// Poll again and verify the completion is recorded and triggers workflow progress.
-	pollResp, err = s.FrontendClient().PollWorkflowTaskQueue(ctx, &workflowservice.PollWorkflowTaskQueueRequest{
-		Namespace: s.Namespace().String(),
-		TaskQueue: &taskqueuepb.TaskQueue{
-			Name: taskQueue,
-			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
-		},
-		Identity: "test",
-	})
-	s.NoError(err)
-	completedEventIdx := slices.IndexFunc(pollResp.History.Events, func(e *historypb.HistoryEvent) bool {
-		return e.GetNexusOperationCompletedEventAttributes() != nil
-	})
-	s.Positive(completedEventIdx)
-
-	_, err = s.FrontendClient().RespondWorkflowTaskCompleted(ctx, &workflowservice.RespondWorkflowTaskCompletedRequest{
-		Identity:  "test",
-		TaskToken: pollResp.TaskToken,
-		Commands: []*commandpb.Command{
-			{
-				CommandType: enumspb.COMMAND_TYPE_COMPLETE_WORKFLOW_EXECUTION,
-				Attributes: &commandpb.Command_CompleteWorkflowExecutionCommandAttributes{
-					CompleteWorkflowExecutionCommandAttributes: &commandpb.CompleteWorkflowExecutionCommandAttributes{
-						Result: &commonpb.Payloads{
-							Payloads: []*commonpb.Payload{
-								pollResp.History.Events[completedEventIdx].GetNexusOperationCompletedEventAttributes().Result,
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-	s.NoError(err)
+	// Wait for the workflow to complete after the valid completion was sent.
 	var result string
 	s.NoError(run.Get(ctx, &result))
 	s.Equal("result", result)
 
+	wfExec := &commonpb.WorkflowExecution{
+		WorkflowId: run.GetID(),
+		RunId:      run.GetRunID(),
+	}
+
+	// Verify the started event has the expected link and find the wftCompletedEventID for reset tests.
+	hist := s.GetHistory(s.Namespace().String(), wfExec)
+	opStartedEvent := s.RequireSingleHistoryEvent(hist, enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED)
+	s.Len(opStartedEvent.Links, 1)
+	protorequire.ProtoEqual(s.T(), handlerLink, opStartedEvent.Links[0].GetWorkflowEvent())
+
+	// Find the first WFT completed after the started event for reset tests.
+	wftCompletedIdx := slices.IndexFunc(hist, func(e *historypb.HistoryEvent) bool {
+		return e.EventType == enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED && e.EventId > opStartedEvent.EventId
+	})
+	s.Positive(wftCompletedIdx, "expected WorkflowTaskCompleted after NexusOperationStarted")
+	wftCompletedEventID := hist[wftCompletedIdx].EventId
+
 	// Reset the workflow and check that the completion event has been reapplied.
 	resp, err := s.FrontendClient().ResetWorkflowExecution(ctx, &workflowservice.ResetWorkflowExecutionRequest{
 		Namespace:                 s.Namespace().String(),
-		WorkflowExecution:         pollResp.WorkflowExecution,
+		WorkflowExecution:         wfExec,
 		Reason:                    "test",
 		RequestId:                 uuid.NewString(),
 		WorkflowTaskFinishEventId: wftCompletedEventID,
 	})
 	s.NoError(err)
 
-	hist := s.SdkClient().GetWorkflowHistory(ctx, run.GetID(), resp.RunId, false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
-
-	seenCompletedEvent := false
-	for hist.HasNext() {
-		event, err := hist.Next()
-		s.NoError(err)
-		if event.EventType == enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED {
-			seenCompletedEvent = true
-			break
-		}
-	}
-	s.True(seenCompletedEvent)
+	resetHist1 := s.GetHistory(s.Namespace().String(), &commonpb.WorkflowExecution{WorkflowId: run.GetID(), RunId: resp.RunId})
+	s.RequireSingleHistoryEvent(resetHist1, enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED)
 
 	// Reset the workflow again to the same point with enumspb.RESET_REAPPLY_EXCLUDE_TYPE_NEXUS option
 	// and verify that the completion event has been excluded.
 	resp, err = s.FrontendClient().ResetWorkflowExecution(ctx, &workflowservice.ResetWorkflowExecutionRequest{
 		Namespace:                 s.Namespace().String(),
-		WorkflowExecution:         pollResp.WorkflowExecution,
+		WorkflowExecution:         wfExec,
 		Reason:                    "test",
 		RequestId:                 uuid.NewString(),
 		WorkflowTaskFinishEventId: wftCompletedEventID,
@@ -715,12 +654,9 @@ func (s *NexusWorkflowTestSuite) TestNexusOperationAsyncCompletion() {
 	})
 	s.NoError(err)
 
-	hist = s.SdkClient().GetWorkflowHistory(ctx, run.GetID(), resp.RunId, false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
-
-	seenCompletedEvent = false
-	for hist.HasNext() {
-		event, err := hist.Next()
-		s.NoError(err)
+	resetHist2 := s.GetHistory(s.Namespace().String(), &commonpb.WorkflowExecution{WorkflowId: run.GetID(), RunId: resp.RunId})
+	seenCompletedEvent := false
+	for _, event := range resetHist2 {
 		if event.EventType == enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED {
 			seenCompletedEvent = true
 			break
