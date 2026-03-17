@@ -988,6 +988,8 @@ func (wh *WorkflowHandler) PollWorkflowTaskQueue(ctx context.Context, request *w
 		Queries:                    matchingResp.Queries,
 		Messages:                   matchingResp.Messages,
 		PollerScalingDecision:      matchingResp.PollerScalingDecision,
+		// TODO: propagate ShutdownWorkerRejected once go.temporal.io/api is bumped
+		// to include the new field: matchingResp.ShutdownWorkerRejected
 	}, nil
 }
 
@@ -1225,6 +1227,8 @@ func (wh *WorkflowHandler) PollActivityTaskQueue(ctx context.Context, request *w
 		PollerScalingDecision:       matchingResponse.PollerScalingDecision,
 		Priority:                    matchingResponse.Priority,
 		RetryPolicy:                 matchingResponse.RetryPolicy,
+		// TODO: propagate ShutdownWorkerRejected once go.temporal.io/api is bumped
+		// to include the new field: matchingResponse.ShutdownWorkerRejected
 	}, nil
 }
 
@@ -5641,6 +5645,8 @@ func (wh *WorkflowHandler) PollNexusTaskQueue(ctx context.Context, request *work
 		return nil, err
 	}
 
+	// TODO: propagate matchingResponse.ShutdownWorkerRejected to the public
+	// PollNexusTaskQueueResponse once go.temporal.io/api is bumped.
 	return matchingResponse.GetResponse(), nil
 }
 
