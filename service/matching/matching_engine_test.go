@@ -2154,14 +2154,16 @@ func (s *matchingEngineSuite) TestAddTaskAfterStartFailure() {
 	s.NoError(err)
 	s.EqualValues(1, s.taskManager.getTaskCount(dbq))
 
-	task1, _, err := s.matchingEngine.pollTask(context.Background(), dbq.partition, &pollMetadata{})
+	result1, err := s.matchingEngine.pollTask(context.Background(), dbq.partition, &pollMetadata{})
 	s.NoError(err)
+	task1 := result1.task
 
 	task1.finish(serviceerror.NewInternal("test error"), true)
 	s.EqualValues(1, s.taskManager.getTaskCount(dbq))
 
-	task2, _, err := s.matchingEngine.pollTask(context.Background(), dbq.partition, &pollMetadata{})
+	result2, err := s.matchingEngine.pollTask(context.Background(), dbq.partition, &pollMetadata{})
 	s.NoError(err)
+	task2 := result2.task
 	protoassert.ProtoEqual(s.T(), task1.event.Data, task2.event.Data)
 	s.NotEqual(task1.event.GetTaskId(), task2.event.GetTaskId(), "IDs should not match")
 
@@ -2800,14 +2802,14 @@ func (s *matchingEngineSuite) TestUnknownBuildId_Match() {
 
 	go func() {
 		prtn := newRootPartition(namespaceID, tq, enumspb.TASK_QUEUE_TYPE_WORKFLOW)
-		task, _, err := s.matchingEngine.pollTask(ctx, prtn, &pollMetadata{
+		result, err := s.matchingEngine.pollTask(ctx, prtn, &pollMetadata{
 			workerVersionCapabilities: &commonpb.WorkerVersionCapabilities{
 				BuildId:       "unknown",
 				UseVersioning: true,
 			},
 		})
 		s.NoError(err)
-		s.Equal("wf", task.event.Data.WorkflowId)
+		s.Equal("wf", result.task.event.Data.WorkflowId)
 		s.Equal(int64(123), task.event.Data.ScheduledEventId)
 		task.finish(nil, true)
 		wg.Done()
@@ -2909,16 +2911,16 @@ func (s *matchingEngineSuite) TestDemotedMatch() {
 	s.NoError(err)
 
 	// now poll for the task
-	task, _, err := s.matchingEngine.pollTask(ctx, prtn, &pollMetadata{
+	result, err := s.matchingEngine.pollTask(ctx, prtn, &pollMetadata{
 		workerVersionCapabilities: &commonpb.WorkerVersionCapabilities{
 			BuildId:       build1,
 			UseVersioning: true,
 		},
 	})
 	s.Require().NoError(err)
-	s.Equal("wf", task.event.Data.WorkflowId)
-	s.Equal(int64(123), task.event.Data.ScheduledEventId)
-	task.finish(nil, true)
+	s.Equal("wf", result.task.event.Data.WorkflowId)
+	s.Equal(int64(123), result.task.event.Data.ScheduledEventId)
+	result.task.finish(nil, true)
 }
 
 type mockRoutingMatchingClient struct {
