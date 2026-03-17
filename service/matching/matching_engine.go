@@ -107,6 +107,12 @@ type (
 		workerInstanceKey         string
 	}
 
+	pollResult struct {
+		task             *internalTask
+		versionSetUsed   bool
+		shutdownRejected bool
+	}
+
 	userDataUpdate struct {
 		taskQueue string
 		update    persistence.SingleTaskQueueUserDataUpdate
@@ -695,13 +701,19 @@ pollLoop:
 			conditions:                req.Conditions,
 			workerInstanceKey:         request.WorkerInstanceKey,
 		}
-		task, versionSetUsed, err := e.pollTask(pollerCtx, partition, pollMetadata)
+		result, err := e.pollTask(pollerCtx, partition, pollMetadata)
 		if err != nil {
 			if errors.Is(err, errNoTasks) {
+				if result.shutdownRejected {
+					return &matchingservice.PollWorkflowTaskQueueResponseWithRawHistory{
+						ShutdownWorkerRejected: true,
+					}, nil
+				}
 				return emptyPollWorkflowTaskQueueResponse, nil
 			}
 			return nil, err
 		}
+		task := result.task
 		if task.isStarted() {
 			// tasks received from remote are already started. So, simply forward the response
 			// no need to emit task dispatch latency metric because the parent partition already did it.
@@ -759,7 +771,7 @@ pollLoop:
 		}
 
 		requestClone := request
-		if versionSetUsed {
+		if result.versionSetUsed {
 			// We remove build ID from workerVersionCapabilities so History can differentiate between
 			// old and new versioning in Record*TaskStart.
 			// TODO: remove this block after old versioning cleanup. [cleanup-old-wv]
@@ -1004,20 +1016,26 @@ pollLoop:
 			conditions:                req.Conditions,
 			workerInstanceKey:         request.WorkerInstanceKey,
 		}
-		task, versionSetUsed, err := e.pollTask(pollerCtx, partition, pollMetadata)
+		result, err := e.pollTask(pollerCtx, partition, pollMetadata)
 		if err != nil {
 			if errors.Is(err, errNoTasks) {
+				if result.shutdownRejected {
+					return &matchingservice.PollActivityTaskQueueResponse{
+						ShutdownWorkerRejected: true,
+					}, nil
+				}
 				return emptyPollActivityTaskQueueResponse, nil
 			}
 			return nil, err
 		}
 
+		task := result.task
 		if task.isStarted() {
 			// tasks received from remote are already started. So, simply forward the response
 			return task.pollActivityTaskQueueResponse(), nil
 		}
 		requestClone := request
-		if versionSetUsed {
+		if result.versionSetUsed {
 			// We remove build ID from workerVersionCapabilities so History can differentiate between
 			// old and new versioning in Record*TaskStart.
 			// TODO: remove this block after old versioning cleanup. [cleanup-old-wv]
@@ -2597,14 +2615,20 @@ pollLoop:
 			conditions:                req.Conditions,
 			workerInstanceKey:         request.WorkerInstanceKey,
 		}
-		task, _, err := e.pollTask(pollerCtx, partition, pollMetadata)
+		result, err := e.pollTask(pollerCtx, partition, pollMetadata)
 		if err != nil {
 			if errors.Is(err, errNoTasks) {
+				if result.shutdownRejected {
+					return &matchingservice.PollNexusTaskQueueResponse{
+						ShutdownWorkerRejected: true,
+					}, nil
+				}
 				return &matchingservice.PollNexusTaskQueueResponse{}, nil
 			}
 			return nil, err
 		}
 
+		task := result.task
 		if task.isStarted() {
 			// tasks received from remote are already started. So, simply forward the response
 			return task.pollNexusTaskQueueResponse(), nil
@@ -2855,10 +2879,10 @@ func (e *matchingEngineImpl) pollTask(
 	ctx context.Context,
 	partition tqid.Partition,
 	pollMetadata *pollMetadata,
-) (*internalTask, bool, error) {
+) (pollResult, error) {
 	pm, _, err := e.getTaskQueuePartitionManager(ctx, partition, true, loadCausePoll)
 	if err != nil {
-		return nil, false, err
+		return pollResult{}, err
 	}
 
 	pollMetadata.localPollStartTime = e.timeSource.Now()
@@ -2879,7 +2903,7 @@ func (e *matchingEngineImpl) pollTask(
 		pollerTrackerKey := uuid.NewString()
 		if workerInstanceKey != "" {
 			if e.shutdownWorkers.Get(workerInstanceKey) != nil {
-				return nil, false, errNoTasks
+				return pollResult{shutdownRejected: true}, errNoTasks
 			}
 			e.workerInstancePollers.Add(workerInstanceKey, pollerTrackerKey, cancel)
 		}
@@ -2891,7 +2915,8 @@ func (e *matchingEngineImpl) pollTask(
 			}
 		}()
 	}
-	return pm.PollTask(ctx, pollMetadata)
+	task, versionSetUsed, err := pm.PollTask(ctx, pollMetadata)
+	return pollResult{task: task, versionSetUsed: versionSetUsed}, err
 }
 
 // emitTaskDispatchLatency emits latency metrics for a task dispatched to a worker.
