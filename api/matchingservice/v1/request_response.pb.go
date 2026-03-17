@@ -145,9 +145,12 @@ type PollWorkflowTaskQueueResponse struct {
 	PollerScalingDecision *v14.PollerScalingDecision `protobuf:"bytes,21,opt,name=poller_scaling_decision,json=pollerScalingDecision,proto3" json:"poller_scaling_decision,omitempty"`
 	// Raw history bytes sent from matching service when history.sendRawHistoryBetweenInternalServices is enabled.
 	// Matching client will deserialize this to History when it receives the response.
-	RawHistory    *v16.History `protobuf:"bytes,22,opt,name=raw_history,json=rawHistory,proto3" json:"raw_history,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RawHistory *v16.History `protobuf:"bytes,22,opt,name=raw_history,json=rawHistory,proto3" json:"raw_history,omitempty"`
+	// When true, this empty response was caused by the server rejecting the poll
+	// because the worker has been shut down via the ShutdownWorker API.
+	ShutdownWorkerRejected bool `protobuf:"varint,23,opt,name=shutdown_worker_rejected,json=shutdownWorkerRejected,proto3" json:"shutdown_worker_rejected,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *PollWorkflowTaskQueueResponse) Reset() {
@@ -327,6 +330,13 @@ func (x *PollWorkflowTaskQueueResponse) GetRawHistory() *v16.History {
 	return nil
 }
 
+func (x *PollWorkflowTaskQueueResponse) GetShutdownWorkerRejected() bool {
+	if x != nil {
+		return x.ShutdownWorkerRejected
+	}
+	return false
+}
+
 // PollWorkflowTaskQueueResponseWithRawHistory is wire-compatible with PollWorkflowTaskQueueResponse.
 //
 // WIRE COMPATIBILITY PATTERN:
@@ -374,9 +384,12 @@ type PollWorkflowTaskQueueResponseWithRawHistory struct {
 	// Raw history bytes. Each element is a proto-encoded batch of history events.
 	// When matching client deserializes this to PollWorkflowTaskQueueResponse, this field
 	// will be automatically deserialized to the raw_history field as History.
-	RawHistory    [][]byte `protobuf:"bytes,22,rep,name=raw_history,json=rawHistory,proto3" json:"raw_history,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RawHistory [][]byte `protobuf:"bytes,22,rep,name=raw_history,json=rawHistory,proto3" json:"raw_history,omitempty"`
+	// When true, this empty response was caused by the server rejecting the poll
+	// because the worker has been shut down via the ShutdownWorker API.
+	ShutdownWorkerRejected bool `protobuf:"varint,23,opt,name=shutdown_worker_rejected,json=shutdownWorkerRejected,proto3" json:"shutdown_worker_rejected,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *PollWorkflowTaskQueueResponseWithRawHistory) Reset() {
@@ -556,6 +569,13 @@ func (x *PollWorkflowTaskQueueResponseWithRawHistory) GetRawHistory() [][]byte {
 	return nil
 }
 
+func (x *PollWorkflowTaskQueueResponseWithRawHistory) GetShutdownWorkerRejected() bool {
+	if x != nil {
+		return x.ShutdownWorkerRejected
+	}
+	return false
+}
+
 type PollActivityTaskQueueRequest struct {
 	state           protoimpl.MessageState           `protogen:"open.v1"`
 	NamespaceId     string                           `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
@@ -662,8 +682,11 @@ type PollActivityTaskQueueResponse struct {
 	RetryPolicy                 *v11.RetryPolicy           `protobuf:"bytes,19,opt,name=retry_policy,json=retryPolicy,proto3" json:"retry_policy,omitempty"`
 	// ID of the activity run (applicable for standalone activities only)
 	ActivityRunId string `protobuf:"bytes,20,opt,name=activity_run_id,json=activityRunId,proto3" json:"activity_run_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// When true, this empty response was caused by the server rejecting the poll
+	// because the worker has been shut down via the ShutdownWorker API.
+	ShutdownWorkerRejected bool `protobuf:"varint,21,opt,name=shutdown_worker_rejected,json=shutdownWorkerRejected,proto3" json:"shutdown_worker_rejected,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *PollActivityTaskQueueResponse) Reset() {
@@ -834,6 +857,13 @@ func (x *PollActivityTaskQueueResponse) GetActivityRunId() string {
 		return x.ActivityRunId
 	}
 	return ""
+}
+
+func (x *PollActivityTaskQueueResponse) GetShutdownWorkerRejected() bool {
+	if x != nil {
+		return x.ShutdownWorkerRejected
+	}
+	return false
 }
 
 type AddWorkflowTaskRequest struct {
@@ -4085,9 +4115,12 @@ func (x *PollNexusTaskQueueRequest) GetConditions() *PollConditions {
 type PollNexusTaskQueueResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Response that should be delivered to the worker containing a request from DispatchNexusTaskRequest.
-	Response      *v1.PollNexusTaskQueueResponse `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Response *v1.PollNexusTaskQueueResponse `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
+	// When true, this empty response was caused by the server rejecting the poll
+	// because the worker has been shut down via the ShutdownWorker API.
+	ShutdownWorkerRejected bool `protobuf:"varint,2,opt,name=shutdown_worker_rejected,json=shutdownWorkerRejected,proto3" json:"shutdown_worker_rejected,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *PollNexusTaskQueueResponse) Reset() {
@@ -4125,6 +4158,13 @@ func (x *PollNexusTaskQueueResponse) GetResponse() *v1.PollNexusTaskQueueRespons
 		return x.Response
 	}
 	return nil
+}
+
+func (x *PollNexusTaskQueueResponse) GetShutdownWorkerRejected() bool {
+	if x != nil {
+		return x.ShutdownWorkerRejected
+	}
+	return false
 }
 
 type RespondNexusTaskCompletedRequest struct {
@@ -5747,7 +5787,7 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\x10forwarded_source\x18\x04 \x01(\tR\x0fforwardedSource\x12V\n" +
 	"\n" +
 	"conditions\x18\x05 \x01(\v26.temporal.server.api.matchingservice.v1.PollConditionsR\n" +
-	"conditions\"\xd1\v\n" +
+	"conditions\"\x8b\f\n" +
 	"\x1dPollWorkflowTaskQueueResponse\x12\x1d\n" +
 	"\n" +
 	"task_token\x18\x01 \x01(\fR\ttaskToken\x12X\n" +
@@ -5772,10 +5812,11 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\x0fnext_page_token\x18\x14 \x01(\fR\rnextPageToken\x12h\n" +
 	"\x17poller_scaling_decision\x18\x15 \x01(\v20.temporal.api.taskqueue.v1.PollerScalingDecisionR\x15pollerScalingDecision\x12A\n" +
 	"\vraw_history\x18\x16 \x01(\v2 .temporal.api.history.v1.HistoryR\n" +
-	"rawHistory\x1a`\n" +
+	"rawHistory\x128\n" +
+	"\x18shutdown_worker_rejected\x18\x17 \x01(\bR\x16shutdownWorkerRejected\x1a`\n" +
 	"\fQueriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12:\n" +
-	"\x05value\x18\x02 \x01(\v2$.temporal.api.query.v1.WorkflowQueryR\x05value:\x028\x01J\x04\b\r\x10\x0e\"\xcb\v\n" +
+	"\x05value\x18\x02 \x01(\v2$.temporal.api.query.v1.WorkflowQueryR\x05value:\x028\x01J\x04\b\r\x10\x0e\"\x85\f\n" +
 	"+PollWorkflowTaskQueueResponseWithRawHistory\x12\x1d\n" +
 	"\n" +
 	"task_token\x18\x01 \x01(\fR\ttaskToken\x12X\n" +
@@ -5800,7 +5841,8 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\x0fnext_page_token\x18\x14 \x01(\fR\rnextPageToken\x12h\n" +
 	"\x17poller_scaling_decision\x18\x15 \x01(\v20.temporal.api.taskqueue.v1.PollerScalingDecisionR\x15pollerScalingDecision\x12\x1f\n" +
 	"\vraw_history\x18\x16 \x03(\fR\n" +
-	"rawHistory\x1a`\n" +
+	"rawHistory\x128\n" +
+	"\x18shutdown_worker_rejected\x18\x17 \x01(\bR\x16shutdownWorkerRejected\x1a`\n" +
 	"\fQueriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12:\n" +
 	"\x05value\x18\x02 \x01(\v2$.temporal.api.query.v1.WorkflowQueryR\x05value:\x028\x01J\x04\b\r\x10\x0e\"\xc3\x02\n" +
@@ -5811,7 +5853,7 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\x10forwarded_source\x18\x04 \x01(\tR\x0fforwardedSource\x12V\n" +
 	"\n" +
 	"conditions\x18\x05 \x01(\v26.temporal.server.api.matchingservice.v1.PollConditionsR\n" +
-	"conditions\"\xc0\n" +
+	"conditions\"\xfa\n" +
 	"\n" +
 	"\x1dPollActivityTaskQueueResponse\x12\x1d\n" +
 	"\n" +
@@ -5836,7 +5878,8 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\x17poller_scaling_decision\x18\x11 \x01(\v20.temporal.api.taskqueue.v1.PollerScalingDecisionR\x15pollerScalingDecision\x12<\n" +
 	"\bpriority\x18\x12 \x01(\v2 .temporal.api.common.v1.PriorityR\bpriority\x12F\n" +
 	"\fretry_policy\x18\x13 \x01(\v2#.temporal.api.common.v1.RetryPolicyR\vretryPolicy\x12&\n" +
-	"\x0factivity_run_id\x18\x14 \x01(\tR\ractivityRunId\"\x9d\x05\n" +
+	"\x0factivity_run_id\x18\x14 \x01(\tR\ractivityRunId\x128\n" +
+	"\x18shutdown_worker_rejected\x18\x15 \x01(\bR\x16shutdownWorkerRejected\"\x9d\x05\n" +
 	"\x16AddWorkflowTaskRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12G\n" +
 	"\texecution\x18\x02 \x01(\v2).temporal.api.common.v1.WorkflowExecutionR\texecution\x12C\n" +
@@ -6085,9 +6128,10 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\x10forwarded_source\x18\x04 \x01(\tR\x0fforwardedSource\x12V\n" +
 	"\n" +
 	"conditions\x18\x05 \x01(\v26.temporal.server.api.matchingservice.v1.PollConditionsR\n" +
-	"conditions\"u\n" +
+	"conditions\"\xaf\x01\n" +
 	"\x1aPollNexusTaskQueueResponse\x12W\n" +
-	"\bresponse\x18\x01 \x01(\v2;.temporal.api.workflowservice.v1.PollNexusTaskQueueResponseR\bresponse\"\x80\x02\n" +
+	"\bresponse\x18\x01 \x01(\v2;.temporal.api.workflowservice.v1.PollNexusTaskQueueResponseR\bresponse\x128\n" +
+	"\x18shutdown_worker_rejected\x18\x02 \x01(\bR\x16shutdownWorkerRejected\"\x80\x02\n" +
 	" RespondNexusTaskCompletedRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12C\n" +
 	"\n" +
