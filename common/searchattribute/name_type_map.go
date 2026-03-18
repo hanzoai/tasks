@@ -9,15 +9,6 @@ import (
 	"go.temporal.io/server/common/searchattribute/sadefs"
 )
 
-type (
-	NameTypeMap struct {
-		// customSearchAttributes are defined by cluster admin per cluster level and passed and stored in SearchAttributes object.
-		customSearchAttributes map[string]enumspb.IndexedValueType
-	}
-
-	category int32
-)
-
 const (
 	systemCategory category = 1 << iota
 	predefinedCategory
@@ -29,12 +20,26 @@ var (
 	predefined = sadefs.Predefined()
 )
 
-func buildIndexNameTypeMap(indexSearchAttributes map[string]*persistencespb.IndexSearchAttributes) map[string]NameTypeMap {
+type (
+	NameTypeMap struct {
+		// predefinedSearchAttributes are by default defined internally (sadefs.Predefined()).
+		// You can overwrite it by calling WithPredefinedSearchAttributes.
+		predefinedSearchAttributes map[string]enumspb.IndexedValueType
+
+		// customSearchAttributes are defined by cluster admin per cluster level and
+		// passed and stored in SearchAttributes object.
+		customSearchAttributes map[string]enumspb.IndexedValueType
+	}
+
+	category int32
+)
+
+func buildIndexNameTypeMap(
+	indexSearchAttributes map[string]*persistencespb.IndexSearchAttributes,
+) map[string]NameTypeMap {
 	indexNameTypeMap := make(map[string]NameTypeMap, len(indexSearchAttributes))
 	for indexName, customSearchAttributes := range indexSearchAttributes {
-		indexNameTypeMap[indexName] = NameTypeMap{
-			customSearchAttributes: customSearchAttributes.GetCustomSearchAttributes(),
-		}
+		indexNameTypeMap[indexName] = NewNameTypeMap(customSearchAttributes.GetCustomSearchAttributes())
 	}
 	return indexNameTypeMap
 }
@@ -42,14 +47,38 @@ func buildIndexNameTypeMap(indexSearchAttributes map[string]*persistencespb.Inde
 // NewNameTypeMap creates a new NameTypeMap with the given custom search attributes.
 func NewNameTypeMap(customSearchAttributes map[string]enumspb.IndexedValueType) NameTypeMap {
 	return NameTypeMap{
-		customSearchAttributes: customSearchAttributes,
+		predefinedSearchAttributes: predefined,
+		customSearchAttributes:     customSearchAttributes,
+	}
+}
+
+// WithPredefinedSearchAttributes sets the predefined search attributes.
+// The default value is the sadefs.Predefined() map which contains the internal predefined search
+// attributes.
+// If you need to overwrite it while preserving the internal predefined search attributes, you can
+// call as follows:
+//
+//	WithPredefinedSearchAttributes(maps.Copy(
+//		sadefs.Predefined(),
+//		map[string]enumspb.IndexedValueType{},
+//	))
+func (m NameTypeMap) WithPredefinedSearchAttributes(
+	predefinedSearchAttributes map[string]enumspb.IndexedValueType,
+) NameTypeMap {
+	return NameTypeMap{
+		predefinedSearchAttributes: predefinedSearchAttributes,
+		customSearchAttributes:     m.customSearchAttributes,
 	}
 }
 
 func (m NameTypeMap) System() map[string]enumspb.IndexedValueType {
-	allSystem := make(map[string]enumspb.IndexedValueType, len(system)+len(predefined))
+	predefinedSearchAttributes := m.predefined()
+	allSystem := make(
+		map[string]enumspb.IndexedValueType,
+		len(system)+len(predefinedSearchAttributes),
+	)
 	maps.Copy(allSystem, system)
-	maps.Copy(allSystem, predefined)
+	maps.Copy(allSystem, predefinedSearchAttributes)
 	return allSystem
 }
 
@@ -57,10 +86,21 @@ func (m NameTypeMap) Custom() map[string]enumspb.IndexedValueType {
 	return m.customSearchAttributes
 }
 
+func (m NameTypeMap) predefined() map[string]enumspb.IndexedValueType {
+	if len(m.predefinedSearchAttributes) == 0 {
+		return predefined
+	}
+	return m.predefinedSearchAttributes
+}
+
 func (m NameTypeMap) All() map[string]enumspb.IndexedValueType {
-	allSearchAttributes := make(map[string]enumspb.IndexedValueType, len(system)+len(m.customSearchAttributes)+len(predefined))
+	predefinedSearchAttributes := m.predefined()
+	allSearchAttributes := make(
+		map[string]enumspb.IndexedValueType,
+		len(system)+len(predefinedSearchAttributes)+len(m.customSearchAttributes),
+	)
 	maps.Copy(allSearchAttributes, system)
-	maps.Copy(allSearchAttributes, predefined)
+	maps.Copy(allSearchAttributes, predefinedSearchAttributes)
 	maps.Copy(allSearchAttributes, m.customSearchAttributes)
 	return allSearchAttributes
 }
@@ -78,8 +118,8 @@ func (m NameTypeMap) getType(name string, cat category) (enumspb.IndexedValueTyp
 		}
 	}
 	if cat|predefinedCategory == cat {
-		predefined := sadefs.Predefined()
-		if t, isPredefined := predefined[name]; isPredefined {
+		predefinedSearchAttributes := m.predefined()
+		if t, isPredefined := predefinedSearchAttributes[name]; isPredefined {
 			return t, nil
 		}
 	}
