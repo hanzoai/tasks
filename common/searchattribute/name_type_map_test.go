@@ -67,3 +67,51 @@ func Test_GetType(t *testing.T) {
 	r.ErrorIs(err, sadefs.ErrInvalidName)
 	r.Equal(enumspb.INDEXED_VALUE_TYPE_UNSPECIFIED, ivt)
 }
+
+func Test_WithPredefinedSearchAttributes(t *testing.T) {
+	r := require.New(t)
+
+	customSA := map[string]enumspb.IndexedValueType{
+		"CustomKey": enumspb.INDEXED_VALUE_TYPE_TEXT,
+	}
+	base := NewNameTypeMap(customSA)
+
+	// Baseline: default predefined includes TemporalChangeVersion from sadefs.Predefined().
+	r.True(base.IsDefined("TemporalChangeVersion"))
+	ivt, err := base.GetType("TemporalChangeVersion")
+	r.NoError(err)
+	r.Equal(enumspb.INDEXED_VALUE_TYPE_KEYWORD_LIST, ivt)
+
+	// Custom attributes are preserved.
+	ivt, err = base.GetType("CustomKey")
+	r.NoError(err)
+	r.Equal(enumspb.INDEXED_VALUE_TYPE_TEXT, ivt)
+
+	// Override predefined with a custom set that does NOT include TemporalChangeVersion.
+	overriddenPredefined := map[string]enumspb.IndexedValueType{
+		"MyPredefined": enumspb.INDEXED_VALUE_TYPE_DOUBLE,
+	}
+	overridden := base.WithPredefinedSearchAttributes(overriddenPredefined)
+
+	// New predefined attribute is resolved.
+	ivt, err = overridden.GetType("MyPredefined")
+	r.NoError(err)
+	r.Equal(enumspb.INDEXED_VALUE_TYPE_DOUBLE, ivt)
+
+	// TemporalChangeVersion is no longer found via predefined (only system SAs remain).
+	r.False(overridden.IsDefined("TemporalChangeVersion"))
+
+	// Custom attributes are still preserved after override.
+	ivt, err = overridden.GetType("CustomKey")
+	r.NoError(err)
+	r.Equal(enumspb.INDEXED_VALUE_TYPE_TEXT, ivt)
+
+	// System search attributes (e.g. RunId) are still accessible.
+	ivt, err = overridden.GetType("RunId")
+	r.NoError(err)
+	r.Equal(enumspb.INDEXED_VALUE_TYPE_KEYWORD, ivt)
+
+	// Original base map is not mutated.
+	r.True(base.IsDefined("TemporalChangeVersion"))
+	r.False(base.IsDefined("MyPredefined"))
+}
