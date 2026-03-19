@@ -1,8 +1,8 @@
 package query
 
 import (
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/searchattribute"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/searchattribute"
 )
 
 // nilStoreQueryConverter is a dummy query converter implementation that returns nil value as the

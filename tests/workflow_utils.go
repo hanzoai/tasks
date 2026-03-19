@@ -2,8 +2,8 @@ package tests
 
 import (
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/testing/testvars"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/testing/testvars"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 func mustStartWorkflow(s testcore.Env, tv *testvars.TestVars) string {

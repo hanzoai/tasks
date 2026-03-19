@@ -7,17 +7,17 @@ import (
 	"strings"
 	"time"
 
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/resolver"
-	"go.temporal.io/server/tests/testutils"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/resolver"
+	"github.com/hanzoai/tasks/tests/testutils"
 )
 
 // TestCluster allows executing cassandra operations in testing.

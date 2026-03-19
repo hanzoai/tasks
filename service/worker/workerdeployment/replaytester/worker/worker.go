@@ -9,7 +9,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/service/worker/workerdeployment/replaytester"
+	"github.com/hanzoai/tasks/service/worker/workerdeployment/replaytester"
 )
 
 func main() {

@@ -11,9 +11,9 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/resourcetest"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/resourcetest"
 	"go.uber.org/mock/gomock"
 )
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
 )
 
 type successfulCompletionHandler struct {
@@ -39,7 +39,7 @@ func (h *successfulCompletionHandler) CompleteOperation(ctx context.Context, com
 	if completion.HTTPRequest.Header.Get("foo") != "bar" {
 		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid 'foo' header: %q", completion.HTTPRequest.Header.Get("foo"))
 	}
-	if completion.HTTPRequest.Header.Get("User-Agent") != "temporalio/server" {
+	if completion.HTTPRequest.Header.Get("User-Agent") != "hanzoai/tasks" {
 		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid 'User-Agent' header: %q", completion.HTTPRequest.Header.Get("User-Agent"))
 	}
 	if completion.OperationToken != "test-operation-token" {

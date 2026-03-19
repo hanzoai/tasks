@@ -5,12 +5,12 @@ import (
 	"os"
 
 	"github.com/urfave/cli"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
-	dbschemas "go.temporal.io/server/schema"
-	"go.temporal.io/server/temporal/environment"
-	"go.temporal.io/server/tools/common/schema"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/mysql"
+	dbschemas "github.com/hanzoai/tasks/schema"
+	"github.com/hanzoai/tasks/temporal/environment"
+	"github.com/hanzoai/tasks/tools/common/schema"
 )
 
 // RunTool runs the temporal-sql-tool command line tool

@@ -7,13 +7,13 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/persistence/transitionhistory"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/service/history/hsm"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/persistence/transitionhistory"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/service/history/hsm"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 type (

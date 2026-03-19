@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	chasm "go.temporal.io/server/chasm"
-	persistence "go.temporal.io/server/common/persistence"
+	chasm "github.com/hanzoai/tasks/chasm"
+	persistence "github.com/hanzoai/tasks/common/persistence"
 	gomock "go.uber.org/mock/gomock"
 )
 

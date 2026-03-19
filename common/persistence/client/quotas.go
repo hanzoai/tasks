@@ -1,12 +1,12 @@
 package client
 
 import (
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/quotas"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/quotas"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 type (

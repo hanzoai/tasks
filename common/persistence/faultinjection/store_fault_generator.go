@@ -1,7 +1,7 @@
 package faultinjection
 
 import (
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/config"
 )
 
 type (

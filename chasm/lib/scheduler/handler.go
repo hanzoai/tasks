@@ -6,10 +6,10 @@ import (
 
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb/v1"
-	"go.temporal.io/server/common/log"
-	legacyscheduler "go.temporal.io/server/service/worker/scheduler"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb/v1"
+	"github.com/hanzoai/tasks/common/log"
+	legacyscheduler "github.com/hanzoai/tasks/service/worker/scheduler"
 )
 
 type handler struct {

@@ -9,10 +9,10 @@ import (
 	"github.com/olivere/elastic/v7"
 	"github.com/temporalio/sqlparser"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/persistence/visibility/store"
-	"go.temporal.io/server/common/searchattribute"
-	"go.temporal.io/server/common/sqlquery"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store"
+	"github.com/hanzoai/tasks/common/searchattribute"
+	"github.com/hanzoai/tasks/common/sqlquery"
 )
 
 type (

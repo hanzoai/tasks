@@ -6,12 +6,12 @@ import (
 	"errors"
 
 	"go.temporal.io/api/serviceerror"
-	commonspb "go.temporal.io/server/api/common/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/history/api"
-	"go.temporal.io/server/service/history/consts"
-	"go.temporal.io/server/service/history/tasks"
+	commonspb "github.com/hanzoai/tasks/api/common/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/history/api"
+	"github.com/hanzoai/tasks/service/history/consts"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 // Invoke the GetDLQTasks API. All errors returned from this function are already translated into the appropriate type

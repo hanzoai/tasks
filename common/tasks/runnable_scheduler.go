@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/quotas"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/quotas"
 )
 
 // RunnableScheduler is scheduler for [Runnable] tasks.

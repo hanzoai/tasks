@@ -6,11 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/quotas/calculator"
-	"go.temporal.io/server/common/quotas/quotastest"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/quotas/calculator"
+	"github.com/hanzoai/tasks/common/quotas/quotastest"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 )

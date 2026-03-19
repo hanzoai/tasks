@@ -13,11 +13,11 @@ import (
 	"go.temporal.io/api/operatorservice/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	commonnexus "go.temporal.io/server/common/nexus"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	commonnexus "github.com/hanzoai/tasks/common/nexus"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 func TestNexusEndpointsFunctionalSuite(t *testing.T) {

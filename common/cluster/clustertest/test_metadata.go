@@ -1,8 +1,8 @@
 package clustertest
 
 import (
-	"go.temporal.io/server/common/cluster"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/cluster"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 // NewMetadataForTest returns a new [cluster.Metadata] instance for testing.

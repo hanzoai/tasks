@@ -7,12 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	schedulespb "go.temporal.io/server/api/schedule/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/scheduler"
-	"go.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb/v1"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/util"
+	schedulespb "github.com/hanzoai/tasks/api/schedule/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/scheduler"
+	"github.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb/v1"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/util"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/versionhistory"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
 )
 
 const (

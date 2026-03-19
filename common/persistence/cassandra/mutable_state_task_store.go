@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/service/history/tasks"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/nosql/nosqlplugin/cassandra/gocql"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 const (

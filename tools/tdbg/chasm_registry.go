@@ -1,11 +1,11 @@
 package tdbg
 
 import (
-	"go.temporal.io/server/chasm"
-	chasmscheduler "go.temporal.io/server/chasm/lib/scheduler"
-	chasmtests "go.temporal.io/server/chasm/lib/tests"
-	chasmworkflow "go.temporal.io/server/chasm/lib/workflow"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/chasm"
+	chasmscheduler "github.com/hanzoai/tasks/chasm/lib/scheduler"
+	chasmtests "github.com/hanzoai/tasks/chasm/lib/tests"
+	chasmworkflow "github.com/hanzoai/tasks/chasm/lib/workflow"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 func newChasmRegistry(logger log.Logger) (*chasm.Registry, error) {

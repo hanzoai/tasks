@@ -1,8 +1,8 @@
 package log
 
 import (
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/quotas"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/quotas"
 )
 
 // extraSkipForThrottleLogger is the number of extra stack trace frames to skip when SkipLogger is used

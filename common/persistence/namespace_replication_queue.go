@@ -7,11 +7,11 @@ import (
 	"fmt"
 
 	commonpb "go.temporal.io/api/common/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	replicationspb "go.temporal.io/server/api/replication/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/persistence/serialization"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	replicationspb "github.com/hanzoai/tasks/api/replication/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
 )
 
 const (

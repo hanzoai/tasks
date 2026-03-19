@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/temporalio/sqlparser"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/searchattribute/sadefs"
-	"go.temporal.io/server/common/sqlquery"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common/sqlquery"
 )
 
 // Supported Fields

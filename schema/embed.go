@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"path/filepath"
 
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
 )
 
 //go:embed *

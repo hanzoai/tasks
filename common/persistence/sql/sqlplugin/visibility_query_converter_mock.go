@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	sqlparser "github.com/temporalio/sqlparser"
-	query "go.temporal.io/server/common/persistence/visibility/store/query"
+	query "github.com/hanzoai/tasks/common/persistence/visibility/store/query"
 	gomock "go.uber.org/mock/gomock"
 )
 

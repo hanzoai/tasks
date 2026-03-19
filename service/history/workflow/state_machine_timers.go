@@ -5,11 +5,11 @@ import (
 	"slices"
 	"time"
 
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/persistence/transitionhistory"
-	"go.temporal.io/server/service/history/hsm"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/tasks"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/persistence/transitionhistory"
+	"github.com/hanzoai/tasks/service/history/hsm"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

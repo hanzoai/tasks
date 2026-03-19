@@ -12,7 +12,7 @@ package cluster
 import (
 	reflect "reflect"
 
-	pingable "go.temporal.io/server/common/pingable"
+	pingable "github.com/hanzoai/tasks/common/pingable"
 	gomock "go.uber.org/mock/gomock"
 )
 

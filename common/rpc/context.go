@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"go.temporal.io/server/common/headers"
+	"github.com/hanzoai/tasks/common/headers"
 )
 
 type (
