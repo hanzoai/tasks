@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/testing/protorequire"
-	"go.temporal.io/server/service/history/hsm"
-	"go.temporal.io/server/service/history/hsm/hsmtest"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
+	"github.com/hanzoai/tasks/service/history/hsm"
+	"github.com/hanzoai/tasks/service/history/hsm/hsmtest"
 )
 
 var def1 = hsmtest.NewDefinition("type1")

@@ -12,8 +12,8 @@ import (
 	"github.com/olivere/elastic/v7"
 	"github.com/olivere/elastic/v7/uritemplates"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/auth"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/auth"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 type (

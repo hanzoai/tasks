@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	versionpb "go.temporal.io/api/version/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/persistence"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/persistence"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

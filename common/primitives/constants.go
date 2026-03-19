@@ -3,7 +3,7 @@ package primitives
 import (
 	"time"
 
-	"go.temporal.io/server/common/debug"
+	"github.com/hanzoai/tasks/common/debug"
 )
 
 const (

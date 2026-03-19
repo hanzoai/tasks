@@ -1,8 +1,8 @@
 package archival
 
 import (
-	"go.temporal.io/server/common/quotas"
-	"go.temporal.io/server/service/history/configs"
+	"github.com/hanzoai/tasks/common/quotas"
+	"github.com/hanzoai/tasks/service/history/configs"
 	"go.uber.org/fx"
 )
 

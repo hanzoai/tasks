@@ -5,10 +5,10 @@ package ndc
 import (
 	"context"
 
-	"go.temporal.io/server/common/cluster"
-	"go.temporal.io/server/common/log"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	wcache "go.temporal.io/server/service/history/workflow/cache"
+	"github.com/hanzoai/tasks/common/cluster"
+	"github.com/hanzoai/tasks/common/log"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	wcache "github.com/hanzoai/tasks/service/history/workflow/cache"
 )
 
 type (

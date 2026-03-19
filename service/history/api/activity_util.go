@@ -4,11 +4,11 @@ import (
 	"context"
 
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	tokenspb "go.temporal.io/server/api/token/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/locks"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	tokenspb "github.com/hanzoai/tasks/api/token/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/locks"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 func SetActivityTaskRunID(

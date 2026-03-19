@@ -5,8 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 type (

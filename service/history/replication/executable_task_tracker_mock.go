@@ -13,9 +13,9 @@ import (
 	reflect "reflect"
 	time "time"
 
-	repication "go.temporal.io/server/api/replication/v1"
-	backoff "go.temporal.io/server/common/backoff"
-	tasks "go.temporal.io/server/common/tasks"
+	repication "github.com/hanzoai/tasks/api/replication/v1"
+	backoff "github.com/hanzoai/tasks/common/backoff"
+	tasks "github.com/hanzoai/tasks/common/tasks"
 	gomock "go.uber.org/mock/gomock"
 )
 

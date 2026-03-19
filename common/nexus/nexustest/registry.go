@@ -3,9 +3,9 @@ package nexustest
 import (
 	"context"
 
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/namespace"
-	commonnexus "go.temporal.io/server/common/nexus"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/namespace"
+	commonnexus "github.com/hanzoai/tasks/common/nexus"
 )
 
 type FakeEndpointRegistry struct {

@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/softassert"
+	"github.com/hanzoai/tasks/common/softassert"
 )
 
 const (

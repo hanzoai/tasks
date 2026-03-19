@@ -9,8 +9,8 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/server/common/nexus/nexusrpc"
-	"go.temporal.io/server/common/testing/protorequire"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
 )
 
 func TestRoundTrip_ApplicationFailure(t *testing.T) {

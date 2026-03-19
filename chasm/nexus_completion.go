@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 
 	commonpb "go.temporal.io/api/common/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
 )
 
 // NexusCompletionHandlerURL is the user-visible URL for Nexus->CHASM callbacks.

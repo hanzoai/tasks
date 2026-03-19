@@ -7,13 +7,13 @@ import (
 
 	"github.com/google/uuid"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/api"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/api"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
 	"google.golang.org/grpc"
 )
 

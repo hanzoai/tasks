@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	metricsspb "go.temporal.io/server/api/metrics/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/testing/rpctest"
+	metricsspb "github.com/hanzoai/tasks/api/metrics/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/testing/rpctest"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"

@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/mock"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/mock"
 	"go.uber.org/mock/gomock"
 )
 

@@ -15,11 +15,11 @@ import (
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/debug"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/rpc"
-	"go.temporal.io/server/common/testing/testvars"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/debug"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/rpc"
+	"github.com/hanzoai/tasks/common/testing/testvars"
 )
 
 type (

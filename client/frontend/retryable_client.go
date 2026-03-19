@@ -2,7 +2,7 @@ package frontend
 
 import (
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/backoff"
+	"github.com/hanzoai/tasks/common/backoff"
 )
 
 var _ workflowservice.WorkflowServiceClient = (*retryableClient)(nil)

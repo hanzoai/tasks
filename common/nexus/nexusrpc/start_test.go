@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
 )
 
 type successHandler struct {
@@ -46,7 +46,7 @@ func (h *successHandler) StartOperation(ctx context.Context, service, operation 
 	if options.Header.Get("nexus-callback-callback-test") != "" {
 		return nil, nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "callback header not omitted from options Header")
 	}
-	if options.Header.Get("User-Agent") != "temporalio/server" {
+	if options.Header.Get("User-Agent") != "hanzoai/tasks" {
 		return nil, nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid 'User-Agent' header: %q", options.Header.Get("User-Agent"))
 	}
 

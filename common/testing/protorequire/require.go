@@ -2,7 +2,7 @@ package protorequire
 
 import (
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/testing/protoassert"
+	"github.com/hanzoai/tasks/common/testing/protoassert"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -7,13 +7,13 @@ import (
 
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
-	"go.temporal.io/server/common/tqid"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
+	"github.com/hanzoai/tasks/common/tqid"
 	"google.golang.org/grpc"
 )
 

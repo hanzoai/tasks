@@ -7,7 +7,7 @@ import (
 
 	"github.com/dgryski/go-farm"
 	rpmembership "github.com/temporalio/ringpop-go/membership"
-	"go.temporal.io/server/common/membership"
+	"github.com/hanzoai/tasks/common/membership"
 )
 
 // hostInfo represents a host in a ring.

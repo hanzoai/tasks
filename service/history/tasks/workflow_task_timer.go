@@ -6,9 +6,9 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/common/definition"
-	ctasks "go.temporal.io/server/common/tasks"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/common/definition"
+	ctasks "github.com/hanzoai/tasks/common/tasks"
 )
 
 const (

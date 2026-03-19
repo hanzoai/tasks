@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/collection"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/collection"
 )
 
 type tlsConfigProvider interface {

@@ -3,9 +3,9 @@ package callbacks
 import (
 	"time"
 
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/service/history/hsm"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/service/history/hsm"
 )
 
 const (

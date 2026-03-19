@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	tokenspb "go.temporal.io/server/api/token/v1"
+	tokenspb "github.com/hanzoai/tasks/api/token/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"

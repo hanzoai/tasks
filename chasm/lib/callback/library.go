@@ -1,7 +1,7 @@
 package callback
 
 import (
-	"go.temporal.io/server/chasm"
+	"github.com/hanzoai/tasks/chasm"
 	"google.golang.org/grpc"
 )
 

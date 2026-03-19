@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/dgryski/go-farm"
-	"go.temporal.io/server/common/clock"
+	"github.com/hanzoai/tasks/common/clock"
 )
 
 // GradualChange represents a setting that can change its value over time in a controlled way.

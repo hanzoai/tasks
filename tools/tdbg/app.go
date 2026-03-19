@@ -8,8 +8,8 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/urfave/cli/v2"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 type (

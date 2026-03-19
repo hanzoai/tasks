@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/components/callbacks"
-	"go.temporal.io/server/service/history/hsm"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/components/callbacks"
+	"github.com/hanzoai/tasks/service/history/hsm"
 )
 
 func TestValidTransitions(t *testing.T) {

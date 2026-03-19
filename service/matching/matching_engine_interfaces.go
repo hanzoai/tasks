@@ -3,8 +3,8 @@ package matching
 import (
 	"context"
 
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 type (

@@ -12,8 +12,8 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/server/common/testing/protorequire"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 type LinksSuite struct {

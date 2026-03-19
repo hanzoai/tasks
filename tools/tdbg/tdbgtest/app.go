@@ -2,7 +2,7 @@ package tdbgtest
 
 import (
 	"github.com/urfave/cli/v2"
-	"go.temporal.io/server/tools/tdbg"
+	"github.com/hanzoai/tasks/tools/tdbg"
 )
 
 // NewCliApp is a wrapper around [tdbg.NewCliApp] that sets the [cli.App.ExitErrHandler] to a no-op function.

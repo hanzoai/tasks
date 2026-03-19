@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	archiverspb "go.temporal.io/server/api/archiver/v1"
-	"go.temporal.io/server/common/archiver"
-	"go.temporal.io/server/common/archiver/gcloud/connector"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/searchattribute"
+	archiverspb "github.com/hanzoai/tasks/api/archiver/v1"
+	"github.com/hanzoai/tasks/common/archiver"
+	"github.com/hanzoai/tasks/common/archiver/gcloud/connector"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/searchattribute"
 )
 
 const (

@@ -5,9 +5,9 @@ import (
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/tests/gen/testspb/v1"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/tests/gen/testspb/v1"
+	"github.com/hanzoai/tasks/common/namespace"
 )
 
 type (

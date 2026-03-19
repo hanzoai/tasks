@@ -9,13 +9,13 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	workflowspb "go.temporal.io/server/api/workflow/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	workflowspb "github.com/hanzoai/tasks/api/workflow/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
 )
 
 type StubHandler struct{}

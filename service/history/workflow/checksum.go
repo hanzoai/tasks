@@ -3,11 +3,11 @@ package workflow
 import (
 	"fmt"
 
-	checksumspb "go.temporal.io/server/api/checksum/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/checksum"
-	"go.temporal.io/server/common/util"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	checksumspb "github.com/hanzoai/tasks/api/checksum/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/checksum"
+	"github.com/hanzoai/tasks/common/util"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 	expmaps "golang.org/x/exp/maps"
 )
 

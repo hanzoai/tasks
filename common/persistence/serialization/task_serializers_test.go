@@ -13,12 +13,12 @@ import (
 	"github.com/stretchr/testify/suite"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/shuffle"
-	"go.temporal.io/server/common/testing/protorequire"
-	"go.temporal.io/server/service/history/tasks"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/shuffle"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"google.golang.org/protobuf/proto"
 )
 

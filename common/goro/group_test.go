@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/goro"
+	"github.com/hanzoai/tasks/common/goro"
 )
 
 func TestMultiCancelAndWait(t *testing.T) {

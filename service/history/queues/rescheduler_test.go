@@ -8,11 +8,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	ctasks "go.temporal.io/server/common/tasks"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	ctasks "github.com/hanzoai/tasks/common/tasks"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"go.uber.org/mock/gomock"
 )
 

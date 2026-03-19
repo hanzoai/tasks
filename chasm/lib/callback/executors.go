@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
-	"go.temporal.io/server/chasm"
-	callbackspb "go.temporal.io/server/chasm/lib/callback/gen/callbackpb/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
-	commonnexus "go.temporal.io/server/common/nexus"
-	"go.temporal.io/server/common/resource"
-	"go.temporal.io/server/service/history/queues/common"
+	"github.com/hanzoai/tasks/chasm"
+	callbackspb "github.com/hanzoai/tasks/chasm/lib/callback/gen/callbackpb/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
+	commonnexus "github.com/hanzoai/tasks/common/nexus"
+	"github.com/hanzoai/tasks/common/resource"
+	"github.com/hanzoai/tasks/service/history/queues/common"
 	"go.uber.org/fx"
 )
 

@@ -3,10 +3,10 @@ package replication
 import (
 	"context"
 
-	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/client"
-	"go.temporal.io/server/client/history"
-	"go.temporal.io/server/common/cluster"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	"github.com/hanzoai/tasks/client"
+	"github.com/hanzoai/tasks/client/history"
+	"github.com/hanzoai/tasks/common/cluster"
 	"google.golang.org/grpc/metadata"
 )
 

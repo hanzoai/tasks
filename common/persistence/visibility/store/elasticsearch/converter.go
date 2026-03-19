@@ -2,9 +2,9 @@ package elasticsearch
 
 import (
 	"github.com/temporalio/sqlparser"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/persistence/visibility/store/query"
-	"go.temporal.io/server/common/searchattribute"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/query"
+	"github.com/hanzoai/tasks/common/searchattribute"
 )
 
 var allowedComparisonOperators = map[string]struct{}{

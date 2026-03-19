@@ -6,9 +6,9 @@ import (
 	"time"
 
 	failurepb "go.temporal.io/api/failure/v1"
-	"go.temporal.io/server/chasm"
-	callbackspb "go.temporal.io/server/chasm/lib/callback/gen/callbackpb/v1"
-	"go.temporal.io/server/common/backoff"
+	"github.com/hanzoai/tasks/chasm"
+	callbackspb "github.com/hanzoai/tasks/chasm/lib/callback/gen/callbackpb/v1"
+	"github.com/hanzoai/tasks/common/backoff"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

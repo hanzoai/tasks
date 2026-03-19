@@ -9,10 +9,10 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	schedulespb "go.temporal.io/server/api/schedule/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/scheduler"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	schedulespb "github.com/hanzoai/tasks/api/schedule/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/scheduler"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

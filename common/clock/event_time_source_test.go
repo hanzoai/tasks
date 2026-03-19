@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/server/common/clock"
+	"github.com/hanzoai/tasks/common/clock"
 )
 
 // event is a helper to verify how many times a callback was triggered. Because callbacks are triggered synchronously

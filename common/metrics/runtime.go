@@ -5,9 +5,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.temporal.io/server/common/build"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/build"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 const (

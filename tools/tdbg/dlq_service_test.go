@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v2"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/history/tasks"
-	"go.temporal.io/server/tools/tdbg"
-	"go.temporal.io/server/tools/tdbg/tdbgtest"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/history/tasks"
+	"github.com/hanzoai/tasks/tools/tdbg"
+	"github.com/hanzoai/tasks/tools/tdbg/tdbgtest"
 	"google.golang.org/grpc"
 )
 

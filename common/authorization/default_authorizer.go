@@ -3,7 +3,7 @@ package authorization
 import (
 	"context"
 
-	"go.temporal.io/server/common/api"
+	"github.com/hanzoai/tasks/common/api"
 )
 
 type (

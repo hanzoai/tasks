@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/collection"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/collection"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"go.uber.org/mock/gomock"
 )
 

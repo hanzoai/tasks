@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 	commonpb "go.temporal.io/api/common/v1"
 	failurepb "go.temporal.io/api/failure/v1"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/payload"
-	"go.temporal.io/server/common/payloads"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/payload"
+	"github.com/hanzoai/tasks/common/payloads"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

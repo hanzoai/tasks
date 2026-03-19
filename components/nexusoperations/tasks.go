@@ -7,11 +7,11 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/service/history/consts"
-	"go.temporal.io/server/service/history/hsm"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/service/history/consts"
+	"github.com/hanzoai/tasks/service/history/hsm"
 	"google.golang.org/protobuf/proto"
 )
 

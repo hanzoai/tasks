@@ -14,8 +14,8 @@ import (
 	reflect "reflect"
 
 	history "go.temporal.io/api/history/v1"
-	interfaces "go.temporal.io/server/service/history/interfaces"
-	update "go.temporal.io/server/service/history/workflow/update"
+	interfaces "github.com/hanzoai/tasks/service/history/interfaces"
+	update "github.com/hanzoai/tasks/service/history/workflow/update"
 	gomock "go.uber.org/mock/gomock"
 )
 

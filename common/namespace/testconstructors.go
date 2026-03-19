@@ -1,8 +1,8 @@
 package namespace
 
 import (
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
 )
 
 // TODO: delete this whole file and transition usages to FromPersistentState

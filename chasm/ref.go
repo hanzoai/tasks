@@ -4,7 +4,7 @@ import (
 	"reflect"
 
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
 )
 
 // ErrMalformedComponentRef is returned when component ref bytes cannot be deserialized.

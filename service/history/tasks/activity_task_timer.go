@@ -5,8 +5,8 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/common/definition"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/common/definition"
 )
 
 var _ Task = (*ActivityTimeoutTask)(nil)

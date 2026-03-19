@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"go.temporal.io/server/tools/elasticsearch"
+	"github.com/hanzoai/tasks/tools/elasticsearch"
 )
 
 func main() {

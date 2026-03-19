@@ -1,18 +1,18 @@
 package history
 
 import (
-	"go.temporal.io/server/client"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/common/resource"
-	ctasks "go.temporal.io/server/common/tasks"
-	"go.temporal.io/server/common/telemetry"
-	"go.temporal.io/server/service/history/deletemanager"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/queues"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/client"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/persistence/visibility/manager"
+	"github.com/hanzoai/tasks/common/resource"
+	ctasks "github.com/hanzoai/tasks/common/tasks"
+	"github.com/hanzoai/tasks/common/telemetry"
+	"github.com/hanzoai/tasks/service/history/deletemanager"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/queues"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"go.uber.org/fx"
 )
 

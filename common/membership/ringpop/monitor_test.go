@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/util"
 	expmaps "golang.org/x/exp/maps"
 )
 

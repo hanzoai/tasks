@@ -6,7 +6,7 @@ import (
 
 	"github.com/dgryski/go-farm"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 func getPartitionForRangeHash(rangeHash uint32, totalPartitions uint32) uint32 {

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uber-go/tally/v4"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 	"go.uber.org/mock/gomock"
 )
 

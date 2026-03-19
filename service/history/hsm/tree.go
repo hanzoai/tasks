@@ -11,9 +11,9 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	tokenspb "go.temporal.io/server/api/token/v1"
-	"go.temporal.io/server/service/history/consts"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	tokenspb "github.com/hanzoai/tasks/api/token/v1"
+	"github.com/hanzoai/tasks/service/history/consts"
 	"google.golang.org/protobuf/proto"
 )
 

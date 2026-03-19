@@ -3,8 +3,8 @@ package queues
 import (
 	"fmt"
 
-	"go.temporal.io/server/common/collection"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/collection"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 type (

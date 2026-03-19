@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/urfave/cli"
-	"go.temporal.io/server/common/auth"
-	c "go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/temporal/environment"
-	"go.temporal.io/server/tools/common/schema"
+	"github.com/hanzoai/tasks/common/auth"
+	c "github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/temporal/environment"
+	"github.com/hanzoai/tasks/tools/common/schema"
 )
 
 const defaultNumReplicas = 1

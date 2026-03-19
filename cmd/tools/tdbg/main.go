@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"go.temporal.io/server/tools/tdbg"
+	"github.com/hanzoai/tasks/tools/tdbg"
 )
 
 func main() {

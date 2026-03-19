@@ -8,11 +8,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/debug"
-	"go.temporal.io/server/common/log"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/testing/protorequire"
+	"github.com/hanzoai/tasks/common/debug"
+	"github.com/hanzoai/tasks/common/log"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
 )
 
 type (

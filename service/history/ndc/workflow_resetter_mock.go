@@ -16,7 +16,7 @@ import (
 	enums "go.temporal.io/api/enums/v1"
 	history "go.temporal.io/api/history/v1"
 	workflow "go.temporal.io/api/workflow/v1"
-	namespace "go.temporal.io/server/common/namespace"
+	namespace "github.com/hanzoai/tasks/common/namespace"
 	gomock "go.uber.org/mock/gomock"
 )
 

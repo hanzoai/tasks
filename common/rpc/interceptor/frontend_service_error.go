@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/api"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
+	"github.com/hanzoai/tasks/common/api"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )

@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 type serviceErrorWithDPanicSuite struct {

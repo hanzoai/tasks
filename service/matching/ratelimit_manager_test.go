@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/tqid"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/tqid"
 )
 
 type RateLimitManagerSuite struct {

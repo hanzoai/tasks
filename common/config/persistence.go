@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gocql/gocql"
-	"go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/elasticsearch/client"
 )
 
 const (

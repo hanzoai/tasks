@@ -3,7 +3,7 @@ package nexus_test
 import (
 	"fmt"
 
-	"go.temporal.io/server/common/nexus"
+	"github.com/hanzoai/tasks/common/nexus"
 )
 
 func ExampleRouteDispatchNexusTaskByNamespaceAndTaskQueue() {

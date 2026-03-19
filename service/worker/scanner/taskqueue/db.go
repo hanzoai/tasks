@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/backoff"
-	p "go.temporal.io/server/common/persistence"
+	"github.com/hanzoai/tasks/common/backoff"
+	p "github.com/hanzoai/tasks/common/persistence"
 )
 
 var (

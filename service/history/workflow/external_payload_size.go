@@ -6,7 +6,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/proxy"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 // CalculateExternalPayloadSize calculates the total size and count of all external payloads in the given history events.

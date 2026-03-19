@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/testing/protorequire"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

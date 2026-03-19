@@ -3,7 +3,7 @@ package main
 import (
 	_ "embed"
 
-	"go.temporal.io/server/cmd/tools/codegen"
+	"github.com/hanzoai/tasks/cmd/tools/codegen"
 )
 
 type (

@@ -3,8 +3,8 @@ package replication
 import (
 	"time"
 
-	"go.temporal.io/server/common/metrics"
-	ctasks "go.temporal.io/server/common/tasks"
+	"github.com/hanzoai/tasks/common/metrics"
+	ctasks "github.com/hanzoai/tasks/common/tasks"
 )
 
 type (

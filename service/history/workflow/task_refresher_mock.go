@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	persistence "go.temporal.io/server/api/persistence/v1"
-	interfaces "go.temporal.io/server/service/history/interfaces"
+	persistence "github.com/hanzoai/tasks/api/persistence/v1"
+	interfaces "github.com/hanzoai/tasks/service/history/interfaces"
 	gomock "go.uber.org/mock/gomock"
 )
 

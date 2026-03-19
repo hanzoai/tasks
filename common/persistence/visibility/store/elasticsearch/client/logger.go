@@ -3,7 +3,7 @@ package client
 import (
 	"fmt"
 
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 type (

@@ -11,7 +11,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/testsuite"
-	batchspb "go.temporal.io/server/api/batch/v1"
+	batchspb "github.com/hanzoai/tasks/api/batch/v1"
 	"go.uber.org/mock/gomock"
 )
 

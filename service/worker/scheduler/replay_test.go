@@ -10,8 +10,8 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/service/worker/scheduler"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/service/worker/scheduler"
 )
 
 // TestReplays tests workflow logic backwards compatibility from previous versions.

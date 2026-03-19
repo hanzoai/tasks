@@ -8,12 +8,12 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/testing/testhooks"
-	"go.temporal.io/server/common/tqid"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	taskqueuespb "github.com/hanzoai/tasks/api/taskqueue/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/testing/testhooks"
+	"github.com/hanzoai/tasks/common/tqid"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

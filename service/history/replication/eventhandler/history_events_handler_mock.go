@@ -14,9 +14,9 @@ import (
 	reflect "reflect"
 
 	history "go.temporal.io/api/history/v1"
-	history0 "go.temporal.io/server/api/history/v1"
-	workflow "go.temporal.io/server/api/workflow/v1"
-	definition "go.temporal.io/server/common/definition"
+	history0 "github.com/hanzoai/tasks/api/history/v1"
+	workflow "github.com/hanzoai/tasks/api/workflow/v1"
+	definition "github.com/hanzoai/tasks/common/definition"
 	gomock "go.uber.org/mock/gomock"
 )
 

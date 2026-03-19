@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 // TaskQueueRecorder wraps an ExecutionManager to record ALL task writes

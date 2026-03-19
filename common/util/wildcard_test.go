@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 func TestWildCardStringToRegexp(t *testing.T) {

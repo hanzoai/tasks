@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel/trace"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/softassert"
-	"go.temporal.io/server/common/telemetry"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/softassert"
+	"github.com/hanzoai/tasks/common/telemetry"
 	"google.golang.org/protobuf/proto"
 )
 

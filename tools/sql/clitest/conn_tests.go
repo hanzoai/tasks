@@ -4,11 +4,11 @@ import (
 	"net"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/tools/common/schema/test"
-	"go.temporal.io/server/tools/sql"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/tools/common/schema/test"
+	"github.com/hanzoai/tasks/tools/sql"
 )
 
 type (

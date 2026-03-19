@@ -2,14 +2,14 @@ package queues
 
 import (
 	"go.opentelemetry.io/otel/trace"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/cluster"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/cluster"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 type (

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	querypb "go.temporal.io/api/query/v1"
-	"go.temporal.io/server/common/payloads"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	"github.com/hanzoai/tasks/common/payloads"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 type QuerySuite struct {

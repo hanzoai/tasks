@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.temporal.io/server/common/clock"
+	"github.com/hanzoai/tasks/common/clock"
 )
 
 const (

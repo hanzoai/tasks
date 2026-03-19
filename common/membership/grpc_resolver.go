@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/primitives"
 	"go.uber.org/fx"
 	"google.golang.org/grpc/resolver"
 )

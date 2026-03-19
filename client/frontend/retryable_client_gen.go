@@ -8,7 +8,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"google.golang.org/grpc"
 
-	"go.temporal.io/server/common/backoff"
+	"github.com/hanzoai/tasks/common/backoff"
 )
 
 func (c *retryableClient) CountActivityExecutions(

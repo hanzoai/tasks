@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
 )
 
 func TestProtoEncode(t *testing.T) {

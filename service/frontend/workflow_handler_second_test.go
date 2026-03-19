@@ -7,10 +7,10 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	schedulepb "go.temporal.io/api/schedule/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
-	schedulespb "go.temporal.io/server/api/schedule/v1"
-	"go.temporal.io/server/common/payload"
-	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/common/searchattribute"
+	schedulespb "github.com/hanzoai/tasks/api/schedule/v1"
+	"github.com/hanzoai/tasks/common/payload"
+	"github.com/hanzoai/tasks/common/persistence/visibility/manager"
+	"github.com/hanzoai/tasks/common/searchattribute"
 	"go.uber.org/mock/gomock"
 )
 

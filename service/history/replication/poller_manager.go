@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"go.temporal.io/server/common/cluster"
+	"github.com/hanzoai/tasks/common/cluster"
 )
 
 type (

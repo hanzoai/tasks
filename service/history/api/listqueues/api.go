@@ -5,9 +5,9 @@ import (
 	"errors"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/history/consts"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/history/consts"
 )
 
 func Invoke(

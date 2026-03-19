@@ -15,9 +15,9 @@ import (
 	time "time"
 
 	taskqueue "go.temporal.io/api/taskqueue/v1"
-	matchingservice "go.temporal.io/server/api/matchingservice/v1"
-	namespace "go.temporal.io/server/common/namespace"
-	tqid "go.temporal.io/server/common/tqid"
+	matchingservice "github.com/hanzoai/tasks/api/matchingservice/v1"
+	namespace "github.com/hanzoai/tasks/common/namespace"
+	tqid "github.com/hanzoai/tasks/common/tqid"
 	gomock "go.uber.org/mock/gomock"
 )
 

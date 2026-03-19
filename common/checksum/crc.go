@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"hash/crc32"
 
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
 )
 
 // ErrMismatch indicates a checksum verification failure due to

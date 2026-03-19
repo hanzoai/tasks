@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/uber-go/tally/v4"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 var sanitizer = tally.NewSanitizer(tally.SanitizeOptions{

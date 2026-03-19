@@ -22,12 +22,12 @@ import (
 	v14 "go.temporal.io/api/taskqueue/v1"
 	v115 "go.temporal.io/api/worker/v1"
 	v1 "go.temporal.io/api/workflowservice/v1"
-	v17 "go.temporal.io/server/api/clock/v1"
-	v110 "go.temporal.io/server/api/deployment/v1"
-	v116 "go.temporal.io/server/api/enums/v1"
-	v13 "go.temporal.io/server/api/history/v1"
-	v111 "go.temporal.io/server/api/persistence/v1"
-	v18 "go.temporal.io/server/api/taskqueue/v1"
+	v17 "github.com/hanzoai/tasks/api/clock/v1"
+	v110 "github.com/hanzoai/tasks/api/deployment/v1"
+	v116 "github.com/hanzoai/tasks/api/enums/v1"
+	v13 "github.com/hanzoai/tasks/api/history/v1"
+	v111 "github.com/hanzoai/tasks/api/persistence/v1"
+	v18 "github.com/hanzoai/tasks/api/taskqueue/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -6163,7 +6163,7 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\tis_member\x18\x01 \x01(\bR\bisMember\"L\n" +
 	"\x0ePollConditions\x12!\n" +
 	"\fmin_priority\x18\x01 \x01(\x05R\vminPriority\x12\x17\n" +
-	"\ano_wait\x18\x02 \x01(\bR\x06noWaitB>Z<go.temporal.io/server/api/matchingservice/v1;matchingserviceb\x06proto3"
+	"\ano_wait\x18\x02 \x01(\bR\x06noWaitB>Z<github.com/hanzoai/tasks/api/matchingservice/v1;matchingserviceb\x06proto3"
 
 var (
 	file_temporal_server_api_matchingservice_v1_request_response_proto_rawDescOnce sync.Once

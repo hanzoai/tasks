@@ -3,7 +3,7 @@ package queues
 import (
 	"slices"
 
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 var _ Action = (*actionSliceCount)(nil)

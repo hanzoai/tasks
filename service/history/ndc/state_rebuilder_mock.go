@@ -14,9 +14,9 @@ import (
 	reflect "reflect"
 	time "time"
 
-	persistence "go.temporal.io/server/api/persistence/v1"
-	definition "go.temporal.io/server/common/definition"
-	interfaces "go.temporal.io/server/service/history/interfaces"
+	persistence "github.com/hanzoai/tasks/api/persistence/v1"
+	definition "github.com/hanzoai/tasks/common/definition"
+	interfaces "github.com/hanzoai/tasks/service/history/interfaces"
 	gomock "go.uber.org/mock/gomock"
 )
 

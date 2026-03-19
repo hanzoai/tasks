@@ -6,7 +6,7 @@ import (
 
 	"github.com/dgryski/go-farm"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 type (

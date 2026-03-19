@@ -8,7 +8,7 @@ import (
 	"time"
 
 	schedulepb "go.temporal.io/api/schedule/v1"
-	"go.temporal.io/server/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/quotas"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/quotas"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

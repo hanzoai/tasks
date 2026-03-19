@@ -7,10 +7,10 @@ import (
 	"reflect"
 
 	commonpb "go.temporal.io/api/common/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/codec"
-	"go.temporal.io/server/common/persistence/serialization"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/codec"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
 	"google.golang.org/protobuf/proto"
 )
 

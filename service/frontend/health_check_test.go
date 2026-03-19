@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	healthspb "go.temporal.io/server/api/health/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/health"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/primitives"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	healthspb "github.com/hanzoai/tasks/api/health/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common/health"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/primitives"
 	"go.uber.org/mock/gomock"
 )
 

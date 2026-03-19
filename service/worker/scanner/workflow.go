@@ -9,10 +9,10 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/service/worker/scanner/executions"
-	"go.temporal.io/server/service/worker/scanner/history"
-	"go.temporal.io/server/service/worker/scanner/taskqueue"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/service/worker/scanner/executions"
+	"github.com/hanzoai/tasks/service/worker/scanner/history"
+	"github.com/hanzoai/tasks/service/worker/scanner/taskqueue"
 )
 
 const (

@@ -5,10 +5,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.temporal.io/server/common/log/tag"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/matching"
-	"go.temporal.io/server/service/worker/scanner/executor"
+	"github.com/hanzoai/tasks/common/log/tag"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/matching"
+	"github.com/hanzoai/tasks/service/worker/scanner/executor"
 )
 
 type handlerStatus = executor.TaskStatus

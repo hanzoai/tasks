@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/archiver"
-	"go.temporal.io/server/common/codec"
-	"go.temporal.io/server/tests/testutils"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/archiver"
+	"github.com/hanzoai/tasks/common/codec"
+	"github.com/hanzoai/tasks/tests/testutils"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

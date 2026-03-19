@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 type (

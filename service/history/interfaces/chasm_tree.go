@@ -6,9 +6,9 @@ import (
 	"context"
 	"time"
 
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/service/history/tasks"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 var _ ChasmTree = (*chasm.Node)(nil)

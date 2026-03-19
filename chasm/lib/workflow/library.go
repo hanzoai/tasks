@@ -1,6 +1,6 @@
 package workflow
 
-import "go.temporal.io/server/chasm"
+import "github.com/hanzoai/tasks/chasm"
 
 type (
 	Library struct {

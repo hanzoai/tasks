@@ -3,7 +3,7 @@ package dummy
 import (
 	"context"
 
-	"go.temporal.io/server/service/history/hsm"
+	"github.com/hanzoai/tasks/service/history/hsm"
 )
 
 func RegisterExecutor(

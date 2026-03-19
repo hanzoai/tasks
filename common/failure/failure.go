@@ -4,7 +4,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 const (

@@ -3,9 +3,9 @@ package interceptor
 import (
 	"context"
 
-	"go.temporal.io/server/common/api"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/common/api"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/namespace"
 	"google.golang.org/grpc"
 )
 

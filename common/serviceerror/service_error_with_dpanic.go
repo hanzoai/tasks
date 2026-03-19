@@ -2,7 +2,7 @@ package serviceerror
 
 import (
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 // NewInternalErrorWithDPanic is a wrapper for service error that will panic if it's in dev environment

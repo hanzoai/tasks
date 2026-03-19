@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/sony/gobreaker"
-	"go.temporal.io/server/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
 )
 
 type (

@@ -6,7 +6,7 @@ import (
 	"net"
 
 	"github.com/gocql/gocql"
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/config"
 )
 
 const (

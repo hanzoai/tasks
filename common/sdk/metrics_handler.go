@@ -4,7 +4,7 @@ import (
 	"time"
 
 	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 type (

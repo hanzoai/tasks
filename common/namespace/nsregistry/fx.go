@@ -1,7 +1,7 @@
 package nsregistry
 
 import (
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/common/namespace"
 	"go.uber.org/fx"
 )
 

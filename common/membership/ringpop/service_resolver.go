@@ -17,12 +17,12 @@ import (
 	rpmembership "github.com/temporalio/ringpop-go/membership"
 	"github.com/temporalio/ringpop-go/swim"
 	"github.com/temporalio/tchannel-go"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 const (

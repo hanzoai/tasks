@@ -6,10 +6,10 @@ import (
 	"time"
 
 	sdkworker "go.temporal.io/sdk/worker"
-	"go.temporal.io/server/common/debug"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/retrypolicy"
-	"go.temporal.io/server/service/matching/counter"
+	"github.com/hanzoai/tasks/common/debug"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/retrypolicy"
+	"github.com/hanzoai/tasks/service/matching/counter"
 )
 
 var (
@@ -1502,7 +1502,7 @@ Don't change this on a live cluster without using the gradual change mechanism.
 		"history.enableHistoryReplicationDLQV2",
 		true,
 		`EnableHistoryReplicationDLQV2 switches to the DLQ v2 implementation for history replication. See details in
-[go.temporal.io/server/common/persistence.QueueV2]`,
+[github.com/hanzoai/tasks/common/persistence.QueueV2]`,
 	)
 
 	HistoryRPS = NewGlobalIntSetting(

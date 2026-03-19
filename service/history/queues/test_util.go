@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"go.temporal.io/server/common/predicates"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/predicates"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 func NewRandomKey() tasks.Key {

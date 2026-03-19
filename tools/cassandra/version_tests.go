@@ -6,13 +6,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/persistence/cassandra"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/resolver"
-	"go.temporal.io/server/temporal/environment"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/persistence/cassandra"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/resolver"
+	"github.com/hanzoai/tasks/temporal/environment"
 )
 
 type (

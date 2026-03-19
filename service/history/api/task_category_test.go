@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/service/history/api"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/service/history/api"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"google.golang.org/grpc/codes"
 )
 

@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/testing/testvars"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/testing/testvars"
 )
 
 func TestChasmNotifier_SubscribeAndNotify(t *testing.T) {

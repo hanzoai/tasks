@@ -5,11 +5,11 @@ import (
 	"os"
 
 	"github.com/urfave/cli"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	dbschemas "go.temporal.io/server/schema"
-	"go.temporal.io/server/temporal/environment"
-	"go.temporal.io/server/tools/common/schema"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	dbschemas "github.com/hanzoai/tasks/schema"
+	"github.com/hanzoai/tasks/temporal/environment"
+	"github.com/hanzoai/tasks/tools/common/schema"
 )
 
 // RunTool runs the temporal-cassandra-tool command line tool

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 func GetTaskCategory(categoryID int, registry tasks.TaskCategoryRegistry) (tasks.Category, error) {

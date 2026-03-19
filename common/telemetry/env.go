@@ -7,7 +7,7 @@ import (
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	otelsdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 var (

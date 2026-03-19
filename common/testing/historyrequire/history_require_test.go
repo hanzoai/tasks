@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	historypb "go.temporal.io/api/history/v1"
-	test "go.temporal.io/server/common/testing"
-	"go.temporal.io/server/common/testing/testvars"
+	test "github.com/hanzoai/tasks/common/testing"
+	"github.com/hanzoai/tasks/common/testing/testvars"
 )
 
 // sampleCompactHistory is used in almost every test.

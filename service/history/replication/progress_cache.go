@@ -6,14 +6,14 @@ import (
 	"sync"
 	"unsafe"
 
-	historyspb "go.temporal.io/server/api/history/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/cache"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/persistence/transitionhistory"
-	"go.temporal.io/server/common/persistence/versionhistory"
-	"go.temporal.io/server/service/history/configs"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/cache"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/persistence/transitionhistory"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
+	"github.com/hanzoai/tasks/service/history/configs"
 )
 
 type (

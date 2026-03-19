@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 type (

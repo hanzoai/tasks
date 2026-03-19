@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
-	commonnexus "go.temporal.io/server/common/nexus"
-	"go.temporal.io/server/common/nexus/nexusrpc"
-	queuescommon "go.temporal.io/server/service/history/queues/common"
-	queueserrors "go.temporal.io/server/service/history/queues/errors"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
+	commonnexus "github.com/hanzoai/tasks/common/nexus"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
+	queuescommon "github.com/hanzoai/tasks/service/history/queues/common"
+	queueserrors "github.com/hanzoai/tasks/service/history/queues/errors"
 )
 
 var retryable4xxErrorTypes = []int{

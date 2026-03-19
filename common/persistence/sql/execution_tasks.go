@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/service/history/tasks"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 func (m *sqlExecutionStore) AddHistoryTasks(

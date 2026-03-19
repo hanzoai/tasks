@@ -11,11 +11,11 @@ import (
 	"github.com/dgryski/go-farm"
 	commonpb "go.temporal.io/api/common/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
-	archiverspb "go.temporal.io/server/api/archiver/v1"
-	"go.temporal.io/server/common/archiver"
-	"go.temporal.io/server/common/archiver/gcloud/connector"
-	"go.temporal.io/server/common/codec"
-	"go.temporal.io/server/common/searchattribute"
+	archiverspb "github.com/hanzoai/tasks/api/archiver/v1"
+	"github.com/hanzoai/tasks/common/archiver"
+	"github.com/hanzoai/tasks/common/archiver/gcloud/connector"
+	"github.com/hanzoai/tasks/common/codec"
+	"github.com/hanzoai/tasks/common/searchattribute"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -17,10 +17,10 @@ import (
 	v19 "go.temporal.io/api/failure/v1"
 	v17 "go.temporal.io/api/history/v1"
 	v12 "go.temporal.io/api/workflow/v1"
-	v15 "go.temporal.io/server/api/clock/v1"
-	v1 "go.temporal.io/server/api/enums/v1"
-	v14 "go.temporal.io/server/api/history/v1"
-	v16 "go.temporal.io/server/api/workflow/v1"
+	v15 "github.com/hanzoai/tasks/api/clock/v1"
+	v1 "github.com/hanzoai/tasks/api/enums/v1"
+	v14 "github.com/hanzoai/tasks/api/history/v1"
+	v16 "github.com/hanzoai/tasks/api/workflow/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -5111,7 +5111,7 @@ const file_temporal_server_api_persistence_v1_executions_proto_rawDesc = "" +
 	"\bidentity\x18\x02 \x01(\tR\bidentity\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x04 \x01(\tR\trequestIdB6Z4go.temporal.io/server/api/persistence/v1;persistenceb\x06proto3"
+	"request_id\x18\x04 \x01(\tR\trequestIdB6Z4github.com/hanzoai/tasks/api/persistence/v1;persistenceb\x06proto3"
 
 var (
 	file_temporal_server_api_persistence_v1_executions_proto_rawDescOnce sync.Once

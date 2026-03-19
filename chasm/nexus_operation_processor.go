@@ -6,9 +6,9 @@ import (
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/payloads"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/payloads"
 )
 
 // NexusOperationProcessorContext contains context for processing a Nexus operation's input, including the target

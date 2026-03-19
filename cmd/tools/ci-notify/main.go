@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	cinotify "go.temporal.io/server/tools/ci-notify"
+	cinotify "github.com/hanzoai/tasks/tools/ci-notify"
 )
 
 func main() {

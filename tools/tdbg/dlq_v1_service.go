@@ -6,11 +6,11 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/api/adminservice/v1"
-	replicationspb "go.temporal.io/server/api/replication/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/codec"
-	"go.temporal.io/server/common/collection"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	replicationspb "github.com/hanzoai/tasks/api/replication/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/codec"
+	"github.com/hanzoai/tasks/common/collection"
 	"go.uber.org/multierr"
 )
 

@@ -13,11 +13,11 @@ import (
 	context "context"
 	reflect "reflect"
 
-	persistence "go.temporal.io/server/api/persistence/v1"
-	definition "go.temporal.io/server/common/definition"
-	locks "go.temporal.io/server/common/locks"
-	persistence0 "go.temporal.io/server/common/persistence"
-	update "go.temporal.io/server/service/history/workflow/update"
+	persistence "github.com/hanzoai/tasks/api/persistence/v1"
+	definition "github.com/hanzoai/tasks/common/definition"
+	locks "github.com/hanzoai/tasks/common/locks"
+	persistence0 "github.com/hanzoai/tasks/common/persistence"
+	update "github.com/hanzoai/tasks/service/history/workflow/update"
 	gomock "go.uber.org/mock/gomock"
 )
 

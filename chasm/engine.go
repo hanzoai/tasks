@@ -5,7 +5,7 @@ package chasm
 import (
 	"context"
 
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 // NoValue is a sentinel type representing no value.

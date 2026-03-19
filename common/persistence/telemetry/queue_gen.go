@@ -4,7 +4,7 @@
 
 package telemetry
 
-//go:generate gowrap gen -p go.temporal.io/server/common/persistence -i Queue -t gowrap_template -o queue_gen.go -l ""
+//go:generate gowrap gen -p github.com/hanzoai/tasks/common/persistence -i Queue -t gowrap_template -o queue_gen.go -l ""
 
 import (
 	"context"
@@ -14,10 +14,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	_sourcePersistence "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/telemetry"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	_sourcePersistence "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/telemetry"
 )
 
 // telemetryQueue implements Queue interface instrumented with OpenTelemetry.

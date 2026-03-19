@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	enums "go.temporal.io/server/api/enums/v1"
-	repication "go.temporal.io/server/api/replication/v1"
+	enums "github.com/hanzoai/tasks/api/enums/v1"
+	repication "github.com/hanzoai/tasks/api/replication/v1"
 	gomock "go.uber.org/mock/gomock"
 )
 

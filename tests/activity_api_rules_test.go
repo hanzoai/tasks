@@ -18,10 +18,10 @@ import (
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/util"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/util"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 type ActivityApiRulesClientTestSuite struct {

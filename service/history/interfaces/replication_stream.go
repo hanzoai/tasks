@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	replicationspb "go.temporal.io/server/api/replication/v1"
-	"go.temporal.io/server/common/collection"
-	"go.temporal.io/server/service/history/tasks"
+	replicationspb "github.com/hanzoai/tasks/api/replication/v1"
+	"github.com/hanzoai/tasks/common/collection"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 type (

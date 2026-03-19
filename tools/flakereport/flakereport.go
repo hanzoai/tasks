@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
-	"go.temporal.io/server/common/headers"
+	"github.com/hanzoai/tasks/common/headers"
 )
 
 const (

@@ -4,14 +4,14 @@ import (
 	"context"
 	"time"
 
-	"go.temporal.io/server/common/convert"
-	"go.temporal.io/server/common/goro"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/metrics"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
-	"go.temporal.io/server/service/history/configs"
+	"github.com/hanzoai/tasks/common/convert"
+	"github.com/hanzoai/tasks/common/goro"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/metrics"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
+	"github.com/hanzoai/tasks/service/history/configs"
 )
 
 const (

@@ -3,9 +3,9 @@ package archiver
 import (
 	"errors"
 
-	archiverspb "go.temporal.io/server/api/archiver/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
+	archiverspb "github.com/hanzoai/tasks/api/archiver/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
 )
 
 var (

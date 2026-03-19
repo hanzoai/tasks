@@ -5,7 +5,7 @@ import (
 	"io"
 
 	"go.temporal.io/api/serviceerror"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

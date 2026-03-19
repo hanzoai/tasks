@@ -2,7 +2,7 @@ package log
 
 import (
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/log/tag"
+	"github.com/hanzoai/tasks/common/log/tag"
 )
 
 const extraSkipForReplayLogger = 1

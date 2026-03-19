@@ -6,16 +6,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	persistencetests "go.temporal.io/server/common/persistence/persistence-tests"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/persistence/sql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
-	sqltests "go.temporal.io/server/common/persistence/sql/sqlplugin/tests"
-	"go.temporal.io/server/common/resolver"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	persistencetests "github.com/hanzoai/tasks/common/persistence/persistence-tests"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/persistence/sql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	_ "github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/mysql"
+	sqltests "github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/tests"
+	"github.com/hanzoai/tasks/common/resolver"
 )
 
 func TestMySQLShardStoreSuite(t *testing.T) {

@@ -3,8 +3,8 @@ package queues
 import (
 	"strconv"
 
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/quotas"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/quotas"
 )
 
 const (
