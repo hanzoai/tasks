@@ -1,13 +1,13 @@
 name: Build Docker Images
 description: |
-  Build Temporal Docker images from binaries.
+  Build Hanzo Tasks Docker images from binaries.
 
   Prerequisites:
     - The build-binaries action must run before this action to produce the binaries.
 
 inputs:
   push:
-    description: "Push images to Docker Hub"
+    description: "Push images to GHCR"
     required: false
     default: "false"
   tag-latest:
@@ -30,11 +30,8 @@ inputs:
     description: "Alpine base image tag"
     required: false
     default: "3.23.3"
-  dockerhub-username:
-    description: "Docker Hub username"
-    required: false
-  dockerhub-token:
-    description: "Docker Hub token"
+  ghcr-token:
+    description: "GHCR token (GITHUB_TOKEN)"
     required: false
 
 outputs:
@@ -101,19 +98,20 @@ runs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Log in to Docker Hub
+    - name: Log in to GHCR
       if: inputs.push == 'true'
       uses: docker/login-action@v3
       with:
-        username: ${{ inputs.dockerhub-username }}
-        password: ${{ inputs.dockerhub-token }}
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.ghcr-token }}
 
     - name: Build Docker images
       if: inputs.push != 'true'
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
-        IMAGE_REPO: temporaliotest
+        IMAGE_REPO: ghcr.io/hanzoai
         IMAGE_SHA_SHORT_TAG: ${{ steps.image-tags.outputs.sha }}
         IMAGE_SHA_FULL_TAG: ${{ steps.image-tags.outputs.sha-full }}
         IMAGE_BRANCH_TAG: ${{ steps.image-tags.outputs.tag }}
@@ -141,7 +139,7 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
-        IMAGE_REPO: temporaliotest
+        IMAGE_REPO: ghcr.io/hanzoai
         IMAGE_SHA_SHORT_TAG: ${{ steps.image-tags.outputs.sha }}
         IMAGE_SHA_FULL_TAG: ${{ steps.image-tags.outputs.sha-full }}
         IMAGE_BRANCH_TAG: ${{ steps.image-tags.outputs.tag }}

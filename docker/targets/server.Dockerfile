@@ -11,13 +11,13 @@ ARG TARGETARCH
 
 RUN apk add --no-cache \
     ca-certificates \
-    tzdata && addgroup -g 1000 temporal && \
-    adduser -u 1000 -G temporal -D temporal
+    tzdata && addgroup -g 1000 tasks && \
+    adduser -u 1000 -G tasks -D tasks
 
 COPY --chmod=755 ./build/${TARGETARCH}/tasksd /usr/local/bin/
-COPY --chmod=755 ./scripts/sh/entrypoint.sh /etc/temporal/entrypoint.sh
+COPY --chmod=755 ./scripts/sh/entrypoint.sh /etc/tasks/entrypoint.sh
 
-WORKDIR /etc/temporal
-USER temporal
+WORKDIR /etc/tasks
+USER tasks
 
-CMD [ "/etc/temporal/entrypoint.sh" ]
+CMD [ "/etc/tasks/entrypoint.sh" ]

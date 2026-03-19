@@ -1,0 +1,29 @@
+# Hanzo Tasks -- Tasks Server Configuration
+#
+# Non-secret configuration for tasks server and UI.
+# Mounted as /etc/tasks/dynamic-config/dynamic-config.yaml in the tasks container.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tasks-config
+  namespace: hanzo
+data:
+  # Tasks dynamic config -- tuning knobs that don't require restart
+  dynamic-config.yaml: |
+    # Multi-tenant namespace isolation
+    system.forceSearchAttributesCacheRefreshOnRead:
+      - value: true
+    # Retain workflow history for 30 days
+    history.workflowExecutionRetentionPeriod:
+      - value: "720h"
+    # Rate limits per namespace (per org)
+    frontend.namespaceRPS:
+      - value: 400
+    frontend.globalNamespaceRPS:
+      - value: 1200
+    # Max concurrent workflow task pollers per namespace
+    matching.numTaskqueueReadPartitions:
+      - value: 4
+    matching.numTaskqueueWritePartitions:
+      - value: 4
