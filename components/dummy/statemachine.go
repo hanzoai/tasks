@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/service/history/hsm"
+	"github.com/hanzoai/tasks/service/history/hsm"
 )
 
 type State int

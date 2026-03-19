@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/service/history/api"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/service/history/api"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 	"go.uber.org/mock/gomock"
 )
 

@@ -2,11 +2,11 @@ package api
 
 import (
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/versionhistory"
-	"go.temporal.io/server/service/history/consts"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
+	"github.com/hanzoai/tasks/service/history/consts"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 func IsRetryableError(err error) bool {

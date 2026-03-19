@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
 	"google.golang.org/grpc/credentials"
 )
 

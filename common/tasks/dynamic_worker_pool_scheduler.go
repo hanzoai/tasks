@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 // DynamicWorkerPoolLimiter provides dynamic limiters for [DynamicWorkerPoolScheduler].

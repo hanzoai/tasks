@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/history/api/listqueues"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/history/api/listqueues"
 )
 
 // failingHistoryTaskQueueManager is a [persistence.HistoryTaskQueueManager] that always fails.

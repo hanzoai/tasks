@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	commonpb "go.temporal.io/api/common/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
-	"go.temporal.io/server/common"
+	"github.com/hanzoai/tasks/common"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

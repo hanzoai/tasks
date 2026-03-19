@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 var _ PerHostCertProviderMap = (*localStorePerHostCertProviderMap)(nil)

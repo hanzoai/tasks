@@ -2,7 +2,7 @@ package vclock
 
 import (
 	"go.temporal.io/api/serviceerror"
-	clockspb "go.temporal.io/server/api/clock/v1"
+	clockspb "github.com/hanzoai/tasks/api/clock/v1"
 )
 
 func NewVectorClock(

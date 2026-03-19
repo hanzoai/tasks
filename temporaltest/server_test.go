@@ -18,10 +18,10 @@ import (
 	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/authorization"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/temporal"
-	"go.temporal.io/server/temporaltest"
+	"github.com/hanzoai/tasks/common/authorization"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/temporal"
+	"github.com/hanzoai/tasks/temporaltest"
 	"google.golang.org/grpc/codes"
 )
 

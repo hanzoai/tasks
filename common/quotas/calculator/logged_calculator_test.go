@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 	"go.uber.org/mock/gomock"
 )
 

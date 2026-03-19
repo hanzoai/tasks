@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/convert"
-	"go.temporal.io/server/common/membership"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/convert"
+	"github.com/hanzoai/tasks/common/membership"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
 )
 
 type (

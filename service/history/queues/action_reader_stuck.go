@@ -1,9 +1,9 @@
 package queues
 
 import (
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 var _ Action = (*actionReaderStuck)(nil)

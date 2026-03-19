@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	p "go.temporal.io/server/common/persistence"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	p "github.com/hanzoai/tasks/common/persistence"
 	"go.uber.org/mock/gomock"
 )
 

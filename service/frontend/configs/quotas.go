@@ -4,11 +4,11 @@ import (
 	"math"
 	"time"
 
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/quotas"
-	"go.temporal.io/server/common/quotas/calculator"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/quotas"
+	"github.com/hanzoai/tasks/common/quotas/calculator"
 )
 
 const (

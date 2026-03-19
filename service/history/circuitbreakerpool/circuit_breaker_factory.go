@@ -1,8 +1,8 @@
 package circuitbreakerpool
 
 import (
-	"go.temporal.io/server/common/circuitbreaker"
-	"go.temporal.io/server/common/collection"
+	"github.com/hanzoai/tasks/common/circuitbreaker"
+	"github.com/hanzoai/tasks/common/collection"
 )
 
 type CircuitBreakerPool[K comparable] struct {

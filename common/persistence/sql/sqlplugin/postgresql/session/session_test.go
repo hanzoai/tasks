@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/auth"
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/auth"
+	"github.com/hanzoai/tasks/common/config"
 )
 
 func TestBuildDSNAttr_NoTLS_NoConnectAttributes(t *testing.T) {

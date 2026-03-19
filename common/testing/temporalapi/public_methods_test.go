@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/testing/temporalapi"
+	"github.com/hanzoai/tasks/common/testing/temporalapi"
 )
 
 type publicIface interface {

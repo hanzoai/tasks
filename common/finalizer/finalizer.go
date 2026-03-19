@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	cclock "go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/goro"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
+	cclock "github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/goro"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 var (

@@ -1,15 +1,15 @@
 package history
 
 import (
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/persistence/visibility/manager"
-	ctasks "go.temporal.io/server/common/tasks"
-	"go.temporal.io/server/common/telemetry"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/queues"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/persistence/visibility/manager"
+	ctasks "github.com/hanzoai/tasks/common/tasks"
+	"github.com/hanzoai/tasks/common/telemetry"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/queues"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"go.uber.org/fx"
 )
 

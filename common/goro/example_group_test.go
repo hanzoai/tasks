@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.temporal.io/server/common/goro"
+	"github.com/hanzoai/tasks/common/goro"
 )
 
 type ExampleService struct {

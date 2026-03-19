@@ -4,14 +4,14 @@ import (
 	"sync"
 
 	"github.com/gocql/gocql"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	p "go.temporal.io/server/common/persistence"
-	commongocql "go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/resolver"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	p "github.com/hanzoai/tasks/common/persistence"
+	commongocql "github.com/hanzoai/tasks/common/persistence/nosql/nosqlplugin/cassandra/gocql"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/resolver"
 )
 
 type (

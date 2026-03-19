@@ -1,7 +1,7 @@
 package queues
 
 import (
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 type (

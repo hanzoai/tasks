@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	schedulepb "go.temporal.io/api/schedule/v1"
-	"go.temporal.io/server/common/testing/protorequire"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

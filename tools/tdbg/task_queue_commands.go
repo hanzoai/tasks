@@ -7,8 +7,8 @@ import (
 	"github.com/urfave/cli/v2"
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	"go.temporal.io/server/api/adminservice/v1"
-	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	taskqueuespb "github.com/hanzoai/tasks/api/taskqueue/v1"
 )
 
 // AdminListTaskQueueTasks displays task information

@@ -1,7 +1,7 @@
 package update
 
 import (
-	"go.temporal.io/server/common/effect"
+	"github.com/hanzoai/tasks/common/effect"
 )
 
 var (

@@ -1,10 +1,10 @@
 package api
 
 import (
-	historyspb "go.temporal.io/server/api/history/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	tokenspb "go.temporal.io/server/api/token/v1"
-	"go.temporal.io/server/service/history/consts"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	tokenspb "github.com/hanzoai/tasks/api/token/v1"
+	"github.com/hanzoai/tasks/service/history/consts"
 )
 
 // NOTE: DO NOT MODIFY UNLESS ALSO APPLIED TO ./service/frontend/token_deprecated.go

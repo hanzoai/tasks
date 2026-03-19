@@ -7,12 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/service/worker/deletenamespace/deleteexecutions"
-	"go.temporal.io/server/service/worker/deletenamespace/errors"
-	"go.temporal.io/server/service/worker/deletenamespace/reclaimresources"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/service/worker/deletenamespace/deleteexecutions"
+	"github.com/hanzoai/tasks/service/worker/deletenamespace/errors"
+	"github.com/hanzoai/tasks/service/worker/deletenamespace/reclaimresources"
 )
 
 func Test_DeleteNamespaceWorkflow_ByName(t *testing.T) {

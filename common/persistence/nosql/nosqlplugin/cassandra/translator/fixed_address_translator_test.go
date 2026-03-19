@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/config"
 	"go.uber.org/mock/gomock"
 )
 

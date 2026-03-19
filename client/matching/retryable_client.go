@@ -3,9 +3,9 @@ package matching
 import (
 	"errors"
 
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/tqid"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/tqid"
 )
 
 var _ matchingservice.MatchingServiceClient = (*retryableClient)(nil)

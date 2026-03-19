@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"go.temporal.io/server/tools/parallelize"
+	"github.com/hanzoai/tasks/tools/parallelize"
 )
 
 func main() {

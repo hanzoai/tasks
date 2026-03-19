@@ -11,11 +11,11 @@ import (
 	protocolpb "go.temporal.io/api/protocol/v1"
 	"go.temporal.io/api/serviceerror"
 	updatepb "go.temporal.io/api/update/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/effect"
-	. "go.temporal.io/server/common/testing/protoutils"
-	"go.temporal.io/server/common/testing/testvars"
-	"go.temporal.io/server/service/history/workflow/update"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/effect"
+	. "github.com/hanzoai/tasks/common/testing/protoutils"
+	"github.com/hanzoai/tasks/common/testing/testvars"
+	"github.com/hanzoai/tasks/service/history/workflow/update"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
