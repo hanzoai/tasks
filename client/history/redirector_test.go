@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/api/historyservicemock/v1"
-	"go.temporal.io/server/common/convert"
-	"go.temporal.io/server/common/membership"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/api/historyservicemock/v1"
+	"github.com/hanzoai/tasks/common/convert"
+	"github.com/hanzoai/tasks/common/membership"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
 	"go.uber.org/mock/gomock"
 )
 

@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/metrics/metricstest"
-	"go.temporal.io/server/common/retrypolicy"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/metrics/metricstest"
+	"github.com/hanzoai/tasks/common/retrypolicy"
 	"go.uber.org/mock/gomock"
 )
 

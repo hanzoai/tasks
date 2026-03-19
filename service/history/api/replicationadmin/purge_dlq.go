@@ -3,10 +3,10 @@ package replicationadmin
 import (
 	"context"
 
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/service/history/consts"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/replication"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/service/history/consts"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/replication"
 )
 
 func PurgeDLQ(

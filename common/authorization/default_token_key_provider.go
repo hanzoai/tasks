@@ -12,9 +12,9 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v4"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
 	"go.uber.org/multierr"
 )
 

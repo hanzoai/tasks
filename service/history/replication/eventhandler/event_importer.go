@@ -7,16 +7,16 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/serviceerror"
-	historyspb "go.temporal.io/server/api/history/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/persistence/versionhistory"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 const (

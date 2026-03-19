@@ -6,12 +6,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/metrics/metricstest"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/service/history/configs"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/metrics/metricstest"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/service/history/configs"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

@@ -7,11 +7,11 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/quotas"
-	"go.temporal.io/server/service/frontend/configs"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/quotas"
+	"github.com/hanzoai/tasks/service/frontend/configs"
 	"google.golang.org/grpc"
 )
 

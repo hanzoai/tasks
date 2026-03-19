@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	historyservice "go.temporal.io/server/api/historyservice/v1"
-	repication "go.temporal.io/server/api/replication/v1"
-	chasm "go.temporal.io/server/chasm"
+	historyservice "github.com/hanzoai/tasks/api/historyservice/v1"
+	repication "github.com/hanzoai/tasks/api/replication/v1"
+	chasm "github.com/hanzoai/tasks/chasm"
 	gomock "go.uber.org/mock/gomock"
 )
 

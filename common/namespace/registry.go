@@ -3,7 +3,7 @@
 package namespace
 
 import (
-	"go.temporal.io/server/common/pingable"
+	"github.com/hanzoai/tasks/common/pingable"
 )
 
 type (

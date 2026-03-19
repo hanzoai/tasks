@@ -3,12 +3,12 @@ package api
 import (
 	"context"
 
-	clockspb "go.temporal.io/server/api/clock/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/locks"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/workflow/update"
+	clockspb "github.com/hanzoai/tasks/api/clock/v1"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/locks"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/workflow/update"
 )
 
 func GetAndUpdateWorkflowWithNew(

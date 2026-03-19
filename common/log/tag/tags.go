@@ -5,9 +5,9 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/util"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/util"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

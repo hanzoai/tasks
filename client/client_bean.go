@@ -9,14 +9,14 @@ import (
 
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/client/admin"
-	"go.temporal.io/server/client/frontend"
-	"go.temporal.io/server/client/history"
-	"go.temporal.io/server/client/matching"
-	"go.temporal.io/server/common/cluster"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/client/admin"
+	"github.com/hanzoai/tasks/client/frontend"
+	"github.com/hanzoai/tasks/client/history"
+	"github.com/hanzoai/tasks/client/matching"
+	"github.com/hanzoai/tasks/common/cluster"
 	"google.golang.org/grpc"
 )
 

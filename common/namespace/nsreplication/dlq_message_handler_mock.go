@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	repication "go.temporal.io/server/api/replication/v1"
+	repication "github.com/hanzoai/tasks/api/replication/v1"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -2,8 +2,8 @@ package nexusoperation
 
 import (
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/nexusoperation/gen/nexusoperationpb/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/nexusoperation/gen/nexusoperationpb/v1"
 )
 
 // EventScheduled is triggered when the operation is meant to be scheduled - immediately after initialization.

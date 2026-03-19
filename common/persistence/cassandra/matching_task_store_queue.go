@@ -9,10 +9,10 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/convert"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
-	"go.temporal.io/server/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/convert"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/nosql/nosqlplugin/cassandra/gocql"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
 )
 
 // matchingTaskVersion represents the task schema version

@@ -6,8 +6,8 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/payload"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common/payload"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 type VisibilityValue interface {

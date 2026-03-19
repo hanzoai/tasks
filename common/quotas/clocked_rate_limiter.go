@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.temporal.io/server/common/clock"
+	"github.com/hanzoai/tasks/common/clock"
 	"golang.org/x/time/rate"
 )
 

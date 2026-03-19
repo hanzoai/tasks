@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/converter"
-	"go.temporal.io/server/common/payload"
+	"github.com/hanzoai/tasks/common/payload"
 )
 
 func Test_DecodeValue_AllowList_FromMetadata_Success(t *testing.T) {

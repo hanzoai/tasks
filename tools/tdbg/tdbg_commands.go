@@ -9,8 +9,8 @@ import (
 	"github.com/urfave/cli/v2"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"go.uber.org/multierr"
 )
 

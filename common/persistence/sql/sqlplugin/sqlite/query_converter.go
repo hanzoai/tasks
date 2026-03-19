@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/temporalio/sqlparser"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/persistence/visibility/store/query"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/query"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 var maxDatetime = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)

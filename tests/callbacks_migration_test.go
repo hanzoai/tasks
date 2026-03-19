@@ -18,11 +18,11 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/nexus/nexusrpc"
-	"go.temporal.io/server/common/testing/testvars"
-	"go.temporal.io/server/components/callbacks"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/common/testing/testvars"
+	"github.com/hanzoai/tasks/components/callbacks"
+	"github.com/hanzoai/tasks/tests/testcore"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

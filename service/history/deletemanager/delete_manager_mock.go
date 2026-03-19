@@ -14,9 +14,9 @@ import (
 	reflect "reflect"
 
 	common "go.temporal.io/api/common/v1"
-	namespace "go.temporal.io/server/common/namespace"
-	interfaces "go.temporal.io/server/service/history/interfaces"
-	tasks "go.temporal.io/server/service/history/tasks"
+	namespace "github.com/hanzoai/tasks/common/namespace"
+	interfaces "github.com/hanzoai/tasks/service/history/interfaces"
+	tasks "github.com/hanzoai/tasks/service/history/tasks"
 	gomock "go.uber.org/mock/gomock"
 )
 

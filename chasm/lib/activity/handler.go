@@ -7,12 +7,12 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
-	"go.temporal.io/server/common/contextutil"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/activity/gen/activitypb/v1"
+	"github.com/hanzoai/tasks/common/contextutil"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
 )
 
 var (

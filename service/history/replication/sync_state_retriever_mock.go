@@ -14,10 +14,10 @@ import (
 	reflect "reflect"
 
 	common "go.temporal.io/api/common/v1"
-	history "go.temporal.io/server/api/history/v1"
-	persistence "go.temporal.io/server/api/persistence/v1"
-	chasm "go.temporal.io/server/chasm"
-	interfaces "go.temporal.io/server/service/history/interfaces"
+	history "github.com/hanzoai/tasks/api/history/v1"
+	persistence "github.com/hanzoai/tasks/api/persistence/v1"
+	chasm "github.com/hanzoai/tasks/chasm"
+	interfaces "github.com/hanzoai/tasks/service/history/interfaces"
 	gomock "go.uber.org/mock/gomock"
 )
 

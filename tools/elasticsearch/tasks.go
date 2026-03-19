@@ -7,9 +7,9 @@ import (
 	"fmt"
 
 	"github.com/olivere/elastic/v7"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/elasticsearch/client"
 )
 
 const templateName = "temporal_visibility_v1_template"

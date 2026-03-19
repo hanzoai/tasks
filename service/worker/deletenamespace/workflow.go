@@ -9,12 +9,12 @@ import (
 	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/service/worker/deletenamespace/deleteexecutions"
-	"go.temporal.io/server/service/worker/deletenamespace/errors"
-	"go.temporal.io/server/service/worker/deletenamespace/reclaimresources"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/service/worker/deletenamespace/deleteexecutions"
+	"github.com/hanzoai/tasks/service/worker/deletenamespace/errors"
+	"github.com/hanzoai/tasks/service/worker/deletenamespace/reclaimresources"
 )
 
 const (

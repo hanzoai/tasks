@@ -7,12 +7,12 @@ import (
 	"net/url"
 
 	"github.com/urfave/cli"
-	"go.temporal.io/server/common/auth"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	esclient "go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
-	"go.temporal.io/server/schema"
-	commonschema "go.temporal.io/server/tools/common/schema"
+	"github.com/hanzoai/tasks/common/auth"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	esclient "github.com/hanzoai/tasks/common/persistence/visibility/store/elasticsearch/client"
+	"github.com/hanzoai/tasks/schema"
+	commonschema "github.com/hanzoai/tasks/tools/common/schema"
 )
 
 func createClient(cli *cli.Context, logger log.Logger) (esclient.CLIClient, error) {

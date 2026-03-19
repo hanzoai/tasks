@@ -14,8 +14,8 @@ import (
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/rpc"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/rpc"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 var (

@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
 	versionpb "go.temporal.io/api/version/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/debug"
-	p "go.temporal.io/server/common/persistence"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/debug"
+	p "github.com/hanzoai/tasks/common/persistence"
 )
 
 type (

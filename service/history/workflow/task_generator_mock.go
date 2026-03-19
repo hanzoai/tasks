@@ -14,10 +14,10 @@ import (
 	time "time"
 
 	history "go.temporal.io/api/history/v1"
-	persistence "go.temporal.io/server/api/persistence/v1"
-	hsm "go.temporal.io/server/service/history/hsm"
-	interfaces "go.temporal.io/server/service/history/interfaces"
-	tasks "go.temporal.io/server/service/history/tasks"
+	persistence "github.com/hanzoai/tasks/api/persistence/v1"
+	hsm "github.com/hanzoai/tasks/service/history/hsm"
+	interfaces "github.com/hanzoai/tasks/service/history/interfaces"
+	tasks "github.com/hanzoai/tasks/service/history/tasks"
 	gomock "go.uber.org/mock/gomock"
 )
 
