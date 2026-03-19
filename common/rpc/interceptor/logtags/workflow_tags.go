@@ -6,10 +6,10 @@ package logtags
 import (
 	"strings"
 
-	"go.temporal.io/server/common/api"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/tasktoken"
+	"github.com/hanzoai/tasks/common/api"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/tasktoken"
 )
 
 type (

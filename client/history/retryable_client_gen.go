@@ -5,10 +5,10 @@ package history
 import (
 	"context"
 
-	"go.temporal.io/server/api/historyservice/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
 	"google.golang.org/grpc"
 
-	"go.temporal.io/server/common/backoff"
+	"github.com/hanzoai/tasks/common/backoff"
 )
 
 func (c *retryableClient) AddTasks(

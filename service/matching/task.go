@@ -7,12 +7,12 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	deploymentspb "go.temporal.io/server/api/deployment/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
-	"go.temporal.io/server/common/namespace"
+	deploymentspb "github.com/hanzoai/tasks/api/deployment/v1"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	taskqueuespb "github.com/hanzoai/tasks/api/taskqueue/v1"
+	"github.com/hanzoai/tasks/common/namespace"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

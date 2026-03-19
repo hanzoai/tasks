@@ -3,7 +3,7 @@
 install: bins
 
 # Rebuild binaries (used by Dockerfile).
-bins: temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
+bins: tasksd temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
 
 # Install all tools, recompile proto files, run all possible checks and tests (long but comprehensive).
 all: clean proto bins check test
@@ -341,17 +341,17 @@ update-go-api:
 ##### Binaries #####
 clean-bins:
 	@printf $(COLOR) "Delete old binaries..."
-	@rm -f temporal-server
-	@rm -f temporal-server-debug
+	@rm -f tasksd
+	@rm -f tasksd-debug
 	@rm -f temporal-cassandra-tool
 	@rm -f tdbg
 	@rm -f fairsim
 	@rm -f temporal-sql-tool
 	@rm -f temporal-elasticsearch-tool
 
-temporal-server: $(ALL_SRC)
-	@printf $(COLOR) "Build temporal-server with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-server ./cmd/server
+tasksd: $(ALL_SRC)
+	@printf $(COLOR) "Build tasksd with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o tasksd ./cmd/tasksd
 
 tdbg: $(ALL_SRC)
 	@printf $(COLOR) "Build tdbg with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
@@ -373,9 +373,9 @@ temporal-elasticsearch-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-elasticsearch-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
 	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
 
-temporal-server-debug: $(ALL_SRC)
-	@printf $(COLOR) "Build temporal-server-debug with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG),TEMPORAL_DEBUG -o temporal-server-debug ./cmd/server
+tasksd-debug: $(ALL_SRC)
+	@printf $(COLOR) "Build tasksd-debug with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG),TEMPORAL_DEBUG -o tasksd-debug ./cmd/tasksd
 
 ##### Checks #####
 goimports: fmt-imports $(GOIMPORTS)
@@ -648,48 +648,48 @@ stop-dependencies-cdc:
 
 start: start-sqlite
 
-start-cass-es: temporal-server
-	./temporal-server --config-file config/development-cass-es.yaml --allow-no-auth start
+start-cass-es: tasksd
+	./tasksd --config-file config/development-cass-es.yaml --allow-no-auth start
 
-start-cass-archival: temporal-server
-	./temporal-server --config-file config/development-cass-archival.yaml --allow-no-auth start
+start-cass-archival: tasksd
+	./tasksd --config-file config/development-cass-archival.yaml --allow-no-auth start
 
-start-cass-es-dual: temporal-server
-	./temporal-server --config-file config/development-cass-es-dual.yaml --allow-no-auth start
+start-cass-es-dual: tasksd
+	./tasksd --config-file config/development-cass-es-dual.yaml --allow-no-auth start
 
-start-cass-es-custom: temporal-server
-	./temporal-server --config-file config/development-cass-es-custom.yaml --allow-no-auth start
+start-cass-es-custom: tasksd
+	./tasksd --config-file config/development-cass-es-custom.yaml --allow-no-auth start
 
-start-es-fi: temporal-server
-	./temporal-server --config-file config/development-cass-es-fi.yaml --allow-no-auth start
+start-es-fi: tasksd
+	./tasksd --config-file config/development-cass-es-fi.yaml --allow-no-auth start
 
 start-mysql: start-mysql8
 
-start-mysql8: temporal-server
-	./temporal-server --config-file config/development-mysql8.yaml --allow-no-auth start
+start-mysql8: tasksd
+	./tasksd --config-file config/development-mysql8.yaml --allow-no-auth start
 
-start-mysql-es: temporal-server
-	./temporal-server --config-file config/development-mysql-es.yaml --allow-no-auth start
+start-mysql-es: tasksd
+	./tasksd --config-file config/development-mysql-es.yaml --allow-no-auth start
 
 start-postgres: start-postgres12
 
-start-postgres12: temporal-server
-	./temporal-server --config-file config/development-postgres12.yaml --allow-no-auth start
+start-postgres12: tasksd
+	./tasksd --config-file config/development-postgres12.yaml --allow-no-auth start
 
-start-sqlite: temporal-server
-	./temporal-server --config-file config/development-sqlite.yaml --allow-no-auth start
+start-sqlite: tasksd
+	./tasksd --config-file config/development-sqlite.yaml --allow-no-auth start
 
-start-sqlite-file: temporal-server
-	./temporal-server --config-file config/development-sqlite-file.yaml --allow-no-auth start
+start-sqlite-file: tasksd
+	./tasksd --config-file config/development-sqlite-file.yaml --allow-no-auth start
 
-start-xdc-cluster-a: temporal-server
-	./temporal-server --config-file config/development-cluster-a.yaml --allow-no-auth start
+start-xdc-cluster-a: tasksd
+	./tasksd --config-file config/development-cluster-a.yaml --allow-no-auth start
 
-start-xdc-cluster-b: temporal-server
-	./temporal-server --config-file config/development-cluster-b.yaml --allow-no-auth start
+start-xdc-cluster-b: tasksd
+	./tasksd --config-file config/development-cluster-b.yaml --allow-no-auth start
 
-start-xdc-cluster-c: temporal-server
-	./temporal-server --config-file config/development-cluster-c.yaml --allow-no-auth start
+start-xdc-cluster-c: tasksd
+	./tasksd --config-file config/development-cluster-c.yaml --allow-no-auth start
 
 ##### Grafana #####
 update-dashboards:

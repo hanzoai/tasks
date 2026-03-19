@@ -13,4 +13,4 @@ if [ "${BIND_ON_IP}" = "0.0.0.0" ] || [ "${BIND_ON_IP}" = "::0" ]; then
     export TEMPORAL_BROADCAST_ADDRESS
 fi
 
-exec temporal-server start 
+exec tasksd start 

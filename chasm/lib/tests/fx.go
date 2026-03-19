@@ -1,7 +1,7 @@
 package tests
 
 import (
-	"go.temporal.io/server/chasm"
+	"github.com/hanzoai/tasks/chasm"
 	"go.uber.org/fx"
 )
 

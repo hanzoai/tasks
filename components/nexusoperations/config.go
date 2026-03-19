@@ -4,12 +4,12 @@ import (
 	"strings"
 	"time"
 
-	chasmnexus "go.temporal.io/server/chasm/lib/nexusoperation"
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/rpc/interceptor"
+	chasmnexus "github.com/hanzoai/tasks/chasm/lib/nexusoperation"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/rpc/interceptor"
 )
 
 var RequestTimeout = dynamicconfig.NewDestinationDurationSetting(

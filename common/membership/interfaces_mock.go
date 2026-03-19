@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 	time "time"
 
-	primitives "go.temporal.io/server/common/primitives"
+	primitives "github.com/hanzoai/tasks/common/primitives"
 	gomock "go.uber.org/mock/gomock"
 )
 

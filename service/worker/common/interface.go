@@ -4,7 +4,7 @@ package common
 
 import (
 	sdkworker "go.temporal.io/sdk/worker"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/common/namespace"
 )
 
 type (

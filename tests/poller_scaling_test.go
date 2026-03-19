@@ -18,11 +18,11 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/util"
-	"go.temporal.io/server/components/nexusoperations"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/util"
+	"github.com/hanzoai/tasks/components/nexusoperations"
+	"github.com/hanzoai/tasks/tests/testcore"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

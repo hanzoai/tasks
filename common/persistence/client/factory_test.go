@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/persistence/client"
-	"go.temporal.io/server/common/persistence/mock"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/persistence/client"
+	"github.com/hanzoai/tasks/common/persistence/mock"
 	"go.uber.org/mock/gomock"
 )
 

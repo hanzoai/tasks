@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/rpc/interceptor"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/rpc/interceptor"
 )
 
 var ChasmNexusEnabled = dynamicconfig.NewGlobalBoolSetting(

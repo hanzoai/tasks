@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 	time "time"
 
-	enums "go.temporal.io/server/api/enums/v1"
+	enums "github.com/hanzoai/tasks/api/enums/v1"
 	gomock "go.uber.org/mock/gomock"
 )
 

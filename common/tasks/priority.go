@@ -3,7 +3,7 @@ package tasks
 import (
 	"strconv"
 
-	"go.temporal.io/server/common/headers"
+	"github.com/hanzoai/tasks/common/headers"
 )
 
 type (

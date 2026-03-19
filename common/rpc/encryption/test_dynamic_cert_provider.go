@@ -5,7 +5,7 @@ import (
 	"crypto/x509"
 	"time"
 
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/config"
 )
 
 type TestDynamicCertProvider struct {

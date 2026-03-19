@@ -2,14 +2,14 @@ package mysql
 
 import (
 	"github.com/jmoiron/sqlx"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/persistence/sql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/mysql/session"
-	"go.temporal.io/server/common/resolver"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/persistence/sql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/mysql/session"
+	"github.com/hanzoai/tasks/common/resolver"
 )
 
 const (

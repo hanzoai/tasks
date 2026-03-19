@@ -15,12 +15,12 @@ import (
 	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
-	tokenspb "go.temporal.io/server/api/token/v1"
-	"go.temporal.io/server/common/authorization"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/nexus/nexusrpc"
-	"go.temporal.io/server/service/frontend/configs"
-	"go.temporal.io/server/tests/testcore"
+	tokenspb "github.com/hanzoai/tasks/api/token/v1"
+	"github.com/hanzoai/tasks/common/authorization"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/service/frontend/configs"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 type NexusAPIValidationTestSuite struct {

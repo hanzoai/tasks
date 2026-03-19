@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	commonclock "go.temporal.io/server/common/clock"
-	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	commonclock "github.com/hanzoai/tasks/common/clock"
+	hlc "github.com/hanzoai/tasks/common/clock/hybrid_logical_clock"
 )
 
 func fromWallClock(wallclock int64) *hlc.Clock {

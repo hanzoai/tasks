@@ -4,7 +4,7 @@ import (
 	"regexp"
 
 	"github.com/mitchellh/mapstructure"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 var (

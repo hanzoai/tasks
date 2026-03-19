@@ -4,8 +4,8 @@ import (
 	"os"
 
 	"github.com/urfave/cli"
-	"go.temporal.io/server/common/log"
-	commonschema "go.temporal.io/server/tools/common/schema"
+	"github.com/hanzoai/tasks/common/log"
+	commonschema "github.com/hanzoai/tasks/tools/common/schema"
 )
 
 const (

@@ -7,8 +7,8 @@ import (
 	"context"
 	"time"
 
-	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/common/debug"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	"github.com/hanzoai/tasks/common/debug"
 	"google.golang.org/grpc"
 )
 

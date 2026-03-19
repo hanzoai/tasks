@@ -7,8 +7,8 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/quotas"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/quotas"
 	"google.golang.org/grpc"
 )
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"go.temporal.io/server/service/history/hsm"
+	"github.com/hanzoai/tasks/service/history/hsm"
 )
 
 var (

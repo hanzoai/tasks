@@ -3,7 +3,7 @@ package history
 import (
 	"sync"
 
-	"go.temporal.io/server/common/membership"
+	"github.com/hanzoai/tasks/common/membership"
 	"google.golang.org/grpc"
 )
 
@@ -26,7 +26,7 @@ type (
 		clientCtor             func(grpc.ClientConnInterface) C
 	}
 
-	// RPCFactory is a subset of the [go.temporal.io/server/common/rpc.RPCFactory] interface to make testing easier.
+	// RPCFactory is a subset of the [github.com/hanzoai/tasks/common/rpc.RPCFactory] interface to make testing easier.
 	RPCFactory interface {
 		CreateHistoryGRPCConnection(rpcAddress string) *grpc.ClientConn
 	}

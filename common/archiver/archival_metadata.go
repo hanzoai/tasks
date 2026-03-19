@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
 )
 
 type (

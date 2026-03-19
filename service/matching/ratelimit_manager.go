@@ -6,9 +6,9 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/cache"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/quotas"
+	"github.com/hanzoai/tasks/common/cache"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/quotas"
 )
 
 type (

@@ -3,13 +3,13 @@ package verifyfirstworkflowtaskscheduled
 import (
 	"context"
 
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/locks"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/service/history/api"
-	"go.temporal.io/server/service/history/consts"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/locks"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/service/history/api"
+	"github.com/hanzoai/tasks/service/history/consts"
 )
 
 func Invoke(

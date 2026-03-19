@@ -10,9 +10,9 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/uber-go/tally/v4"
 	"github.com/uber-go/tally/v4/prometheus"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	statsdreporter "go.temporal.io/server/common/metrics/tally/statsd"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	statsdreporter "github.com/hanzoai/tasks/common/metrics/tally/statsd"
 )
 
 type (

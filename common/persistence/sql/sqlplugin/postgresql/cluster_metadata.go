@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
 )
 
 const constMetadataPartition = 0

@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/payload"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/payload"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 func TestArchetypeIDFromExecutionInfo(t *testing.T) {

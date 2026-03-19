@@ -199,7 +199,7 @@ func organizeBinaries() error {
 
 	// Server binaries (for server image)
 	serverBinaries := []string{
-		"temporal-server",
+		"tasksd",
 	}
 
 	// All binaries to copy
@@ -291,7 +291,7 @@ func organizeBinaries() error {
 	// Check which architectures have binaries
 	var availableArchs []string
 	for _, arch := range archs {
-		testBinary := filepath.Join("docker", "build", arch, "temporal-server")
+		testBinary := filepath.Join("docker", "build", arch, "tasksd")
 		if _, err := os.Stat(testBinary); err == nil {
 			availableArchs = append(availableArchs, arch)
 		}

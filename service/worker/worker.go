@@ -5,14 +5,14 @@ import (
 	"sync/atomic"
 
 	sdkworker "go.temporal.io/sdk/worker"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/sdk"
-	workercommon "go.temporal.io/server/service/worker/common"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/sdk"
+	workercommon "github.com/hanzoai/tasks/service/worker/common"
 )
 
 type (

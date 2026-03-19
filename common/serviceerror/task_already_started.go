@@ -3,7 +3,7 @@ package serviceerror
 import (
 	"fmt"
 
-	errordetailsspb "go.temporal.io/server/api/errordetails/v1"
+	errordetailsspb "github.com/hanzoai/tasks/api/errordetails/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
