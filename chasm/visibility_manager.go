@@ -9,7 +9,7 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/payload"
+	"github.com/hanzoai/tasks/common/payload"
 	"google.golang.org/protobuf/proto"
 )
 

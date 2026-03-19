@@ -3,11 +3,11 @@ package history
 import (
 	"context"
 
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/service/history/consts"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/tasks"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/service/history/consts"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 // validateChasmSideEffectTask completes validation of a CHASM side effect task

@@ -12,12 +12,12 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/retrypolicy"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/retrypolicy"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

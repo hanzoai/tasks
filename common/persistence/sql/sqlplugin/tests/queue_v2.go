@@ -10,14 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/persistencetest"
-	"go.temporal.io/server/common/persistence/serialization"
-	persistencesql "go.temporal.io/server/common/persistence/sql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/persistencetest"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	persistencesql "github.com/hanzoai/tasks/common/persistence/sql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
 )
 
 var (

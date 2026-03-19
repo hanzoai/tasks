@@ -7,7 +7,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

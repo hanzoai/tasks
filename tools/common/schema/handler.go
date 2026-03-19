@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/urfave/cli"
-	"go.temporal.io/server/common/log"
-	dbschemas "go.temporal.io/server/schema"
+	"github.com/hanzoai/tasks/common/log"
+	dbschemas "github.com/hanzoai/tasks/schema"
 )
 
 // Setup sets up schema tables

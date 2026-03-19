@@ -4,12 +4,12 @@ import (
 	"context"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/resource"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/activity/gen/activitypb/v1"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/resource"
+	"github.com/hanzoai/tasks/common/util"
 	"go.uber.org/fx"
 )
 

@@ -7,9 +7,9 @@ import (
 	failurepb "go.temporal.io/api/failure/v1"
 	protocolpb "go.temporal.io/api/protocol/v1"
 	updatepb "go.temporal.io/api/update/v1"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/testing/protoutils"
-	"go.temporal.io/server/common/testing/testvars"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/testing/protoutils"
+	"github.com/hanzoai/tasks/common/testing/testvars"
 )
 
 type (

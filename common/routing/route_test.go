@@ -8,7 +8,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/server/common/routing"
+	"github.com/hanzoai/tasks/common/routing"
 )
 
 type QualifiedWorkflow struct {

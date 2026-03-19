@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 // Mostly cribbed from

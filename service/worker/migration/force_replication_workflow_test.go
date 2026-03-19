@@ -22,10 +22,10 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	replicationspb "go.temporal.io/server/api/replication/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/testing/mockapi/workflowservicemock/v1"
+	replicationspb "github.com/hanzoai/tasks/api/replication/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/testing/mockapi/workflowservicemock/v1"
 	"go.uber.org/mock/gomock"
 )
 

@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/sdk/log"
-	"go.temporal.io/server/common/log/tag"
+	"github.com/hanzoai/tasks/common/log/tag"
 	"go.uber.org/mock/gomock"
 )
 

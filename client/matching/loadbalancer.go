@@ -4,10 +4,10 @@ import (
 	"math/rand"
 	"sync"
 
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/testing/testhooks"
-	"go.temporal.io/server/common/tqid"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/testing/testhooks"
+	"github.com/hanzoai/tasks/common/tqid"
 )
 
 type (

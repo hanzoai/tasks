@@ -12,12 +12,12 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/sdk/converter"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/components/nexusoperations"
-	"go.temporal.io/server/service/history/hsm"
-	"go.temporal.io/server/service/history/hsm/hsmtest"
-	"go.temporal.io/server/service/history/workflow"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/components/nexusoperations"
+	"github.com/hanzoai/tasks/service/history/hsm"
+	"github.com/hanzoai/tasks/service/history/hsm/hsmtest"
+	"github.com/hanzoai/tasks/service/history/workflow"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

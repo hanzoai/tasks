@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/versioninfo"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/versioninfo"
 )
 
 func TestSDKVersionRecorder(t *testing.T) {

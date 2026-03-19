@@ -6,10 +6,10 @@ import (
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/primitives/timestamp"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
 )
 
 type processableInput struct {

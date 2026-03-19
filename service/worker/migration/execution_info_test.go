@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/converter"
-	replicationspb "go.temporal.io/server/api/replication/v1"
-	"go.temporal.io/server/chasm"
+	replicationspb "github.com/hanzoai/tasks/api/replication/v1"
+	"github.com/hanzoai/tasks/chasm"
 )
 
 func TestExecutionInfo_Marshal_OSS(t *testing.T) {

@@ -7,13 +7,13 @@ import (
 	"go.temporal.io/api/serviceerror"
 	updatepb "go.temporal.io/api/update/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/locks"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/service/history/api"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/workflow/update"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/locks"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/service/history/api"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/workflow/update"
 )
 
 func Invoke(

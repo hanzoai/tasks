@@ -6,11 +6,11 @@ import (
 	"net/url"
 
 	"github.com/urfave/cli"
-	"go.temporal.io/server/common/auth"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/tools/common/schema"
+	"github.com/hanzoai/tasks/common/auth"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/tools/common/schema"
 )
 
 // setupSchema executes the setupSchemaTask

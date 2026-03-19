@@ -9,13 +9,13 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/future"
-	"go.temporal.io/server/common/payload"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/common/persistence/visibility/store"
-	"go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common/future"
+	"github.com/hanzoai/tasks/common/payload"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/visibility/manager"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/elasticsearch/client"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 	"go.uber.org/mock/gomock"
 )
 

@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/testing/protorequire"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
 )
 
 type (

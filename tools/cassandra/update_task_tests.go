@@ -1,9 +1,9 @@
 package cassandra
 
 import (
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/schema/cassandra"
-	"go.temporal.io/server/tools/common/schema/test"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/schema/cassandra"
+	"github.com/hanzoai/tasks/tools/common/schema/test"
 )
 
 type UpdateSchemaTestSuite struct {

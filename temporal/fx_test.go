@@ -7,13 +7,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/archiver"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/history/tasks"
-	"go.temporal.io/server/tests/testutils"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/archiver"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/history/tasks"
+	"github.com/hanzoai/tasks/tests/testutils"
 	"go.uber.org/mock/gomock"
 )
 

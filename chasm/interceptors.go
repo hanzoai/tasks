@@ -3,8 +3,8 @@ package chasm
 import (
 	"context"
 
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
 	"google.golang.org/grpc"
 )
 

@@ -1,8 +1,8 @@
 package faultinjection
 
 import (
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/persistence"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/persistence"
 )
 
 type (

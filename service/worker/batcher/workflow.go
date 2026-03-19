@@ -12,8 +12,8 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-	batchspb "go.temporal.io/server/api/batch/v1"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	batchspb "github.com/hanzoai/tasks/api/batch/v1"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

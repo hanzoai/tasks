@@ -5,11 +5,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 type (

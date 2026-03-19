@@ -9,12 +9,12 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/sdk/converter"
-	"go.temporal.io/server/api/adminservice/v1"
-	historyspb "go.temporal.io/server/api/history/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	replicationspb "go.temporal.io/server/api/replication/v1"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/persistence/versionhistory"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	replicationspb "github.com/hanzoai/tasks/api/replication/v1"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
 	"google.golang.org/protobuf/proto"
 )
 

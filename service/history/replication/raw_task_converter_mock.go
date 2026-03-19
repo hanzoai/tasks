@@ -12,9 +12,9 @@ package replication
 import (
 	reflect "reflect"
 
-	enums "go.temporal.io/server/api/enums/v1"
-	repication "go.temporal.io/server/api/replication/v1"
-	tasks "go.temporal.io/server/service/history/tasks"
+	enums "github.com/hanzoai/tasks/api/enums/v1"
+	repication "github.com/hanzoai/tasks/api/replication/v1"
+	tasks "github.com/hanzoai/tasks/service/history/tasks"
 	gomock "go.uber.org/mock/gomock"
 )
 

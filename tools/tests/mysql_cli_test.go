@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
-	mysqlversionV8 "go.temporal.io/server/schema/mysql/v8"
-	"go.temporal.io/server/temporal/environment"
-	"go.temporal.io/server/tools/sql/clitest"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/mysql"
+	mysqlversionV8 "github.com/hanzoai/tasks/schema/mysql/v8"
+	"github.com/hanzoai/tasks/temporal/environment"
+	"github.com/hanzoai/tasks/tools/sql/clitest"
 )
 
 func TestMySQLConnTestSuite(t *testing.T) {

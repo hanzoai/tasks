@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 type (

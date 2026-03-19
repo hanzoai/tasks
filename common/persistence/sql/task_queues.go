@@ -8,9 +8,9 @@ import (
 	"math"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 type taskQueueStore struct {

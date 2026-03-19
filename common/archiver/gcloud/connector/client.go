@@ -10,8 +10,8 @@ import (
 	"os"
 
 	"cloud.google.com/go/storage"
-	"go.temporal.io/server/common/archiver"
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/archiver"
+	"github.com/hanzoai/tasks/common/config"
 	"go.uber.org/multierr"
 	"google.golang.org/api/iterator"
 )

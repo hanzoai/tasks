@@ -12,7 +12,7 @@ import (
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
 )
 
 const testTimeout = time.Second * 5

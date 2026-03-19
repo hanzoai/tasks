@@ -1,6 +1,6 @@
 package callback
 
-import "go.temporal.io/server/common/metrics"
+import "github.com/hanzoai/tasks/common/metrics"
 
 // CHASM callback metrics.
 // These are defined independently from HSM callbacks to avoid coupling between the two implementations.

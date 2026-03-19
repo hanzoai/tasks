@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/client"
-	"go.temporal.io/server/common/persistence/mock"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/client"
+	"github.com/hanzoai/tasks/common/persistence/mock"
 	"go.uber.org/mock/gomock"
 )
 

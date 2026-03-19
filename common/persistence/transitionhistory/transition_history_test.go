@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/service/history/consts"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/service/history/consts"
 )
 
 func TestCompareVersionedTransition(t *testing.T) {

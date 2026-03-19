@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
 	"google.golang.org/grpc"
 )
 

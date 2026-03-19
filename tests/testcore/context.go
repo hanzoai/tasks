@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"go.temporal.io/server/common/debug"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/rpc"
+	"github.com/hanzoai/tasks/common/debug"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/rpc"
 )
 
 // NewContext creates a context with default 90-second timeout and RPC headers.
