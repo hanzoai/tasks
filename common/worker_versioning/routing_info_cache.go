@@ -3,9 +3,9 @@ package worker_versioning
 
 import (
 	enumspb "go.temporal.io/api/enums/v1"
-	deploymentspb "go.temporal.io/server/api/deployment/v1"
-	"go.temporal.io/server/common/cache"
-	"go.temporal.io/server/common/metrics"
+	deploymentspb "github.com/hanzoai/tasks/api/deployment/v1"
+	"github.com/hanzoai/tasks/common/cache"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 // RoutingInfoCache is used to cache results of GetTaskQueueUserData

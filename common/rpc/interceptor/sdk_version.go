@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/versioninfo"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/versioninfo"
 	"google.golang.org/grpc"
 )
 

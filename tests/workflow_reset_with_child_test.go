@@ -11,7 +11,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 // Tests workflow reset feature. This suite executes the following scenarios:

@@ -3,8 +3,8 @@ package dummy
 import (
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/namespace"
-	workercommon "go.temporal.io/server/service/worker/common"
+	"github.com/hanzoai/tasks/common/namespace"
+	workercommon "github.com/hanzoai/tasks/service/worker/common"
 	"go.uber.org/fx"
 )
 

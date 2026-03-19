@@ -7,15 +7,15 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	workflowspb "go.temporal.io/server/api/workflow/v1"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/service/history/consts"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/workflow"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	workflowspb "github.com/hanzoai/tasks/api/workflow/v1"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/service/history/consts"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/workflow"
 )
 
 // ErrUseCurrentExecution is a sentinel error to indicate to the caller to

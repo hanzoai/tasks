@@ -6,16 +6,16 @@ import (
 
 	"github.com/google/uuid"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/versionhistory"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
-	"go.temporal.io/server/common/util"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
+	"github.com/hanzoai/tasks/common/util"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 const (

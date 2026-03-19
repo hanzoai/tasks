@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"go.temporal.io/server/common/versioninfo"
+	"github.com/hanzoai/tasks/common/versioninfo"
 )
 
 func TestPostInfo(t *testing.T) {

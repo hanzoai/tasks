@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"go.temporal.io/server/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence"
 )
 
 type (

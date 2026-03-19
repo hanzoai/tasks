@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/testing/testlogger"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/testing/testlogger"
 	"go.uber.org/mock/gomock"
 )
 

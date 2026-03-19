@@ -3,8 +3,8 @@ package worker_versioning
 
 import (
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/cache"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common/cache"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 // VersionMembershipCache is used to cache results of Matching's CheckTaskQueueVersionMembership

@@ -2,7 +2,7 @@ package api
 
 import (
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/cluster"
+	"github.com/hanzoai/tasks/common/cluster"
 )
 
 func ValidateReplicationConfig(

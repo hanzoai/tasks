@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	historyspb "go.temporal.io/server/api/history/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/definition"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/definition"
 )
 
 var _ Task = (*SyncVersionedTransitionTask)(nil)

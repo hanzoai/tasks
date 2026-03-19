@@ -9,7 +9,7 @@ import (
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
 )
 
 type payloadSerializer struct{}

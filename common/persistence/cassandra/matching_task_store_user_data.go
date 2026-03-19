@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/nosql/nosqlplugin/cassandra/gocql"
 )
 
 const (

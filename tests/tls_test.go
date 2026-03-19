@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/authorization"
-	"go.temporal.io/server/common/rpc"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/authorization"
+	"github.com/hanzoai/tasks/common/rpc"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 type TLSFunctionalSuite struct {

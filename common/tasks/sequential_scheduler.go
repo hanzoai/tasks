@@ -5,12 +5,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/collection"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/collection"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
 )
 
 var _ Scheduler[Task] = (*SequentialScheduler[Task])(nil)

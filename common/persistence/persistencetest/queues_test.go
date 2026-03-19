@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/persistencetest"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/persistencetest"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 func TestGetQueueKey_Default(t *testing.T) {

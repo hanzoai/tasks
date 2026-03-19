@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/api"
+	"github.com/hanzoai/tasks/common/api"
 	"google.golang.org/grpc"
 )
 

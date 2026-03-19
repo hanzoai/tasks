@@ -6,7 +6,7 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/converter"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 var (

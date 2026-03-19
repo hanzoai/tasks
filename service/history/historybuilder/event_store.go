@@ -3,9 +3,9 @@ package historybuilder
 import (
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/metrics"
 	"google.golang.org/protobuf/proto"
 )
 

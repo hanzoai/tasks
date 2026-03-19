@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	failurepb "go.temporal.io/api/failure/v1"
-	"go.temporal.io/server/service/history/consts"
+	"github.com/hanzoai/tasks/service/history/consts"
 )
 
 type (

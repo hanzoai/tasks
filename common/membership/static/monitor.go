@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 type (

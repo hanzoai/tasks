@@ -13,11 +13,11 @@ import (
 	context "context"
 	reflect "reflect"
 
-	clock "go.temporal.io/server/api/clock/v1"
-	chasm "go.temporal.io/server/chasm"
-	definition "go.temporal.io/server/common/definition"
-	locks "go.temporal.io/server/common/locks"
-	cache "go.temporal.io/server/service/history/workflow/cache"
+	clock "github.com/hanzoai/tasks/api/clock/v1"
+	chasm "github.com/hanzoai/tasks/chasm"
+	definition "github.com/hanzoai/tasks/common/definition"
+	locks "github.com/hanzoai/tasks/common/locks"
+	cache "github.com/hanzoai/tasks/service/history/workflow/cache"
 	gomock "go.uber.org/mock/gomock"
 )
 

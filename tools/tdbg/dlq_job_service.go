@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/urfave/cli/v2"
-	"go.temporal.io/server/api/adminservice/v1"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
 )
 
 type (

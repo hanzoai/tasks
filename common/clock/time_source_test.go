@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/server/common/clock"
+	"github.com/hanzoai/tasks/common/clock"
 )
 
 func TestNewRealClock_Now(t *testing.T) {

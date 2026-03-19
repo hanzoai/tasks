@@ -13,9 +13,9 @@ import (
 	reflect "reflect"
 
 	workflowservice "go.temporal.io/api/workflowservice/v1"
-	adminservice "go.temporal.io/server/api/adminservice/v1"
-	historyservice "go.temporal.io/server/api/historyservice/v1"
-	matchingservice "go.temporal.io/server/api/matchingservice/v1"
+	adminservice "github.com/hanzoai/tasks/api/adminservice/v1"
+	historyservice "github.com/hanzoai/tasks/api/historyservice/v1"
+	matchingservice "github.com/hanzoai/tasks/api/matchingservice/v1"
 	gomock "go.uber.org/mock/gomock"
 	grpc "google.golang.org/grpc"
 )

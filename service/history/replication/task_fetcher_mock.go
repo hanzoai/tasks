@@ -12,7 +12,7 @@ package replication
 import (
 	reflect "reflect"
 
-	quotas "go.temporal.io/server/common/quotas"
+	quotas "github.com/hanzoai/tasks/common/quotas"
 	gomock "go.uber.org/mock/gomock"
 )
 

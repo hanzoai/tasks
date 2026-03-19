@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"go.temporal.io/server/common/rpc"
+	"github.com/hanzoai/tasks/common/rpc"
 )
 
 var ErrResponseBodyTooLarge = errors.New("http: response body too large")

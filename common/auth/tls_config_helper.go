@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
 )
 
 var ErrTLSConfig = errors.New("unable to config TLS")

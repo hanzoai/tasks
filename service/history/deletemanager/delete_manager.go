@@ -6,17 +6,17 @@ import (
 	"context"
 
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/service/history/configs"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/tasks"
-	"go.temporal.io/server/service/history/workflow"
-	wcache "go.temporal.io/server/service/history/workflow/cache"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/visibility/manager"
+	"github.com/hanzoai/tasks/service/history/configs"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/tasks"
+	"github.com/hanzoai/tasks/service/history/workflow"
+	wcache "github.com/hanzoai/tasks/service/history/workflow/cache"
 )
 
 type (

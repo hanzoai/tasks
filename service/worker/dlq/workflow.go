@@ -13,14 +13,14 @@ import (
 	"go.temporal.io/sdk/temporal"
 	sdkworker "go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/api/adminservice/v1"
-	commonspb "go.temporal.io/server/api/common/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common/debug"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/primitives"
-	workercommon "go.temporal.io/server/service/worker/common"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	commonspb "github.com/hanzoai/tasks/api/common/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common/debug"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/primitives"
+	workercommon "github.com/hanzoai/tasks/service/worker/common"
 	"go.uber.org/fx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -39,7 +39,7 @@ type (
 
 	// Key uniquely identifies a DLQ.
 	Key struct {
-		// TaskCategoryID is the id used by [go.temporal.io/server/service/history/tasks.TaskCategoryRegistry].
+		// TaskCategoryID is the id used by [github.com/hanzoai/tasks/service/history/tasks.TaskCategoryRegistry].
 		TaskCategoryID int
 		// SourceCluster is the cluster that the replication tasks are coming from if the task category is replication.
 		// Otherwise, it is equal to TargetCluster, which is the cluster that both the DLQ workflow is running in, and

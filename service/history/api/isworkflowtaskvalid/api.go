@@ -3,12 +3,12 @@ package isworkflowtaskvalid
 import (
 	"context"
 
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/definition"
-	"go.temporal.io/server/service/history/api"
-	"go.temporal.io/server/service/history/consts"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/definition"
+	"github.com/hanzoai/tasks/service/history/api"
+	"github.com/hanzoai/tasks/service/history/consts"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 func Invoke(

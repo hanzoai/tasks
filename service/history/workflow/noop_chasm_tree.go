@@ -5,10 +5,10 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/chasm"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/tasks"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/chasm"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 var _ historyi.ChasmTree = (*noopChasmTree)(nil)

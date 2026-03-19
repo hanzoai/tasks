@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 // ErrUnknownService is thrown for a service that is not tracked by this instance

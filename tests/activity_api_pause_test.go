@@ -15,8 +15,8 @@ import (
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/util"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/util"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 func TestActivityApiPauseClientTestSuite(t *testing.T) {

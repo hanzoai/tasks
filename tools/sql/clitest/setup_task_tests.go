@@ -1,9 +1,9 @@
 package clitest
 
 import (
-	"go.temporal.io/server/common/shuffle"
-	"go.temporal.io/server/tools/common/schema/test"
-	"go.temporal.io/server/tools/sql"
+	"github.com/hanzoai/tasks/common/shuffle"
+	"github.com/hanzoai/tasks/tools/common/schema/test"
+	"github.com/hanzoai/tasks/tools/sql"
 )
 
 type (

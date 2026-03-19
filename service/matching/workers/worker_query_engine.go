@@ -8,7 +8,7 @@ import (
 	"github.com/temporalio/sqlparser"
 	"go.temporal.io/api/serviceerror"
 	workerpb "go.temporal.io/api/worker/v1"
-	"go.temporal.io/server/common/sqlquery"
+	"github.com/hanzoai/tasks/common/sqlquery"
 )
 
 const (

@@ -2,8 +2,8 @@ package telemetry
 
 import (
 	"go.opentelemetry.io/otel/trace"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/persistence"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/persistence"
 )
 
 type (

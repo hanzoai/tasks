@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	chasm "go.temporal.io/server/chasm"
-	namespace "go.temporal.io/server/common/namespace"
-	persistence "go.temporal.io/server/common/persistence"
+	chasm "github.com/hanzoai/tasks/chasm"
+	namespace "github.com/hanzoai/tasks/common/namespace"
+	persistence "github.com/hanzoai/tasks/common/persistence"
 	gomock "go.uber.org/mock/gomock"
 )
 

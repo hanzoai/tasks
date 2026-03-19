@@ -5,8 +5,8 @@ import (
 
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/service/history/tasks"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 // TODO: This should be part of persistence layer

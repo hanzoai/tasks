@@ -6,9 +6,9 @@ import (
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
 	updatepb "go.temporal.io/api/update/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/effect"
-	"go.temporal.io/server/service/history/workflow/update"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/effect"
+	"github.com/hanzoai/tasks/service/history/workflow/update"
 )
 
 var (

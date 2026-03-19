@@ -9,12 +9,12 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
-	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
-	"go.temporal.io/server/common/util"
-	"go.temporal.io/server/common/worker_versioning"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
+	hlc "github.com/hanzoai/tasks/common/clock/hybrid_logical_clock"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
+	"github.com/hanzoai/tasks/common/util"
+	"github.com/hanzoai/tasks/common/worker_versioning"
 )
 
 // Error used to signal that a queue has no versioning data. This shouldn't escape matching.

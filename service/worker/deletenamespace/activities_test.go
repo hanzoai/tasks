@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/temporal"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence"
 	"go.uber.org/mock/gomock"
 )
 

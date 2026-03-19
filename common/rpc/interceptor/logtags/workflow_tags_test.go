@@ -6,14 +6,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	tokenspb "go.temporal.io/server/api/token/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/rpc/interceptor/logtags"
-	"go.temporal.io/server/common/tasktoken"
-	"go.temporal.io/server/common/testing/testvars"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	tokenspb "github.com/hanzoai/tasks/api/token/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/rpc/interceptor/logtags"
+	"github.com/hanzoai/tasks/common/tasktoken"
+	"github.com/hanzoai/tasks/common/testing/testvars"
 )
 
 func TestExtract(t *testing.T) {

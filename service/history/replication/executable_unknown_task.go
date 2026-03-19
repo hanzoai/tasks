@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	ctasks "go.temporal.io/server/common/tasks"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	ctasks "github.com/hanzoai/tasks/common/tasks"
 )
 
 type (

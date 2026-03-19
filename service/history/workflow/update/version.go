@@ -1,5 +1,5 @@
 package update
 
-import "go.temporal.io/server/common/protocol"
+import "github.com/hanzoai/tasks/common/protocol"
 
 const ProtocolV1 = protocol.Type("temporal.api.update.v1")
