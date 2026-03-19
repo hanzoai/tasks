@@ -7,7 +7,7 @@ import (
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
 )
 
 type asyncWithCancelHandler struct {
@@ -34,7 +34,7 @@ func (h *asyncWithCancelHandler) CancelOperation(ctx context.Context, service, o
 	if h.expectHeader && options.Header.Get("foo") != "bar" {
 		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid 'foo' request header")
 	}
-	if options.Header.Get("User-Agent") != "temporalio/server" {
+	if options.Header.Get("User-Agent") != "hanzoai/tasks" {
 		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid 'User-Agent' header: %q", options.Header.Get("User-Agent"))
 	}
 	return nil

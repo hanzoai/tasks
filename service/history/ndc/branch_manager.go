@@ -6,14 +6,14 @@ import (
 	"context"
 
 	"go.temporal.io/api/serviceerror"
-	historyspb "go.temporal.io/server/api/history/v1"
-	"go.temporal.io/server/common/cluster"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/versionhistory"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	"github.com/hanzoai/tasks/common/cluster"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 const (

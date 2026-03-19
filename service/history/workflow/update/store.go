@@ -5,8 +5,8 @@ import (
 
 	historypb "go.temporal.io/api/history/v1"
 	updatepb "go.temporal.io/api/update/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/effect"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/effect"
 )
 
 type (

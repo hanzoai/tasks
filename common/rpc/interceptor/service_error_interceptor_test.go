@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

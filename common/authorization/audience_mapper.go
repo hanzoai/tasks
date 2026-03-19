@@ -3,7 +3,7 @@ package authorization
 import (
 	"context"
 
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/config"
 	"google.golang.org/grpc"
 )
 

@@ -3,9 +3,9 @@ package replication
 import (
 	"context"
 
-	"go.temporal.io/server/api/historyservice/v1"
-	historyi "go.temporal.io/server/service/history/interfaces"
-	"go.temporal.io/server/service/history/replication"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
+	"github.com/hanzoai/tasks/service/history/replication"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

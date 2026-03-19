@@ -3,7 +3,7 @@ package metrics
 import (
 	"time"
 
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 var (

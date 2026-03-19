@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
 )
 
 const (

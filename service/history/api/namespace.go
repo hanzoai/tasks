@@ -3,8 +3,8 @@ package api
 import (
 	"github.com/google/uuid"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/namespace"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	"github.com/hanzoai/tasks/common/namespace"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 func GetActiveNamespace(

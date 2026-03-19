@@ -12,7 +12,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/headers"
+	"github.com/hanzoai/tasks/common/headers"
 )
 
 const (
@@ -47,7 +47,7 @@ func buildServer(t *testing.T, srcDir, outputPath string) {
 		"build",
 		"-tags", "disable_grpc_modules",
 		"-o", outputPath,
-		"./cmd/server",
+		"./cmd/tasksd",
 	)
 	cmd.Dir = srcDir
 	out, err := cmd.CombinedOutput()

@@ -7,7 +7,7 @@ import (
 	"regexp"
 
 	historypb "go.temporal.io/api/history/v1"
-	"go.temporal.io/server/cmd/tools/codegen"
+	"github.com/hanzoai/tasks/cmd/tools/codegen"
 )
 
 type (

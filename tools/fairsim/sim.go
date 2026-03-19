@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"go.temporal.io/server/service/matching/counter"
+	"github.com/hanzoai/tasks/service/matching/counter"
 )
 
 // matches service/matching.strideFactor, but we don't want to export that

@@ -1,4 +1,4 @@
-module go.temporal.io/server
+module github.com/hanzoai/tasks
 
 go 1.26.0
 

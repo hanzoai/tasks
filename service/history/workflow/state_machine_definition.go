@@ -2,7 +2,7 @@ package workflow
 
 import (
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/service/history/hsm"
+	"github.com/hanzoai/tasks/service/history/hsm"
 )
 
 // TransactionPolicy indicates whether a mutable state transaction is happening for an active namespace or passive namespace.

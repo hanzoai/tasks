@@ -8,14 +8,14 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/log"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/softassert"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/log"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/nosql/nosqlplugin/cassandra/gocql"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/softassert"
 )
 
 const (

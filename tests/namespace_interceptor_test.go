@@ -11,9 +11,9 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/tests/testcore"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

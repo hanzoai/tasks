@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/clock"
+	"github.com/hanzoai/tasks/common/clock"
 )
 
 // addTasks is a helper which adds numberOfTasks to a taskTracker

@@ -8,9 +8,9 @@ import (
 
 	historypb "go.temporal.io/api/history/v1"
 	replicationpb "go.temporal.io/api/replication/v1"
-	historyspb "go.temporal.io/server/api/history/v1"
-	"go.temporal.io/server/common/codec"
-	"go.temporal.io/server/tests/testcore"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	"github.com/hanzoai/tasks/common/codec"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 var (

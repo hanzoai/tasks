@@ -13,9 +13,9 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/primitives"
 	"go.uber.org/mock/gomock"
 )
 

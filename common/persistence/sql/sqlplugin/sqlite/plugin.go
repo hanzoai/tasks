@@ -8,13 +8,13 @@ import (
 
 	"github.com/iancoleman/strcase"
 	"github.com/jmoiron/sqlx"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/persistence/sql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/resolver"
-	sqliteschema "go.temporal.io/server/schema/sqlite"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/persistence/sql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/resolver"
+	sqliteschema "github.com/hanzoai/tasks/schema/sqlite"
 	expmaps "golang.org/x/exp/maps"
 )
 

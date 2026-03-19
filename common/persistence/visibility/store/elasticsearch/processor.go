@@ -14,15 +14,15 @@ import (
 
 	"github.com/dgryski/go-farm"
 	"github.com/olivere/elastic/v7"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/collection"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/future"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/collection"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/future"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/elasticsearch/client"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 type (

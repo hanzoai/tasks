@@ -6,16 +6,16 @@ import (
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence/visibility/store"
-	"go.temporal.io/server/common/persistence/visibility/store/query"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/searchattribute"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/query"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/searchattribute"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 var elasticsearchQueryInvalidComparisonCounter = metrics.NewCounterDef("elasticsearch_query_invalid_comparison")

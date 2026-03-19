@@ -3,8 +3,8 @@ package queues
 import (
 	"fmt"
 
-	"go.temporal.io/server/common/predicates"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/predicates"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	expmaps "golang.org/x/exp/maps"
 )
 

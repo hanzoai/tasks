@@ -2,7 +2,7 @@ package workers
 
 import (
 	workerpb "go.temporal.io/api/worker/v1"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/common/namespace"
 )
 
 type (

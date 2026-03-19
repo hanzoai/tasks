@@ -1,7 +1,7 @@
 package persistence
 
 import (
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 const (

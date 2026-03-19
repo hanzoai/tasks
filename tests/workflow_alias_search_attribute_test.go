@@ -16,12 +16,12 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/workflow"
-	deploymentspb "go.temporal.io/server/api/deployment/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/common/payload"
-	"go.temporal.io/server/common/searchattribute/sadefs"
-	"go.temporal.io/server/common/testing/testvars"
-	"go.temporal.io/server/tests/testcore"
+	deploymentspb "github.com/hanzoai/tasks/api/deployment/v1"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/common/payload"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common/testing/testvars"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 type WorkflowAliasSearchAttributeTestSuite struct {

@@ -1,7 +1,7 @@
 package elasticsearch
 
 import (
-	"go.temporal.io/server/tools/common/schema/test"
+	"github.com/hanzoai/tasks/tools/common/schema/test"
 )
 
 type (

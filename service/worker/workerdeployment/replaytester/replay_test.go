@@ -15,9 +15,9 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
-	deploymentspb "go.temporal.io/server/api/deployment/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/service/worker/workerdeployment"
+	deploymentspb "github.com/hanzoai/tasks/api/deployment/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/service/worker/workerdeployment"
 )
 
 // TestReplays tests workflow logic backwards compatibility from previous versions.

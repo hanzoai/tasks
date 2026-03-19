@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/temporalio/sqlparser"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/persistence/visibility/store/query"
-	"go.temporal.io/server/common/searchattribute"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/query"
+	"github.com/hanzoai/tasks/common/searchattribute"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 type (

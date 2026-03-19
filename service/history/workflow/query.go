@@ -7,7 +7,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	querypb "go.temporal.io/api/query/v1"
 	"go.temporal.io/api/serviceerror"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 const (

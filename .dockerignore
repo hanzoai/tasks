@@ -11,7 +11,7 @@ develop/docker-compose
 
 # exclude binaries from the docker build context
 tdbg
-temporal-server
+tasksd
 temporal-cassandra-tool
 temporal-sql-tool
 temporal-elasticsearch-tool

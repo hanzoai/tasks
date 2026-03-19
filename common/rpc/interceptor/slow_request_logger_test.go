@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/rpc/interceptor"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/rpc/interceptor"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 )

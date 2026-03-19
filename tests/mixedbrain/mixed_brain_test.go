@@ -46,8 +46,8 @@ func TestMixedBrain(t *testing.T) {
 	tmpDir := t.TempDir()
 	logRoot := logDir(t)
 
-	currentBinary := filepath.Join(tmpDir, "temporal-server-current")
-	releaseBinary := filepath.Join(tmpDir, "temporal-server-release")
+	currentBinary := filepath.Join(tmpDir, "tasksd-current")
+	releaseBinary := filepath.Join(tmpDir, "tasksd-release")
 	omesBinary := filepath.Join(tmpDir, "omes-bin")
 
 	t.Run("setup", func(t *testing.T) {

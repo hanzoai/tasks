@@ -4,8 +4,8 @@ import (
 	"runtime/debug"
 
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
 )
 
 // CapturePanic is used to capture panic, it will emit the service panic metric, log the panic and also return the error through pointer.

@@ -7,11 +7,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/tests/testutils"
-	"go.temporal.io/server/tools/common/schema"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/tests/testutils"
+	"github.com/hanzoai/tasks/tools/common/schema"
 )
 
 type (

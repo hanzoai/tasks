@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
 )
 
 func BenchmarkCollection(b *testing.B) {

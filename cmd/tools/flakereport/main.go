@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"go.temporal.io/server/tools/flakereport"
+	"github.com/hanzoai/tasks/tools/flakereport"
 )
 
 func main() {

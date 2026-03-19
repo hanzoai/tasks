@@ -3,11 +3,11 @@ package shard
 import (
 	"time"
 
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/service/history/configs"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/service/history/configs"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 type (

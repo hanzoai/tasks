@@ -8,9 +8,9 @@ import (
 
 	"github.com/iancoleman/strcase"
 	"github.com/jmoiron/sqlx"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql/driver"
-	"go.temporal.io/server/common/resolver"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/postgresql/driver"
+	"github.com/hanzoai/tasks/common/resolver"
 )
 
 const (
