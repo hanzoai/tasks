@@ -1,0 +1,72 @@
+# Hanzo Tasks Ingress
+#   tasks.hanzo.ai     -> tasks-ui:80  (Web UI with IAM SSO)
+#   tasks-api.hanzo.ai -> tasks:7233   (gRPC for workers)
+#
+# DNS (Cloudflare proxied -> 24.199.76.156):
+#   tasks.hanzo.ai     A -> 24.199.76.156
+#   tasks-api.hanzo.ai A -> 24.199.76.156
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tasks-ui-ingress
+  namespace: hanzo
+  labels:
+    app: tasks-ui
+    app.kubernetes.io/name: tasks
+    app.kubernetes.io/part-of: hanzo-platform
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: ingress
+  tls:
+    - hosts:
+        - tasks.hanzo.ai
+      secretName: tasks-hanzo-ai-tls
+  rules:
+    - host: tasks.hanzo.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tasks-ui
+                port:
+                  number: 80
+---
+# gRPC ingress for Tasks workers
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tasks-api-ingress
+  namespace: hanzo
+  labels:
+    app: tasks
+    app.kubernetes.io/name: tasks
+    app.kubernetes.io/part-of: hanzo-platform
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/backend-protocol: GRPC
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/server-snippet: |
+      grpc_read_timeout 3600s;
+      grpc_send_timeout 3600s;
+spec:
+  ingressClassName: ingress
+  tls:
+    - hosts:
+        - tasks-api.hanzo.ai
+      secretName: tasks-api-hanzo-ai-tls
+  rules:
+    - host: tasks-api.hanzo.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tasks
+                port:
+                  number: 7233

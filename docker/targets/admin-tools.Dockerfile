@@ -11,8 +11,8 @@ ARG TARGETARCH
 
 RUN apk add --no-cache \
     ca-certificates \
-    tzdata && addgroup -g 1000 temporal && \
-    adduser -u 1000 -G temporal -D temporal
+    tzdata && addgroup -g 1000 tasks && \
+    adduser -u 1000 -G tasks -D tasks
 
 # Copy all admin tool binaries:
 # - temporal (CLI)
@@ -28,8 +28,8 @@ COPY --chmod=755 \
     ./build/${TARGETARCH}/tdbg \
     /usr/local/bin/
 
-COPY ./build/temporal/schema /etc/temporal/schema
+COPY ./build/temporal/schema /etc/tasks/schema
 
-USER temporal
+USER tasks
 
 CMD ["sh", "-c", "trap exit INT HUP TERM; sleep infinity"]
