@@ -34,7 +34,7 @@ type HTTPClientOptions struct {
 }
 
 // User-Agent header set on HTTP requests.
-const userAgent = "temporalio/server"
+const userAgent = "hanzoai/tasks"
 
 const headerUserAgent = "User-Agent"
 

@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/rpc"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/rpc"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 )

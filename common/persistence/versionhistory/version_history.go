@@ -2,8 +2,8 @@ package versionhistory
 
 import (
 	"go.temporal.io/api/serviceerror"
-	historyspb "go.temporal.io/server/api/history/v1"
-	"go.temporal.io/server/common"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	"github.com/hanzoai/tasks/common"
 )
 
 // NewVersionHistory create a new instance of VersionHistory.

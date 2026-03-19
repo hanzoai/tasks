@@ -5,8 +5,8 @@ import (
 	"io"
 
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/service/history/tasks"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )

@@ -10,31 +10,31 @@ import (
 	_ "time/tzdata" // embed tzdata as a fallback
 
 	"github.com/urfave/cli/v2"
-	"go.temporal.io/server/common/authorization"
-	"go.temporal.io/server/common/build"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/debug"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"      // needed to load mysql plugin
-	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql" // needed to load postgresql plugin
-	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"     // needed to load sqlite plugin
-	"go.temporal.io/server/temporal"
+	"github.com/hanzoai/tasks/common/authorization"
+	"github.com/hanzoai/tasks/common/build"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/debug"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	_ "github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/mysql"      // needed to load mysql plugin
+	_ "github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/postgresql" // needed to load postgresql plugin
+	_ "github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/sqlite"     // needed to load sqlite plugin
+	"github.com/hanzoai/tasks/temporal"
 )
 
-// main entry point for the temporal server
+// main entry point for the Hanzo Tasks server
 func main() {
 	app := buildCLI()
 	_ = app.Run(os.Args)
 }
 
-// buildCLI is the main entry point for the temporal server
+// buildCLI is the main entry point for the Hanzo Tasks server
 func buildCLI() *cli.App {
 	app := cli.NewApp()
-	app.Name = "temporal"
-	app.Usage = "Temporal server"
+	app.Name = "tasksd"
+	app.Usage = "Hanzo Tasks server"
 	app.Version = headers.ServerVersion
 	app.ArgsUsage = " "
 	app.Flags = []cli.Flag{
@@ -124,7 +124,7 @@ func buildCLI() *cli.App {
 		},
 		{
 			Name:      "start",
-			Usage:     "Start Temporal server",
+			Usage:     "Start Hanzo Tasks server",
 			ArgsUsage: " ",
 			Flags: []cli.Flag{
 				&cli.StringFlag{

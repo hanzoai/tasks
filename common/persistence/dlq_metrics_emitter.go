@@ -5,13 +5,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 const (

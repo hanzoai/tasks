@@ -3,8 +3,8 @@ package scheduler
 import (
 	"time"
 
-	schedulespb "go.temporal.io/server/api/schedule/v1"
-	"go.temporal.io/server/chasm"
+	schedulespb "github.com/hanzoai/tasks/api/schedule/v1"
+	"github.com/hanzoai/tasks/chasm"
 )
 
 // Export unexported methods for testing.

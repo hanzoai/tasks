@@ -15,10 +15,10 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/tests/testcore"
 	"google.golang.org/grpc/codes"
 )
 

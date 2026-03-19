@@ -514,7 +514,7 @@ const file_temporal_server_chasm_lib_activity_proto_v1_request_response_proto_ra
 	"%RequestCancelActivityExecutionRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12q\n" +
 	"\x10frontend_request\x18\x02 \x01(\v2F.temporal.api.workflowservice.v1.RequestCancelActivityExecutionRequestR\x0ffrontendRequest\"(\n" +
-	"&RequestCancelActivityExecutionResponseBDZBgo.temporal.io/server/chasm/lib/activity/gen/activitypb;activitypbb\x06proto3"
+	"&RequestCancelActivityExecutionResponseBDZBgithub.com/hanzoai/tasks/chasm/lib/activity/gen/activitypb;activitypbb\x06proto3"
 
 var (
 	file_temporal_server_chasm_lib_activity_proto_v1_request_response_proto_rawDescOnce sync.Once

@@ -6,11 +6,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/mock"
-	"go.temporal.io/server/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/mock"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
 	"go.uber.org/mock/gomock"
 )
 

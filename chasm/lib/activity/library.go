@@ -1,8 +1,8 @@
 package activity
 
 import (
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/activity/gen/activitypb/v1"
 	"google.golang.org/grpc"
 )
 

@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
-	metricsspb "go.temporal.io/server/api/metrics/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
+	metricsspb "github.com/hanzoai/tasks/api/metrics/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )

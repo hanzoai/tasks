@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	commonclock "go.temporal.io/server/common/clock"
-	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
-	"go.temporal.io/server/common/testing/protoassert"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	commonclock "github.com/hanzoai/tasks/common/clock"
+	hlc "github.com/hanzoai/tasks/common/clock/hybrid_logical_clock"
+	"github.com/hanzoai/tasks/common/testing/protoassert"
 	"google.golang.org/protobuf/proto"
 )
 

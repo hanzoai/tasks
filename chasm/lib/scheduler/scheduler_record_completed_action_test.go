@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
-	schedulespb "go.temporal.io/server/api/schedule/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/scheduler"
+	schedulespb "github.com/hanzoai/tasks/api/schedule/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/scheduler"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

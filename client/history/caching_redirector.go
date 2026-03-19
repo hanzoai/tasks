@@ -9,13 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/goro"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/membership"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/goro"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/membership"
+	serviceerrors "github.com/hanzoai/tasks/common/serviceerror"
 )
 
 type (

@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.temporal.io/server/common/clock"
+	"github.com/hanzoai/tasks/common/clock"
 )
 
 func TestGradualChangeValue_BeforeAfter(t *testing.T) {

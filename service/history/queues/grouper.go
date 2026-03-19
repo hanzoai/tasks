@@ -1,8 +1,8 @@
 package queues
 
 import (
-	"go.temporal.io/server/common/predicates"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/predicates"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 // Grouper groups tasks and constructs predicates for those groups.

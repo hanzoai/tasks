@@ -6,12 +6,12 @@ package matching
 import (
 	"time"
 
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/tqid"
-	"go.temporal.io/server/components/nexusoperations"
-	"go.temporal.io/server/service/matching/counter"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/tqid"
+	"github.com/hanzoai/tasks/components/nexusoperations"
+	"github.com/hanzoai/tasks/service/matching/counter"
 )
 
 type (

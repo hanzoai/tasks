@@ -8,12 +8,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/temporalio/ringpop-go"
 	"github.com/temporalio/tchannel-go"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/membership"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/membership"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/primitives"
 	"go.uber.org/mock/gomock"
 )
 

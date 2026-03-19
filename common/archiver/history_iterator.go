@@ -9,9 +9,9 @@ import (
 
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
-	archiverspb "go.temporal.io/server/api/archiver/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/persistence"
+	archiverspb "github.com/hanzoai/tasks/api/archiver/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/persistence"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )

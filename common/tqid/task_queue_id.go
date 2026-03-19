@@ -9,7 +9,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	taskqueuespb "github.com/hanzoai/tasks/api/taskqueue/v1"
 )
 
 const (

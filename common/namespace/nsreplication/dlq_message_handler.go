@@ -6,10 +6,10 @@ import (
 	"context"
 
 	"go.temporal.io/api/serviceerror"
-	replicationspb "go.temporal.io/server/api/replication/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/persistence"
+	replicationspb "github.com/hanzoai/tasks/api/replication/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/persistence"
 )
 
 type (

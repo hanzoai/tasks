@@ -4,9 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/server/common/clock"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/common/clock"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 var _ Monitor = (*monitorImpl)(nil)

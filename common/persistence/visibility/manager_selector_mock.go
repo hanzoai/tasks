@@ -12,8 +12,8 @@ package visibility
 import (
 	reflect "reflect"
 
-	namespace "go.temporal.io/server/common/namespace"
-	manager "go.temporal.io/server/common/persistence/visibility/manager"
+	namespace "github.com/hanzoai/tasks/common/namespace"
+	manager "github.com/hanzoai/tasks/common/persistence/visibility/manager"
 	gomock "go.uber.org/mock/gomock"
 )
 

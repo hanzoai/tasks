@@ -6,11 +6,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/temporalio/sqlparser"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"
-	"go.temporal.io/server/common/searchattribute"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/mysql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/postgresql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/sqlite"
+	"github.com/hanzoai/tasks/common/searchattribute"
 )
 
 var pluginNames = []string{

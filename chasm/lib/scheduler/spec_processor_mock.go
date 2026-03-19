@@ -14,7 +14,7 @@ import (
 	time "time"
 
 	enums "go.temporal.io/api/enums/v1"
-	scheduler "go.temporal.io/server/service/worker/scheduler"
+	scheduler "github.com/hanzoai/tasks/service/worker/scheduler"
 	gomock "go.uber.org/mock/gomock"
 )
 

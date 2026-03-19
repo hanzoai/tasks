@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/server/service/history/tasks"
+	"github.com/hanzoai/tasks/service/history/tasks"
 )
 
 func TestGetArchivalTaskTypeTagValue(t *testing.T) {

@@ -15,11 +15,11 @@ import (
 	updatepb "go.temporal.io/api/update/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/sdk/worker"
-	deploymentspb "go.temporal.io/server/api/deployment/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/worker_versioning"
+	deploymentspb "github.com/hanzoai/tasks/api/deployment/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/worker_versioning"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

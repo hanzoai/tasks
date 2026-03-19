@@ -3,9 +3,9 @@ package testcore
 import (
 	"time"
 
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/persistence/visibility"
-	"go.temporal.io/server/components/nexusoperations"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/persistence/visibility"
+	"github.com/hanzoai/tasks/components/nexusoperations"
 )
 
 var (

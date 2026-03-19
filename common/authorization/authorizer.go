@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"go.temporal.io/server/common/config"
+	"github.com/hanzoai/tasks/common/config"
 )
 
 const (

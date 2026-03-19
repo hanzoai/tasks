@@ -7,7 +7,7 @@ import (
 	"net"
 	"net/http"
 
-	"go.temporal.io/server/common/testing/nettest"
+	"github.com/hanzoai/tasks/common/testing/nettest"
 )
 
 func ExampleListener() {

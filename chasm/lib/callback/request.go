@@ -6,12 +6,12 @@ import (
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/cluster"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/namespace"
-	commonnexus "go.temporal.io/server/common/nexus"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/cluster"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/namespace"
+	commonnexus "github.com/hanzoai/tasks/common/nexus"
 )
 
 // Header key used to identify callbacks that originate from and target the same cluster.
