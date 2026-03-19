@@ -18,6 +18,9 @@ metadata:
   namespace: hanzo
   labels:
     app: tasks
+    app.kubernetes.io/managed-by: hanzo-universe
+    app.kubernetes.io/name: tasks
+    app.kubernetes.io/part-of: hanzo-platform
 spec:
   replicas: 1
   strategy:
@@ -25,10 +28,16 @@ spec:
   selector:
     matchLabels:
       app: tasks
+      app.kubernetes.io/managed-by: hanzo-universe
+      app.kubernetes.io/name: tasks
+      app.kubernetes.io/part-of: hanzo-platform
   template:
     metadata:
       labels:
         app: tasks
+        app.kubernetes.io/managed-by: hanzo-universe
+        app.kubernetes.io/name: tasks
+        app.kubernetes.io/part-of: hanzo-platform
     spec:
       imagePullSecrets:
         - name: ghcr-secret
@@ -96,18 +105,24 @@ spec:
                   key: IAM_CLIENT_SECRET
 
             # -- JWT Auth (server-side token validation) --
-            # The Tasks server validates JWTs from the UI using hanzo.id JWKS.
-            # In-cluster: use internal IAM URL for JWKS to avoid hairpin routing.
-            - name: TEMPORAL_JWT_KEY_SOURCE1
-              value: "http://iam.hanzo.svc/.well-known/jwks"
-            - name: TEMPORAL_JWT_KEY_REFRESH
-              value: "5m"
-            - name: TEMPORAL_AUTH_AUTHORIZER
-              value: "default"
-            - name: TEMPORAL_AUTH_CLAIM_MAPPER
-              value: "default"
-            - name: TEMPORAL_JWT_PERMISSIONS_CLAIM
-              value: "permissions"
+            # TODO: Enable server-side JWT validation once internal-frontend
+            # is properly configured. Requires USE_INTERNAL_FRONTEND=true
+            # and the internal frontend port (7236) to be accessible to the
+            # worker service. Without this, the internal system workers
+            # (scanner, archiver) fail with "Request unauthorized" because
+            # they connect to the public frontend without a JWT token.
+            #
+            # For now, auth is handled at the UI layer only (OIDC login).
+            # The gRPC API (tasks-api.hanzo.ai) is network-restricted via
+            # ingress to internal workers only.
+            #
+            # Env vars for future enablement:
+            #   USE_INTERNAL_FRONTEND: "true"
+            #   TEMPORAL_JWT_KEY_SOURCE1: "http://iam.hanzo.svc/.well-known/jwks"
+            #   TEMPORAL_JWT_KEY_REFRESH: "5m"
+            #   TEMPORAL_AUTH_AUTHORIZER: "default"
+            #   TEMPORAL_AUTH_CLAIM_MAPPER: "default"
+            #   TEMPORAL_JWT_PERMISSIONS_CLAIM: "permissions"
 
             # -- OTEL Tracing --
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -210,6 +225,9 @@ metadata:
   namespace: hanzo
   labels:
     app: tasks-ui
+    app.kubernetes.io/managed-by: hanzo-universe
+    app.kubernetes.io/name: tasks
+    app.kubernetes.io/part-of: hanzo-platform
 spec:
   replicas: 1
   strategy:
@@ -220,10 +238,16 @@ spec:
   selector:
     matchLabels:
       app: tasks-ui
+      app.kubernetes.io/managed-by: hanzo-universe
+      app.kubernetes.io/name: tasks
+      app.kubernetes.io/part-of: hanzo-platform
   template:
     metadata:
       labels:
         app: tasks-ui
+        app.kubernetes.io/managed-by: hanzo-universe
+        app.kubernetes.io/name: tasks
+        app.kubernetes.io/part-of: hanzo-platform
     spec:
       imagePullSecrets:
         - name: ghcr-secret
