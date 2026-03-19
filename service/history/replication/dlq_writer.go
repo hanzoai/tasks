@@ -3,17 +3,17 @@ package replication
 import (
 	"context"
 
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/service/history/configs"
-	"go.temporal.io/server/service/history/queues"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/service/history/configs"
+	"github.com/hanzoai/tasks/service/history/queues"
 	"go.uber.org/fx"
 )
 
 type (
 	// DLQWriter is an interface that can be implemented easily by the two different queue solutions that we have.
 	// - Queue V1 implements this interface via [persistence.ExecutionManager].
-	// - Queue V2 will implement this interface via [go.temporal.io/server/service/history/queues.DLQWriter].
+	// - Queue V2 will implement this interface via [github.com/hanzoai/tasks/service/history/queues.DLQWriter].
 	//
 	// We want this interface to make the migration referenced by [persistence.QueueV2] easier.
 	DLQWriter interface {
@@ -26,7 +26,7 @@ type (
 		TargetShardID       int32
 		ReplicationTaskInfo *persistencespb.ReplicationTaskInfo
 	}
-	// ExecutionManager is a trimmed version of [go.temporal.io/server/common/persistence.ExecutionManager] that only
+	// ExecutionManager is a trimmed version of [github.com/hanzoai/tasks/common/persistence.ExecutionManager] that only
 	// provides the methods we need.
 	ExecutionManager interface {
 		PutReplicationTaskToDLQ(

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	commandpb "go.temporal.io/api/command/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/headers"
+	"github.com/hanzoai/tasks/common/headers"
 )
 
 func TestDisableEagerActivityDispatchForBuggyClients(t *testing.T) {

@@ -4,9 +4,9 @@ import (
 	"sync"
 
 	"github.com/jmoiron/sqlx"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/resolver"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/resolver"
 )
 
 // This pool properly enabled the support for SQLite in the temporal server.

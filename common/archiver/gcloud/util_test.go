@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	historypb "go.temporal.io/api/history/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/codec"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/codec"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

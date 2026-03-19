@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
 )
 
 type Context interface {

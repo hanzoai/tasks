@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/temporalio/sqlparser"
-	"go.temporal.io/server/common/sqlquery"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/sqlquery"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 type (

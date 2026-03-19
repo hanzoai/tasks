@@ -9,10 +9,10 @@ import (
 
 	"github.com/dgryski/go-farm"
 	schedulepb "go.temporal.io/api/schedule/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/cache"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/cache"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/util"
 )
 
 type (

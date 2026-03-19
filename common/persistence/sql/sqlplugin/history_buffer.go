@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 type (

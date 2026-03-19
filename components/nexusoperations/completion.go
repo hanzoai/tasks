@@ -11,8 +11,8 @@ import (
 	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
-	commonnexus "go.temporal.io/server/common/nexus"
-	"go.temporal.io/server/service/history/hsm"
+	commonnexus "github.com/hanzoai/tasks/common/nexus"
+	"github.com/hanzoai/tasks/service/history/hsm"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

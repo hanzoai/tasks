@@ -12,8 +12,8 @@ package elasticsearch
 import (
 	reflect "reflect"
 
-	future "go.temporal.io/server/common/future"
-	client "go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
+	future "github.com/hanzoai/tasks/common/future"
+	client "github.com/hanzoai/tasks/common/persistence/visibility/store/elasticsearch/client"
 	gomock "go.uber.org/mock/gomock"
 )
 

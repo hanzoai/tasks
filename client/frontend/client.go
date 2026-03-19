@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/common/debug"
+	"github.com/hanzoai/tasks/common/debug"
 )
 
 const (

@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/persistencetest"
-	"go.temporal.io/server/common/persistence/serialization"
-	"go.temporal.io/server/common/persistence/sql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/tests"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/persistencetest"
+	"github.com/hanzoai/tasks/common/persistence/serialization"
+	"github.com/hanzoai/tasks/common/persistence/sql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/tests"
 )
 
 // RunQueueV2TestSuite executes interface-level tests for a queue persistence-layer implementation. There should be more

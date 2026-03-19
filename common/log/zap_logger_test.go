@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/tests/testutils"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/tests/testutils"
 	"go.uber.org/zap"
 )
 

@@ -9,12 +9,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/rpc"
-	"go.temporal.io/server/common/rpc/encryption"
-	"go.temporal.io/server/tests/testutils"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/rpc"
+	"github.com/hanzoai/tasks/common/rpc/encryption"
+	"github.com/hanzoai/tasks/tests/testutils"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/credentials"
 )

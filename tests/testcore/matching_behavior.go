@@ -1,8 +1,8 @@
 package testcore
 
 import (
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/testing/testhooks"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/testing/testhooks"
 )
 
 // MatchingBehavior describes a test scenario for matching service behavior.

@@ -15,12 +15,12 @@ import (
 	"weak"
 
 	"github.com/mitchellh/mapstructure"
-	"go.temporal.io/server/common/goro"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/pingable"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/util"
+	"github.com/hanzoai/tasks/common/goro"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/pingable"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/util"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 

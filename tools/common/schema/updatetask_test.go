@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/log"
-	dbschemas "go.temporal.io/server/schema"
-	"go.temporal.io/server/tests/testutils"
+	"github.com/hanzoai/tasks/common/log"
+	dbschemas "github.com/hanzoai/tasks/schema"
+	"github.com/hanzoai/tasks/tests/testutils"
 	"go.uber.org/zap/zaptest"
 )
 

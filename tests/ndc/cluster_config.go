@@ -3,8 +3,8 @@ package ndc
 import (
 	"fmt"
 
-	"go.temporal.io/server/common/cluster"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/cluster"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 func clustersConfig(clusterNames ...string) []*testcore.TestClusterConfig {

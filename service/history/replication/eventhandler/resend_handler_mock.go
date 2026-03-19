@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	namespace "go.temporal.io/server/common/namespace"
+	namespace "github.com/hanzoai/tasks/common/namespace"
 	gomock "go.uber.org/mock/gomock"
 )
 

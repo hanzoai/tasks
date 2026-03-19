@@ -1,7 +1,7 @@
 package ringpop
 
 import (
-	"go.temporal.io/server/common/membership"
+	"github.com/hanzoai/tasks/common/membership"
 	"go.uber.org/fx"
 )
 

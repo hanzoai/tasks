@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 	time "time"
 
-	persistence "go.temporal.io/server/api/persistence/v1"
+	persistence "github.com/hanzoai/tasks/api/persistence/v1"
 	gomock "go.uber.org/mock/gomock"
 )
 

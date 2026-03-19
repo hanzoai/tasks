@@ -4,8 +4,8 @@ import (
 	"context"
 
 	workflowpb "go.temporal.io/api/workflow/v1"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/worker_versioning"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/worker_versioning"
 )
 
 // VersionReactivationSignalerFn is a function type for sending reactivation signals to version workflows.

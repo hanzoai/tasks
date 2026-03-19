@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"go.temporal.io/server/common/api"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/log/tag"
-	"go.temporal.io/server/common/rpc/interceptor/logtags"
-	"go.temporal.io/server/common/tasktoken"
+	"github.com/hanzoai/tasks/common/api"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/log/tag"
+	"github.com/hanzoai/tasks/common/rpc/interceptor/logtags"
+	"github.com/hanzoai/tasks/common/tasktoken"
 	"google.golang.org/grpc"
 )
 

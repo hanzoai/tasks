@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/debug"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/testing/protorequire"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/backoff"
+	"github.com/hanzoai/tasks/common/debug"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

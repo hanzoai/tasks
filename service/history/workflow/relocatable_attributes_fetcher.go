@@ -4,10 +4,10 @@ import (
 	"context"
 
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/service/history/configs"
-	historyi "go.temporal.io/server/service/history/interfaces"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/persistence/visibility/manager"
+	"github.com/hanzoai/tasks/service/history/configs"
+	historyi "github.com/hanzoai/tasks/service/history/interfaces"
 )
 
 // RelocatableAttributesFetcher is used to fetch the relocatable attributes from the mutable state.

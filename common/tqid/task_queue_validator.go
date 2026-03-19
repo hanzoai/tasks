@@ -6,8 +6,8 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	"go.temporal.io/server/common/enums"
-	"go.temporal.io/server/common/primitives"
+	"github.com/hanzoai/tasks/common/enums"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 const (

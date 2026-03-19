@@ -10,8 +10,8 @@ import (
 	reflect "reflect"
 	unsafe "unsafe"
 
-	_ "go.temporal.io/server/api/common/v1"
-	_ "go.temporal.io/server/api/routing/v1"
+	_ "github.com/hanzoai/tasks/api/common/v1"
+	_ "github.com/hanzoai/tasks/api/routing/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
@@ -35,7 +35,7 @@ const file_temporal_server_chasm_lib_scheduler_proto_v1_service_proto_rawDesc = 
 	"\x0eDeleteSchedule\x12C.temporal.server.chasm.lib.scheduler.proto.v1.DeleteScheduleRequest\x1aD.temporal.server.chasm.lib.scheduler.proto.v1.DeleteScheduleResponse\"(\x92\xc4\x03\x1e\x1a\x1cfrontend_request.schedule_id\x8a\xb5\x18\x02\b\x01\x12\xcb\x01\n" +
 	"\x10DescribeSchedule\x12E.temporal.server.chasm.lib.scheduler.proto.v1.DescribeScheduleRequest\x1aF.temporal.server.chasm.lib.scheduler.proto.v1.DescribeScheduleResponse\"(\x92\xc4\x03\x1e\x1a\x1cfrontend_request.schedule_id\x8a\xb5\x18\x02\b\x01\x12\xe6\x01\n" +
 	"\x19ListScheduleMatchingTimes\x12N.temporal.server.chasm.lib.scheduler.proto.v1.ListScheduleMatchingTimesRequest\x1aO.temporal.server.chasm.lib.scheduler.proto.v1.ListScheduleMatchingTimesResponse\"(\x92\xc4\x03\x1e\x1a\x1cfrontend_request.schedule_id\x8a\xb5\x18\x02\b\x01\x12\xe2\x01\n" +
-	"\x18CreateFromMigrationState\x12M.temporal.server.chasm.lib.scheduler.proto.v1.CreateFromMigrationStateRequest\x1aN.temporal.server.chasm.lib.scheduler.proto.v1.CreateFromMigrationStateResponse\"'\x92\xc4\x03#\x1a!state.scheduler_state.schedule_idBGZEgo.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb;schedulerpbb\x06proto3"
+	"\x18CreateFromMigrationState\x12M.temporal.server.chasm.lib.scheduler.proto.v1.CreateFromMigrationStateRequest\x1aN.temporal.server.chasm.lib.scheduler.proto.v1.CreateFromMigrationStateResponse\"'\x92\xc4\x03#\x1a!state.scheduler_state.schedule_idBGZEgithub.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb;schedulerpbb\x06proto3"
 
 var file_temporal_server_chasm_lib_scheduler_proto_v1_service_proto_goTypes = []any{
 	(*CreateScheduleRequest)(nil),             // 0: temporal.server.chasm.lib.scheduler.proto.v1.CreateScheduleRequest

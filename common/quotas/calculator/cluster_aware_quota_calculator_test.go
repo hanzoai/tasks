@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/quotas/quotastest"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/quotas/quotastest"
 )
 
 type quotaCalculatorTestCase struct {
