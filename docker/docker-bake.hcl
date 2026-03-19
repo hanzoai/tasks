@@ -7,7 +7,7 @@ variable "CLI_VERSION" {
 }
 
 variable "IMAGE_REPO" {
-  default = "temporaliotest"
+  default = "ghcr.io/hanzoai"
 }
 
 variable "IMAGE_SHA_SHORT_TAG" {
@@ -50,22 +50,22 @@ target "admin-tools" {
     ALPINE_TAG = "${ALPINE_TAG}"
   }
   tags = compact([
-    "${IMAGE_REPO}/admin-tools:${IMAGE_SHA_SHORT_TAG}",
-    "${IMAGE_REPO}/admin-tools:${IMAGE_SHA_FULL_TAG}",
-    "${IMAGE_REPO}/admin-tools:${SAFE_IMAGE_BRANCH_TAG}",
-    TAG_LATEST ? "${IMAGE_REPO}/admin-tools:latest" : "",
+    "${IMAGE_REPO}/tasks-admin-tools:${IMAGE_SHA_SHORT_TAG}",
+    "${IMAGE_REPO}/tasks-admin-tools:${IMAGE_SHA_FULL_TAG}",
+    "${IMAGE_REPO}/tasks-admin-tools:${SAFE_IMAGE_BRANCH_TAG}",
+    TAG_LATEST ? "${IMAGE_REPO}/tasks-admin-tools:latest" : "",
   ])
   platforms = ["linux/amd64", "linux/arm64"]
   labels = {
-    "org.opencontainers.image.title" = "admin-tools"
-    "org.opencontainers.image.description" = "Temporal admin tools"
-    "org.opencontainers.image.url" = "https://github.com/temporalio/temporal"
-    "org.opencontainers.image.source" = "https://github.com/temporalio/temporal"
+    "org.opencontainers.image.title" = "tasks-admin-tools"
+    "org.opencontainers.image.description" = "Hanzo Tasks admin tools"
+    "org.opencontainers.image.url" = "https://github.com/hanzoai/tasks"
+    "org.opencontainers.image.source" = "https://github.com/hanzoai/tasks"
     "org.opencontainers.image.licenses" = "MIT"
     "org.opencontainers.image.revision" = "${TEMPORAL_SHA}"
     "org.opencontainers.image.created" = timestamp()
-    "com.temporal.server.version" = "${SERVER_VERSION}"
-    "com.temporal.cli.version" = "${CLI_VERSION}"
+    "com.hanzo.tasks.version" = "${SERVER_VERSION}"
+    "com.hanzo.tasks.cli-version" = "${CLI_VERSION}"
   }
 }
 
@@ -76,21 +76,21 @@ target "server" {
     ALPINE_TAG = "${ALPINE_TAG}"
   }
   tags = compact([
-    "${IMAGE_REPO}/server:${IMAGE_SHA_SHORT_TAG}",
-    "${IMAGE_REPO}/server:${IMAGE_SHA_FULL_TAG}",
-    "${IMAGE_REPO}/server:${SAFE_IMAGE_BRANCH_TAG}",
-    TAG_LATEST ? "${IMAGE_REPO}/server:latest" : "",
+    "${IMAGE_REPO}/tasks:${IMAGE_SHA_SHORT_TAG}",
+    "${IMAGE_REPO}/tasks:${IMAGE_SHA_FULL_TAG}",
+    "${IMAGE_REPO}/tasks:${SAFE_IMAGE_BRANCH_TAG}",
+    TAG_LATEST ? "${IMAGE_REPO}/tasks:latest" : "",
   ])
   platforms = ["linux/amd64", "linux/arm64"]
   labels = {
-    "org.opencontainers.image.title" = "server"
-    "org.opencontainers.image.description" = "Temporal Server"
-    "org.opencontainers.image.url" = "https://github.com/temporalio/temporal"
-    "org.opencontainers.image.source" = "https://github.com/temporalio/temporal"
+    "org.opencontainers.image.title" = "tasks"
+    "org.opencontainers.image.description" = "Hanzo Tasks Server"
+    "org.opencontainers.image.url" = "https://github.com/hanzoai/tasks"
+    "org.opencontainers.image.source" = "https://github.com/hanzoai/tasks"
     "org.opencontainers.image.licenses" = "MIT"
     "org.opencontainers.image.version" = "${SERVER_VERSION}"
     "org.opencontainers.image.revision" = "${TEMPORAL_SHA}"
     "org.opencontainers.image.created" = timestamp()
-    "com.temporal.server.version" = "${SERVER_VERSION}"
+    "com.hanzo.tasks.version" = "${SERVER_VERSION}"
   }
 }

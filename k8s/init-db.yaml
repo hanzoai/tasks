@@ -1,0 +1,153 @@
+# One-time Job: Create PostgreSQL databases for Hanzo Tasks.
+#
+# The tasks server (Temporal-based) requires two databases on the shared
+# PostgreSQL instance (sql.hanzo.svc):
+#   - tasks              -- workflow execution state
+#   - tasks_visibility   -- advanced visibility / search attributes
+#
+# Both are owned by the "tasks" role whose password must already be stored
+# in KMS (project: hanzo-tasks, key: POSTGRES_PASSWORD) and synced to the
+# tasks-secrets K8s secret via kms-secrets.yaml.
+#
+# Prerequisites:
+#   - postgres-credentials secret exists in hanzo namespace (superuser password)
+#   - tasks-secrets secret exists in hanzo namespace (tasks user password)
+#   - sql StatefulSet is running and accepting connections
+#
+# Usage:
+#   kubectl apply -f init-db.yaml
+#   kubectl -n hanzo logs job/tasks-init-db -f
+#   kubectl -n hanzo delete job tasks-init-db      # cleanup after success
+#
+# THIS FILE IS NOT IN kustomization.yaml -- it is never applied during
+# normal `kubectl apply -k` upgrades. Manual apply only.
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tasks-init-db
+  namespace: hanzo
+  labels:
+    app: tasks
+    app.kubernetes.io/name: tasks
+    app.kubernetes.io/component: init-db
+    app.kubernetes.io/part-of: hanzo-platform
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: init-db
+        image: postgres:16-alpine
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+
+          PG_HOST="sql.hanzo.svc.cluster.local"
+          PG_USER="hanzo"
+
+          echo "=== Hanzo Tasks Database Initialization ==="
+          echo ""
+
+          # -- 1. Wait for PostgreSQL --
+          echo "[1/5] Waiting for PostgreSQL at ${PG_HOST}..."
+          until pg_isready -h "$PG_HOST" -p 5432 -U "$PG_USER" -q; do
+            echo "  ...waiting"
+            sleep 2
+          done
+          echo "[OK]  PostgreSQL is ready"
+          echo ""
+
+          # -- 2. Create tasks role (idempotent) --
+          echo "[2/5] Creating role: tasks"
+          ROLE_EXISTS=$(psql -h "$PG_HOST" -U "$PG_USER" -d hanzo -tAc \
+            "SELECT 1 FROM pg_roles WHERE rolname = 'tasks'")
+
+          # Escape single quotes in password for SQL safety
+          ESCAPED_PW=$(printf '%s' "$TASKS_PG_PASSWORD" | sed "s/'/''/g")
+
+          if [ "$ROLE_EXISTS" = "1" ]; then
+            echo "  [SKIP] Role tasks already exists -- updating password"
+            psql -h "$PG_HOST" -U "$PG_USER" -d hanzo \
+              -c "ALTER ROLE tasks WITH LOGIN PASSWORD '${ESCAPED_PW}'"
+          else
+            psql -h "$PG_HOST" -U "$PG_USER" -d hanzo \
+              -c "CREATE ROLE tasks WITH LOGIN PASSWORD '${ESCAPED_PW}'"
+            echo "  [OK]   Created role: tasks"
+          fi
+          echo ""
+
+          # -- 3. Create tasks database (idempotent) --
+          echo "[3/5] Creating database: tasks"
+          DB_EXISTS=$(psql -h "$PG_HOST" -U "$PG_USER" -d hanzo -tAc \
+            "SELECT 1 FROM pg_database WHERE datname = 'tasks'")
+
+          if [ "$DB_EXISTS" = "1" ]; then
+            echo "  [SKIP] Database tasks already exists"
+          else
+            createdb -h "$PG_HOST" -U "$PG_USER" -O tasks tasks
+            echo "  [OK]   Created database: tasks"
+          fi
+          echo ""
+
+          # -- 4. Create tasks_visibility database (idempotent) --
+          echo "[4/5] Creating database: tasks_visibility"
+          DB_VIS_EXISTS=$(psql -h "$PG_HOST" -U "$PG_USER" -d hanzo -tAc \
+            "SELECT 1 FROM pg_database WHERE datname = 'tasks_visibility'")
+
+          if [ "$DB_VIS_EXISTS" = "1" ]; then
+            echo "  [SKIP] Database tasks_visibility already exists"
+          else
+            createdb -h "$PG_HOST" -U "$PG_USER" -O tasks tasks_visibility
+            echo "  [OK]   Created database: tasks_visibility"
+          fi
+          echo ""
+
+          # -- 5. Grant privileges and verify --
+          echo "[5/5] Granting privileges"
+          psql -h "$PG_HOST" -U "$PG_USER" -d hanzo <<'SQL'
+          GRANT ALL PRIVILEGES ON DATABASE tasks TO tasks;
+          GRANT ALL PRIVILEGES ON DATABASE tasks_visibility TO tasks;
+          SQL
+          echo "  [OK]   Privileges granted"
+          echo ""
+
+          # -- Verification --
+          echo "=== Verification ==="
+          echo ""
+          echo "Databases:"
+          psql -h "$PG_HOST" -U "$PG_USER" -d hanzo -c \
+            "SELECT datname, pg_catalog.pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname IN ('tasks', 'tasks_visibility') ORDER BY datname"
+
+          echo "Role:"
+          psql -h "$PG_HOST" -U "$PG_USER" -d hanzo -c \
+            "SELECT rolname, rolcanlogin, rolcreatedb FROM pg_roles WHERE rolname = 'tasks'"
+
+          # Quick connectivity test as the tasks user
+          echo "Connectivity test (tasks user -> tasks db):"
+          PGPASSWORD="${TASKS_PG_PASSWORD}" psql -h "$PG_HOST" -U tasks -d tasks -c "SELECT current_user, current_database()" \
+            && echo "  [OK]   tasks user can connect to tasks database" \
+            || echo "  [FAIL] tasks user cannot connect to tasks database"
+
+          PGPASSWORD="${TASKS_PG_PASSWORD}" psql -h "$PG_HOST" -U tasks -d tasks_visibility -c "SELECT current_user, current_database()" \
+            && echo "  [OK]   tasks user can connect to tasks_visibility database" \
+            || echo "  [FAIL] tasks user cannot connect to tasks_visibility database"
+
+          echo ""
+          echo "=== DONE ==="
+          echo "Tasks databases are ready. Deploy the tasks server:"
+          echo "  kubectl apply -k k8s/"
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: TASKS_PG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: tasks-secrets
+              key: POSTGRES_PASSWORD
