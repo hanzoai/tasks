@@ -10,8 +10,8 @@ import (
 	failurepb "go.temporal.io/api/failure/v1"
 	schedulepb "go.temporal.io/api/schedule/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
-	schedulespb "go.temporal.io/server/api/schedule/v1"
-	schedulerpb "go.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb/v1"
+	schedulespb "github.com/hanzoai/tasks/api/schedule/v1"
+	schedulerpb "github.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

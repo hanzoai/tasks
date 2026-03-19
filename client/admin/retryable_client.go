@@ -3,8 +3,8 @@ package admin
 import (
 	"context"
 
-	"go.temporal.io/server/api/adminservice/v1"
-	"go.temporal.io/server/common/backoff"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	"github.com/hanzoai/tasks/common/backoff"
 	"google.golang.org/grpc"
 )
 

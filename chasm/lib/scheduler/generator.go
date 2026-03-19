@@ -3,9 +3,9 @@ package scheduler
 import (
 	"time"
 
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb/v1"
-	"go.temporal.io/server/service/worker/scheduler"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb/v1"
+	"github.com/hanzoai/tasks/service/worker/scheduler"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

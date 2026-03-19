@@ -1,8 +1,8 @@
 package tasktoken
 
 import (
-	clockspb "go.temporal.io/server/api/clock/v1"
-	tokenspb "go.temporal.io/server/api/token/v1"
+	clockspb "github.com/hanzoai/tasks/api/clock/v1"
+	tokenspb "github.com/hanzoai/tasks/api/token/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

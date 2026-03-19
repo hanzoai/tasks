@@ -10,9 +10,9 @@ import (
 	namespacepb "go.temporal.io/api/namespace/v1"
 	rulespb "go.temporal.io/api/rules/v1"
 	"go.temporal.io/api/serviceerror"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/util"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/util"
 	expmaps "golang.org/x/exp/maps"
 )
 

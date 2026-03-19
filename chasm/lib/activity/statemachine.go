@@ -9,10 +9,10 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
-	"go.temporal.io/server/common/metrics"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/activity/gen/activitypb/v1"
+	"github.com/hanzoai/tasks/common/metrics"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/common/namespace"
 	"go.uber.org/mock/gomock"
 )
 

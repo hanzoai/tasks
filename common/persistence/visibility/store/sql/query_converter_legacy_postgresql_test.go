@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"github.com/temporalio/sqlparser"
-	"go.temporal.io/server/common/persistence/visibility/store/query"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/query"
 )
 
 type (

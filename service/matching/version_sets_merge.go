@@ -3,8 +3,8 @@ package matching
 import (
 	"sort"
 
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	hlc "go.temporal.io/server/common/clock/hybrid_logical_clock"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	hlc "github.com/hanzoai/tasks/common/clock/hybrid_logical_clock"
 )
 
 // Merge and sort two sets of set IDs

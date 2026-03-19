@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common"
 )
 
 type (

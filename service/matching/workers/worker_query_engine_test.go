@@ -8,7 +8,7 @@ import (
 	deploymentpb "go.temporal.io/api/deployment/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	workerpb "go.temporal.io/api/worker/v1"
-	"go.temporal.io/server/common/sqlquery"
+	"github.com/hanzoai/tasks/common/sqlquery"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

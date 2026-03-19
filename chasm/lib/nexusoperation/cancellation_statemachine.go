@@ -2,8 +2,8 @@ package nexusoperation
 
 import (
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/chasm/lib/nexusoperation/gen/nexusoperationpb/v1"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/chasm/lib/nexusoperation/gen/nexusoperationpb/v1"
 )
 
 // EventCancellationScheduled is triggered when cancellation is meant to be scheduled for the first time - immediately

@@ -7,10 +7,10 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	schedulepb "go.temporal.io/api/schedule/v1"
-	schedulespb "go.temporal.io/server/api/schedule/v1"
-	schedulerpb "go.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb/v1"
-	"go.temporal.io/server/common"
-	schedulescommon "go.temporal.io/server/common/schedules"
+	schedulespb "github.com/hanzoai/tasks/api/schedule/v1"
+	schedulerpb "github.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb/v1"
+	"github.com/hanzoai/tasks/common"
+	schedulescommon "github.com/hanzoai/tasks/common/schedules"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

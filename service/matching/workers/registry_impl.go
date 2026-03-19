@@ -13,9 +13,9 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	workerpb "go.temporal.io/api/worker/v1"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/metrics"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/metrics"
+	"github.com/hanzoai/tasks/common/namespace"
 	"go.uber.org/fx"
 )
 

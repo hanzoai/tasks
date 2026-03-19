@@ -7,12 +7,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
-	deploymentspb "go.temporal.io/server/api/deployment/v1"
-	"go.temporal.io/server/api/matchingservice/v1"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/primitives/timestamp"
-	"go.temporal.io/server/common/testing/testvars"
-	"go.temporal.io/server/tests/testcore"
+	deploymentspb "github.com/hanzoai/tasks/api/deployment/v1"
+	"github.com/hanzoai/tasks/api/matchingservice/v1"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
+	"github.com/hanzoai/tasks/common/testing/testvars"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 // runWithMatchingBehaviors runs a test with all combinations of matching behaviors.

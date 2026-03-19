@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	routingspb "go.temporal.io/server/api/routing/v1"
-	"go.temporal.io/server/cmd/tools/codegen"
+	routingspb "github.com/hanzoai/tasks/api/routing/v1"
+	"github.com/hanzoai/tasks/cmd/tools/codegen"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -67,7 +67,7 @@ func (p *Plugin) Run(plugin *protogen.Plugin) error {
 		if !file.Generate {
 			continue
 		}
-		if !strings.Contains(string(file.GoImportPath), "go.temporal.io/server/chasm/lib") {
+		if !strings.Contains(string(file.GoImportPath), "github.com/hanzoai/tasks/chasm/lib") {
 			continue
 		}
 		if len(file.Services) == 0 {
@@ -86,15 +86,15 @@ func (p *Plugin) Run(plugin *protogen.Plugin) error {
 		w.println(`"context"`)
 		w.println(`"time"`)
 		w.println("\n")
-		w.println(`"go.temporal.io/server/client/history"`)
-		w.println(`"go.temporal.io/server/common"`)
-		w.println(`"go.temporal.io/server/common/backoff"`)
-		w.println(`"go.temporal.io/server/common/config"`)
-		w.println(`"go.temporal.io/server/common/dynamicconfig"`)
-		w.println(`"go.temporal.io/server/common/headers"`)
-		w.println(`"go.temporal.io/server/common/log"`)
-		w.println(`"go.temporal.io/server/common/membership"`)
-		w.println(`"go.temporal.io/server/common/metrics"`)
+		w.println(`"github.com/hanzoai/tasks/client/history"`)
+		w.println(`"github.com/hanzoai/tasks/common"`)
+		w.println(`"github.com/hanzoai/tasks/common/backoff"`)
+		w.println(`"github.com/hanzoai/tasks/common/config"`)
+		w.println(`"github.com/hanzoai/tasks/common/dynamicconfig"`)
+		w.println(`"github.com/hanzoai/tasks/common/headers"`)
+		w.println(`"github.com/hanzoai/tasks/common/log"`)
+		w.println(`"github.com/hanzoai/tasks/common/membership"`)
+		w.println(`"github.com/hanzoai/tasks/common/metrics"`)
 		w.println(`"google.golang.org/grpc"`)
 		w.unindent()
 		w.println(")")

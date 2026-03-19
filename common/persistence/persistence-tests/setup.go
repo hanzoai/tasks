@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"
-	"go.temporal.io/server/temporal/environment"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/mysql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/postgresql"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/sqlite"
+	"github.com/hanzoai/tasks/temporal/environment"
 )
 
 const (

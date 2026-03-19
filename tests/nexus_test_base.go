@@ -13,9 +13,9 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	cnexus "go.temporal.io/server/common/nexus"
-	"go.temporal.io/server/common/nexus/nexusrpc"
-	"go.temporal.io/server/tests/testcore"
+	cnexus "github.com/hanzoai/tasks/common/nexus"
+	"github.com/hanzoai/tasks/common/nexus/nexusrpc"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 type NexusTestBaseSuite struct {

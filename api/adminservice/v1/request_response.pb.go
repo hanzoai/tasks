@@ -19,15 +19,15 @@ import (
 	v115 "go.temporal.io/api/taskqueue/v1"
 	v19 "go.temporal.io/api/version/v1"
 	v17 "go.temporal.io/api/workflow/v1"
-	v18 "go.temporal.io/server/api/cluster/v1"
-	v112 "go.temporal.io/server/api/common/v1"
-	v14 "go.temporal.io/server/api/enums/v1"
-	v113 "go.temporal.io/server/api/health/v1"
-	v11 "go.temporal.io/server/api/history/v1"
-	v13 "go.temporal.io/server/api/namespace/v1"
-	v12 "go.temporal.io/server/api/persistence/v1"
-	v15 "go.temporal.io/server/api/replication/v1"
-	v114 "go.temporal.io/server/api/taskqueue/v1"
+	v18 "github.com/hanzoai/tasks/api/cluster/v1"
+	v112 "github.com/hanzoai/tasks/api/common/v1"
+	v14 "github.com/hanzoai/tasks/api/enums/v1"
+	v113 "github.com/hanzoai/tasks/api/health/v1"
+	v11 "github.com/hanzoai/tasks/api/history/v1"
+	v13 "github.com/hanzoai/tasks/api/namespace/v1"
+	v12 "github.com/hanzoai/tasks/api/persistence/v1"
+	v15 "github.com/hanzoai/tasks/api/replication/v1"
+	v114 "github.com/hanzoai/tasks/api/taskqueue/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -6171,7 +6171,7 @@ const file_temporal_server_api_adminservice_v1_request_response_proto_rawDesc = 
 	"\x1cSCHEDULER_TARGET_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16SCHEDULER_TARGET_CHASM\x10\x01\x12\x1d\n" +
 	"\x19SCHEDULER_TARGET_WORKFLOW\x10\x02\"\x19\n" +
-	"\x17MigrateScheduleResponseB8Z6go.temporal.io/server/api/adminservice/v1;adminserviceb\x06proto3"
+	"\x17MigrateScheduleResponseB8Z6github.com/hanzoai/tasks/api/adminservice/v1;adminserviceb\x06proto3"
 
 var (
 	file_temporal_server_api_adminservice_v1_request_response_proto_rawDescOnce sync.Once

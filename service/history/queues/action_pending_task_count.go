@@ -4,7 +4,7 @@ import (
 	"slices"
 	"time"
 
-	"go.temporal.io/server/common/collection"
+	"github.com/hanzoai/tasks/common/collection"
 )
 
 const (

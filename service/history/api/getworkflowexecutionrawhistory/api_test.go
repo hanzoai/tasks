@@ -6,11 +6,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/api/adminservice/v1"
-	historyspb "go.temporal.io/server/api/history/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/persistence/versionhistory"
+	"github.com/hanzoai/tasks/api/adminservice/v1"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/persistence/versionhistory"
 )
 
 // DEPRECATED: DO NOT MODIFY UNLESS ALSO APPLIED TO ./service/history/historyEngine_test.go

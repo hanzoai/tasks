@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/api/serviceerror"
-	schedulerpb "go.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
+	schedulerpb "github.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/metrics"
 	"google.golang.org/grpc"
 )
 

@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/primitives"
-	"go.temporal.io/server/common/testing/protorequire"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/log"
+	"github.com/hanzoai/tasks/common/primitives"
+	"github.com/hanzoai/tasks/common/testing/protorequire"
 	"go.uber.org/mock/gomock"
 )
 

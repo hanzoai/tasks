@@ -4,9 +4,9 @@ import (
 	"time"
 
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/namespace"
+	"github.com/hanzoai/tasks/api/historyservice/v1"
+	"github.com/hanzoai/tasks/common"
+	"github.com/hanzoai/tasks/common/namespace"
 )
 
 func ConvertToStartRequest(

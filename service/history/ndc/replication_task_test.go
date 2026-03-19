@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
-	"go.temporal.io/server/common/cluster"
-	"go.temporal.io/server/common/definition"
+	"github.com/hanzoai/tasks/common/cluster"
+	"github.com/hanzoai/tasks/common/definition"
 	"go.uber.org/mock/gomock"
 )
 

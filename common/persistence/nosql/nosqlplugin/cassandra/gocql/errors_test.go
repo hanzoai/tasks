@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence"
 )
 
 // fakeRequestError implements gocql.RequestError for testing.

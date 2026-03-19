@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/resolver"
+	"github.com/hanzoai/tasks/common/config"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/resolver"
 	"go.uber.org/mock/gomock"
 )
 

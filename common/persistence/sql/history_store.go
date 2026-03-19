@@ -9,9 +9,9 @@ import (
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/serviceerror"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	"go.temporal.io/server/common/primitives"
+	p "github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/primitives"
 )
 
 const (

@@ -4,8 +4,8 @@ import (
 	"maps"
 
 	enumspb "go.temporal.io/api/enums/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/searchattribute"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/searchattribute"
 )
 
 func CombineTypeMaps(customTypeMap searchattribute.NameTypeMap, chasmTypeMap *chasm.VisibilitySearchAttributesMapper) searchattribute.NameTypeMap {

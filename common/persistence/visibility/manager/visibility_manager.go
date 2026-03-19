@@ -1,7 +1,7 @@
 package manager
 
 // -aux_files is required here due to Closeable interface being in another file.
-//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination visibility_manager_mock.go -aux_files go.temporal.io/server/common/persistence=../../data_interfaces.go
+//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination visibility_manager_mock.go -aux_files github.com/hanzoai/tasks/common/persistence=../../data_interfaces.go
 
 import (
 	"context"
@@ -11,9 +11,9 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence"
 )
 
 type (

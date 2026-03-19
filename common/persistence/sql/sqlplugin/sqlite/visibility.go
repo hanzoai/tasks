@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"go.temporal.io/server/common/persistence/sql/sqlplugin"
+	"github.com/hanzoai/tasks/common/persistence/sql/sqlplugin"
 )
 
 var (

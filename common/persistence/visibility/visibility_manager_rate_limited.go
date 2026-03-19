@@ -5,13 +5,13 @@ import (
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/chasm"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/common/quotas"
+	"github.com/hanzoai/tasks/chasm"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/headers"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence"
+	"github.com/hanzoai/tasks/common/persistence/visibility/manager"
+	"github.com/hanzoai/tasks/common/quotas"
 )
 
 const (

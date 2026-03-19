@@ -14,9 +14,9 @@ import (
 	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/testing/testvars"
-	"go.temporal.io/server/tests/testcore"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/testing/testvars"
+	"github.com/hanzoai/tasks/tests/testcore"
 )
 
 var (

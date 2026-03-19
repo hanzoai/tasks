@@ -13,11 +13,11 @@ import (
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
-	enumsspb "go.temporal.io/server/api/enums/v1"
-	historyspb "go.temporal.io/server/api/history/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
-	"go.temporal.io/server/common/payloads"
-	"go.temporal.io/server/common/primitives/timestamp"
+	enumsspb "github.com/hanzoai/tasks/api/enums/v1"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
+	"github.com/hanzoai/tasks/common/payloads"
+	"github.com/hanzoai/tasks/common/primitives/timestamp"
 	"google.golang.org/protobuf/testing/protopack"
 )
 

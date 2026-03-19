@@ -6,11 +6,11 @@ import (
 	"github.com/stretchr/testify/require"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence/visibility/store/query"
-	"go.temporal.io/server/common/searchattribute"
-	"go.temporal.io/server/common/searchattribute/sadefs"
+	"github.com/hanzoai/tasks/common/dynamicconfig"
+	"github.com/hanzoai/tasks/common/namespace"
+	"github.com/hanzoai/tasks/common/persistence/visibility/store/query"
+	"github.com/hanzoai/tasks/common/searchattribute"
+	"github.com/hanzoai/tasks/common/searchattribute/sadefs"
 )
 
 const (

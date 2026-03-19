@@ -1,9 +1,9 @@
 package serviceerror
 
 import (
-	errordetailsspb "go.temporal.io/server/api/errordetails/v1"
-	historyspb "go.temporal.io/server/api/history/v1"
-	persistencespb "go.temporal.io/server/api/persistence/v1"
+	errordetailsspb "github.com/hanzoai/tasks/api/errordetails/v1"
+	historyspb "github.com/hanzoai/tasks/api/history/v1"
+	persistencespb "github.com/hanzoai/tasks/api/persistence/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
