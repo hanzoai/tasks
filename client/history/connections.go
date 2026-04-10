@@ -10,7 +10,7 @@ import (
 type (
 	clientConnection[C any] struct {
 		grpcClient C
-		grpcConn   *grpc.ClientConn
+		conn       grpc.ClientConnInterface
 	}
 
 	rpcAddress string
@@ -26,9 +26,9 @@ type (
 		clientCtor             func(grpc.ClientConnInterface) C
 	}
 
-	// RPCFactory is a subset of the [github.com/hanzoai/tasks/common/rpc.RPCFactory] interface to make testing easier.
+	// RPCFactory is a subset of the common.RPCFactory interface for testing.
 	RPCFactory interface {
-		CreateHistoryGRPCConnection(rpcAddress string) *grpc.ClientConn
+		CreateHistoryGRPCConnection(rpcAddress string) grpc.ClientConnInterface
 	}
 
 	connectionPool[C any] interface {
@@ -66,10 +66,10 @@ func (c *connectionPoolImpl[C]) getOrCreateClientConn(addr rpcAddress) clientCon
 	if cc, ok = c.mu.conns[addr]; ok {
 		return cc
 	}
-	grpcConn := c.rpcFactory.CreateHistoryGRPCConnection(string(addr))
+	conn := c.rpcFactory.CreateHistoryGRPCConnection(string(addr))
 	cc = clientConnection[C]{
-		grpcClient: c.clientCtor(grpcConn),
-		grpcConn:   grpcConn,
+		grpcClient: c.clientCtor(conn),
+		conn:       conn,
 	}
 
 	c.mu.conns[addr] = cc
@@ -88,6 +88,6 @@ func (c *connectionPoolImpl[C]) getAllClientConns() []clientConnection[C] {
 	return clientConns
 }
 
+// resetConnectBackoff is a no-op for ZAP transport (no backoff state).
 func (c *connectionPoolImpl[C]) resetConnectBackoff(cc clientConnection[C]) {
-	cc.grpcConn.ResetConnectBackoff()
 }
