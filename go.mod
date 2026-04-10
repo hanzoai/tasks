@@ -79,8 +79,14 @@ require (
 )
 
 require (
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
+	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 // indirect
+	github.com/luxfi/mdns v0.1.0 // indirect
+	github.com/miekg/dns v1.1.62 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	golang.org/x/mod v0.33.0 // indirect
+	golang.org/x/tools v0.42.0 // indirect
 )
 
 require (
@@ -129,6 +135,7 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
+	github.com/luxfi/zap v0.1.0
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -175,3 +182,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/luxfi/zap => ../../lux/zap
