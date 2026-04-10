@@ -42,10 +42,10 @@ func (m *MockRPCFactory) EXPECT() *MockRPCFactoryMockRecorder {
 }
 
 // CreateHistoryGRPCConnection mocks base method.
-func (m *MockRPCFactory) CreateHistoryGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (m *MockRPCFactory) CreateHistoryGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateHistoryGRPCConnection", rpcAddress)
-	ret0, _ := ret[0].(*grpc.ClientConn)
+	ret0, _ := ret[0].(grpc.ClientConnInterface)
 	return ret0
 }
 
@@ -56,10 +56,10 @@ func (mr *MockRPCFactoryMockRecorder) CreateHistoryGRPCConnection(rpcAddress any
 }
 
 // CreateLocalFrontendGRPCConnection mocks base method.
-func (m *MockRPCFactory) CreateLocalFrontendGRPCConnection() *grpc.ClientConn {
+func (m *MockRPCFactory) CreateLocalFrontendGRPCConnection() grpc.ClientConnInterface {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateLocalFrontendGRPCConnection")
-	ret0, _ := ret[0].(*grpc.ClientConn)
+	ret0, _ := ret[0].(grpc.ClientConnInterface)
 	return ret0
 }
 
@@ -85,10 +85,10 @@ func (mr *MockRPCFactoryMockRecorder) CreateLocalFrontendHTTPClient() *gomock.Ca
 }
 
 // CreateMatchingGRPCConnection mocks base method.
-func (m *MockRPCFactory) CreateMatchingGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (m *MockRPCFactory) CreateMatchingGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateMatchingGRPCConnection", rpcAddress)
-	ret0, _ := ret[0].(*grpc.ClientConn)
+	ret0, _ := ret[0].(grpc.ClientConnInterface)
 	return ret0
 }
 
@@ -99,10 +99,10 @@ func (mr *MockRPCFactoryMockRecorder) CreateMatchingGRPCConnection(rpcAddress an
 }
 
 // CreateRemoteFrontendGRPCConnection mocks base method.
-func (m *MockRPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (m *MockRPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateRemoteFrontendGRPCConnection", rpcAddress)
-	ret0, _ := ret[0].(*grpc.ClientConn)
+	ret0, _ := ret[0].(grpc.ClientConnInterface)
 	return ret0
 }
 

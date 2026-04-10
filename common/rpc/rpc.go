@@ -201,7 +201,7 @@ func getListenIP(cfg *config.RPC, logger log.Logger) net.IP {
 }
 
 // CreateRemoteFrontendGRPCConnection creates connection for gRPC calls
-func (d *RPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (d *RPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	var tlsClientConfig *tls.Config
 	var err error
 	if d.tlsFactory != nil {
@@ -223,15 +223,15 @@ func (d *RPCFactory) CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc
 }
 
 // CreateLocalFrontendGRPCConnection creates connection for internal frontend calls
-func (d *RPCFactory) CreateLocalFrontendGRPCConnection() *grpc.ClientConn {
+func (d *RPCFactory) CreateLocalFrontendGRPCConnection() grpc.ClientConnInterface {
 	additionalDialOptions := append([]grpc.DialOption{}, d.perServiceDialOptions[primitives.InternalFrontendService]...)
 
 	return d.dial(d.frontendURL, d.frontendTLSConfig, additionalDialOptions...)
 }
 
 // createInternodeGRPCConnection creates connection for gRPC calls
-func (d *RPCFactory) createInternodeGRPCConnection(hostName string, serviceName primitives.ServiceName) *grpc.ClientConn {
-	if c, ok := d.interNodeGrpcConnections.Get(hostName).(*grpc.ClientConn); ok {
+func (d *RPCFactory) createInternodeGRPCConnection(hostName string, serviceName primitives.ServiceName) grpc.ClientConnInterface {
+	if c, ok := d.interNodeGrpcConnections.Get(hostName).(grpc.ClientConnInterface); ok {
 		return c
 	}
 	var tlsClientConfig *tls.Config
@@ -249,15 +249,15 @@ func (d *RPCFactory) createInternodeGRPCConnection(hostName string, serviceName 
 	return c
 }
 
-func (d *RPCFactory) CreateHistoryGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (d *RPCFactory) CreateHistoryGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	return d.createInternodeGRPCConnection(rpcAddress, primitives.HistoryService)
 }
 
-func (d *RPCFactory) CreateMatchingGRPCConnection(rpcAddress string) *grpc.ClientConn {
+func (d *RPCFactory) CreateMatchingGRPCConnection(rpcAddress string) grpc.ClientConnInterface {
 	return d.createInternodeGRPCConnection(rpcAddress, primitives.MatchingService)
 }
 
-func (d *RPCFactory) dial(hostName string, tlsClientConfig *tls.Config, dialOptions ...grpc.DialOption) *grpc.ClientConn {
+func (d *RPCFactory) dial(hostName string, tlsClientConfig *tls.Config, dialOptions ...grpc.DialOption) grpc.ClientConnInterface {
 	dialOptions = append(d.commonDialOptions, dialOptions...)
 	connection, err := Dial(hostName, tlsClientConfig, d.logger, d.metricsHandler, dialOptions...)
 	if err != nil {

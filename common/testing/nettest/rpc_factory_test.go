@@ -30,7 +30,7 @@ func TestRPCFactory_GetInternodeGRPCServerOptions(t *testing.T) {
 func TestRPCFactory_CreateHistoryGRPCConnection(t *testing.T) {
 	t.Parallel()
 
-	testDialer(t, "localhost", func(rpcFactory *nettest.RPCFactory) *grpc.ClientConn {
+	testDialer(t, "localhost", func(rpcFactory *nettest.RPCFactory) grpc.ClientConnInterface {
 		return rpcFactory.CreateHistoryGRPCConnection("localhost")
 	})
 }
@@ -38,7 +38,7 @@ func TestRPCFactory_CreateHistoryGRPCConnection(t *testing.T) {
 func TestRPCFactory_CreateMatchingGRPCConnection(t *testing.T) {
 	t.Parallel()
 
-	testDialer(t, "localhost", func(rpcFactory *nettest.RPCFactory) *grpc.ClientConn {
+	testDialer(t, "localhost", func(rpcFactory *nettest.RPCFactory) grpc.ClientConnInterface {
 		return rpcFactory.CreateMatchingGRPCConnection("localhost")
 	})
 }
@@ -46,7 +46,7 @@ func TestRPCFactory_CreateMatchingGRPCConnection(t *testing.T) {
 func TestRPCFactory_CreateLocalFrontendGRPCConnection(t *testing.T) {
 	t.Parallel()
 
-	testDialer(t, ":0", func(rpcFactory *nettest.RPCFactory) *grpc.ClientConn {
+	testDialer(t, ":0", func(rpcFactory *nettest.RPCFactory) grpc.ClientConnInterface {
 		return rpcFactory.CreateLocalFrontendGRPCConnection()
 	})
 }
@@ -54,12 +54,12 @@ func TestRPCFactory_CreateLocalFrontendGRPCConnection(t *testing.T) {
 func TestRPCFactory_CreateRemoteFrontendGRPCConnection(t *testing.T) {
 	t.Parallel()
 
-	testDialer(t, "localhost", func(rpcFactory *nettest.RPCFactory) *grpc.ClientConn {
+	testDialer(t, "localhost", func(rpcFactory *nettest.RPCFactory) grpc.ClientConnInterface {
 		return rpcFactory.CreateRemoteFrontendGRPCConnection("localhost")
 	})
 }
 
-func testDialer(t *testing.T, target string, dial func(rpcFactory *nettest.RPCFactory) *grpc.ClientConn) {
+func testDialer(t *testing.T, target string, dial func(rpcFactory *nettest.RPCFactory) grpc.ClientConnInterface) {
 	t.Helper()
 
 	t.Run("HappyPath", func(t *testing.T) {
@@ -73,7 +73,9 @@ func testDialer(t *testing.T, target string, dial func(rpcFactory *nettest.RPCFa
 			errs <- err
 		}()
 
-		conn := dial(rpcFactory)
+		connIface := dial(rpcFactory)
+		// The nettest factory returns *grpc.ClientConn under the interface.
+		conn := connIface.(*grpc.ClientConn)
 		conn.Connect()
 		require.NoError(t, <-errs)
 		assert.Equal(t, target, conn.Target())
