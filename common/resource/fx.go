@@ -41,6 +41,7 @@ import (
 	"github.com/hanzoai/tasks/common/quotas"
 	"github.com/hanzoai/tasks/common/rpc"
 	"github.com/hanzoai/tasks/common/rpc/encryption"
+	"github.com/hanzoai/tasks/common/rpc/zaptransport"
 	"github.com/hanzoai/tasks/common/sdk"
 	"github.com/hanzoai/tasks/common/searchattribute"
 	"github.com/hanzoai/tasks/common/telemetry"
@@ -403,6 +404,26 @@ func RPCFactoryProvider(
 		return nil, err
 	}
 
+	// Use ZAP transport for internode communication (history, matching, worker).
+	// Frontend service keeps gRPC for backward compatibility with Temporal SDK clients.
+	if svcName != primitives.FrontendService && svcName != primitives.InternalFrontendService {
+		factory := zaptransport.NewFactory(
+			cfg,
+			svcName,
+			logger,
+			metricsHandler,
+			tlsConfigProvider,
+			frontendURL,
+			frontendHTTPURL,
+			frontendHTTPPort,
+			frontendTLSConfig,
+			monitor,
+		)
+		logger.Info(fmt.Sprintf("ZAP RPC factory created for %s", svcName))
+		return factory, nil
+	}
+
+	// Frontend uses gRPC transport for SDK client compatibility.
 	var options []grpc.DialOption
 	if tracingStatsHandler != nil {
 		options = append(options, grpc.WithStatsHandler(tracingStatsHandler))
@@ -425,7 +446,7 @@ func RPCFactoryProvider(
 	)
 	factory.EnableInternodeServerKeepalive = enableServerKeepalive
 	factory.EnableInternodeClientKeepalive = enableClientKeepalive
-	logger.Debug(fmt.Sprintf("RPC factory created. enableServerKeepalive: %v, enableClientKeepalive: %v", enableServerKeepalive, enableClientKeepalive))
+	logger.Debug(fmt.Sprintf("gRPC RPC factory created for %s", svcName))
 	return factory, nil
 }
 
