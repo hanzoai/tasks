@@ -1,14 +1,15 @@
-// Package sdk provides the Hanzo Tasks client for Go applications.
+// Package tasks provides the Hanzo Tasks client for Go applications.
 //
 // Two methods, two use cases:
 //
-//	client := sdk.New(os.Getenv("TASKS_URL"), nil)
+//	client := tasks.New(os.Getenv("TASKS_URL"), os.Getenv("TASKS_ZAP"), nil)
 //	client.Add("settlement.process", "30s", fn)   // recurring schedule
 //	client.Now("webhook.deliver", payload)          // fire once immediately
 //
-// When TASKS_URL is set, tasks execute as durable Temporal workflows
-// with retry, dead letter, and audit trail. When empty, tasks run
-// locally via goroutine timers (dev mode).
+// Transport priority: ZAP (binary, low-latency) > HTTP > local goroutine.
+// When TASKS_ZAP is set, tasks submit over ZAP binary protocol.
+// When TASKS_URL is set, tasks submit over HTTP as fallback.
+// When neither is set, tasks run locally via goroutine timers (dev mode).
 //
 // Integration with Hanzo Base:
 //
