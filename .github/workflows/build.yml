@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [main, dev]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -21,13 +22,30 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+      - name: Compute tags
+        id: tags
+        run: |
+          SHA=${GITHUB_SHA::8}
+          REF=${GITHUB_REF_NAME}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "semver=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+            echo "is_tag=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_tag=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build + push
         run: |
+          IMG=${REGISTRY}:${{ steps.tags.outputs.ref }}-amd64
           docker build \
             --build-arg GITHUB_TOKEN=${{ secrets.TOKEN_GITHUB_CICD }} \
-            -t ${REGISTRY}:${GITHUB_REF_NAME}-amd64 \
+            -t $IMG \
+            -t ${REGISTRY}:${{ steps.tags.outputs.sha }}-amd64 \
             .
-          docker push ${REGISTRY}:${GITHUB_REF_NAME}-amd64
+          docker push $IMG
+          docker push ${REGISTRY}:${{ steps.tags.outputs.sha }}-amd64
 
   build-arm64:
     runs-on: hanzo-build-linux-arm64
@@ -37,13 +55,24 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+      - name: Compute tags
+        id: tags
+        run: |
+          SHA=${GITHUB_SHA::8}
+          REF=${GITHUB_REF_NAME}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+
       - name: Build + push
         run: |
+          IMG=${REGISTRY}:${{ steps.tags.outputs.ref }}-arm64
           docker build \
             --build-arg GITHUB_TOKEN=${{ secrets.TOKEN_GITHUB_CICD }} \
-            -t ${REGISTRY}:${GITHUB_REF_NAME}-arm64 \
+            -t $IMG \
+            -t ${REGISTRY}:${{ steps.tags.outputs.sha }}-arm64 \
             .
-          docker push ${REGISTRY}:${GITHUB_REF_NAME}-arm64
+          docker push $IMG
+          docker push ${REGISTRY}:${{ steps.tags.outputs.sha }}-arm64
 
   manifest:
     needs: [build-amd64, build-arm64]
@@ -52,10 +81,50 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Create multi-arch manifest
+      - name: Compute tags
+        id: tags
         run: |
-          TAG=${GITHUB_REF_NAME}
-          docker manifest create ${REGISTRY}:${TAG} \
-            ${REGISTRY}:${TAG}-amd64 \
-            ${REGISTRY}:${TAG}-arm64
-          docker manifest push ${REGISTRY}:${TAG}
+          SHA=${GITHUB_SHA::8}
+          REF=${GITHUB_REF_NAME}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "semver=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+            echo "is_tag=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_tag=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create manifests
+        run: |
+          REF=${{ steps.tags.outputs.ref }}
+          SHA=${{ steps.tags.outputs.sha }}
+
+          # Branch/tag manifest
+          docker manifest create ${REGISTRY}:${REF} \
+            ${REGISTRY}:${REF}-amd64 \
+            ${REGISTRY}:${REF}-arm64
+          docker manifest push ${REGISTRY}:${REF}
+
+          # SHA manifest
+          docker manifest create ${REGISTRY}:${SHA} \
+            ${REGISTRY}:${SHA}-amd64 \
+            ${REGISTRY}:${SHA}-arm64
+          docker manifest push ${REGISTRY}:${SHA}
+
+          # latest (only from main)
+          if [ "$REF" = "main" ]; then
+            docker manifest create ${REGISTRY}:latest \
+              ${REGISTRY}:${REF}-amd64 \
+              ${REGISTRY}:${REF}-arm64
+            docker manifest push ${REGISTRY}:latest
+          fi
+
+      - name: Tag semver (on version tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VER=${{ steps.tags.outputs.semver }}
+          docker manifest create ${REGISTRY}:${VER} \
+            ${REGISTRY}:${GITHUB_REF_NAME}-amd64 \
+            ${REGISTRY}:${GITHUB_REF_NAME}-arm64
+          docker manifest push ${REGISTRY}:${VER}
