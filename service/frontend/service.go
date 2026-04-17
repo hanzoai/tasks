@@ -1,7 +1,9 @@
 package frontend
 
 import (
+	"log/slog"
 	"net"
+	"os"
 	"regexp"
 	"sync"
 	"time"
@@ -406,6 +408,7 @@ type Service struct {
 	visibilityManager manager.VisibilityManager
 	server            *grpc.Server
 	httpAPIServer     *HTTPAPIServer
+	zapHandler        *ZAPHandler
 
 	logger            log.Logger
 	grpcListener      net.Listener
@@ -428,7 +431,7 @@ func NewService(
 	metricsHandler metrics.Handler,
 	membershipMonitor membership.Monitor,
 ) *Service {
-	return &Service{
+	svc := &Service{
 		config:            serviceConfig,
 		server:            server,
 		healthServer:      healthServer,
@@ -443,6 +446,13 @@ func NewService(
 		metricsHandler:    metricsHandler,
 		membershipMonitor: membershipMonitor,
 	}
+
+	// Enable ZAP SDK handler when ZAP_SDK_ENABLED is set or ZAP_SDK_PORT is set.
+	if os.Getenv("ZAP_SDK_ENABLED") == "true" || os.Getenv("ZAP_SDK_PORT") != "" {
+		svc.zapHandler = NewZAPHandler(handler, slog.Default())
+	}
+
+	return svc
 }
 
 // Start starts the service
@@ -482,6 +492,14 @@ func (s *Service) Start() {
 			"To enable Nexus, follow these instructions: https://github.com/temporalio/temporal/blob/main/docs/architecture/nexus.md#enabling-nexus.")
 	}
 
+	if s.zapHandler != nil {
+		go func() {
+			if err := s.zapHandler.Start(); err != nil {
+				s.logger.Error("Failed to start ZAP SDK handler", tag.Error(err))
+			}
+		}()
+	}
+
 	go s.membershipMonitor.Start()
 }
 
@@ -509,6 +527,9 @@ func (s *Service) Stop() {
 	s.adminHandler.Stop()
 	s.versionChecker.Stop()
 	s.visibilityManager.Close()
+	if s.zapHandler != nil {
+		s.zapHandler.Stop()
+	}
 
 	s.logger.Info("ShutdownHandler: Draining traffic")
 	// Gracefully stop gRPC server and HTTP API server concurrently
