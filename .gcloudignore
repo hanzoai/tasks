@@ -1,0 +1,11 @@
+.git
+.github
+docs
+develop
+docker
+tests
+temporal/server_test.go
+temporaltest
+*.test
+*.md
+!CLAUDE.md

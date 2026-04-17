@@ -1,0 +1,31 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "$$GITHUB_TOKEN" > /tmp/gh_token.txt
+        DOCKER_BUILDKIT=1 docker build \
+          --secret id=github_token,src=/tmp/gh_token.txt \
+          -t ${_IMAGE} .
+        rm /tmp/gh_token.txt
+    secretEnv: ['GITHUB_TOKEN']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE}']
+
+substitutions:
+  _IMAGE: us-docker.pkg.dev/liquidity-registry/liquidityio/tasks:v1.0.0
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/liquidity-registry/secrets/github-token/versions/latest
+      env: 'GITHUB_TOKEN'
+
+images:
+  - '${_IMAGE}'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+
+timeout: '600s'
