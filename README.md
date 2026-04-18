@@ -17,7 +17,7 @@ Tasks provides the backbone for:
 - **Agent execution** -- each agent runs as a Tasks worker
 - **Durable cron and batch jobs** -- reliable scheduled and bulk operations
 
-Fork of [Temporal.io](https://github.com/temporalio/temporal) (MIT license).
+MIT licensed. See [LICENSE](./LICENSE).
 
 ## Getting Started
 
@@ -56,14 +56,14 @@ github.com/hanzoai/tasks
 
 Hanzo Tasks integrates with the broader Hanzo ecosystem:
 
-- **Playground** imports `go.temporal.io/sdk` (the client SDK) and connects to the Tasks server
+- **Playground** connects to the Tasks server via the durable-execution SDK
 - **Base** embeds Tasks for durable cron/batch execution
 - Each playground **space** = a Tasks namespace
 - Each **agent** = a Tasks worker
 
 ## Repository
 
-This repository contains the source code of the Hanzo Tasks server. To implement Workflows, Activities, and Workers, use the [Temporal Go SDK](https://github.com/temporalio/sdk-go) or other [supported language SDKs](https://docs.temporal.io/dev-guide/).
+This repository contains the source code of the Hanzo Tasks server. To implement Workflows, Activities, and Workers from Go, use the in-process client at [`pkg/tasks`](./pkg/tasks); a full durable-execution SDK is compatible with the server's gRPC surface.
 
 ## Architecture
 
