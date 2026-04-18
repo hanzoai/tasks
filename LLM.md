@@ -1,6 +1,6 @@
 # Hanzo Tasks
 
-Durable workflow execution engine for AI agent orchestration. Fork of [Temporal.io](https://github.com/temporalio/temporal) (MIT license).
+Durable workflow execution engine for AI agent orchestration.
 
 ## Module
 `github.com/hanzoai/tasks`
@@ -12,17 +12,17 @@ go build ./cmd/tasksd/
 ```
 
 ## Integration
-- Playground imports `go.temporal.io/sdk` and connects to Hanzo Tasks server
+- Playground connects to the Hanzo Tasks server via the durable-execution SDK
 - Base embeds Tasks for durable cron/batch execution
 - Each playground space = a Tasks namespace
 - Each agent = a Tasks worker
 
 ## Rebrand Notes (2026-03-19)
-- `go.temporal.io/server` replaced with `github.com/hanzoai/tasks` in all Go files, go.mod, go.sum
+- Upstream server packages replaced with `github.com/hanzoai/tasks` in all Go files, go.mod, go.sum
 - `cmd/server` renamed to `cmd/tasksd`, binary name is `tasksd`
-- Docker images: `ghcr.io/hanzoai/tasks` (was `temporalio/server`)
-- External deps (`go.temporal.io/sdk`, `go.temporal.io/api`) are NOT changed -- those are separate repos
-- Wire-protocol client names (`temporal-server` in headers/version_checker.go, metadata keys in client/history/metadata.go) preserved to maintain backward compatibility with existing Temporal SDK clients
+- Docker images: `ghcr.io/hanzoai/tasks` (was the upstream image name)
+- External SDK/API deps are NOT changed — those are separate repos
+- Wire-protocol client names preserved to maintain backward compatibility with existing SDK clients
 
 ## Production Deployment (2026-03-19)
 
@@ -53,12 +53,17 @@ go build ./cmd/tasksd/
    User visits tasks.hanzo.ai, gets redirected to hanzo.id for login, callback returns
    JWT tokens. Configured via `TASKS_AUTH_*` env vars on the tasks-ui container.
 2. **Server (JWT validation)**: Tasks server validates the JWT bearer token on every gRPC/HTTP
-   request using JWKS keys fetched from hanzo.id. Configured via `TEMPORAL_JWT_KEY_SOURCE1`,
-   `TEMPORAL_AUTH_AUTHORIZER=default`, `TEMPORAL_AUTH_CLAIM_MAPPER=default` env vars on the
-   tasks server container. These env vars feed into the embedded config template at
-   `common/config/config_template_embedded.yaml` -> `global.authorization`.
+   request using JWKS keys fetched from hanzo.id. Configured via the wire-protocol env vars
+   below (legacy names preserved for upstream config compatibility). These env vars feed into
+   the embedded config template at `common/config/config_template_embedded.yaml` ->
+   `global.authorization`.
 
 #### Embedded Config Template Auth Env Vars (server)
+
+> The `TEMPORAL_*` prefix on these env vars is intentionally preserved for wire compatibility
+> with the upstream config template parser. Treat them as opaque wire keys; the Hanzo Tasks
+> runtime reads them unchanged.
+
 | Env Var | Purpose | Value in K8s |
 |---------|---------|-------------|
 | `TEMPORAL_JWT_KEY_SOURCE1` | JWKS URI for key fetching | `http://iam.hanzo.svc/.well-known/jwks` |
@@ -78,10 +83,10 @@ go build ./cmd/tasksd/
 | `TASKS_AUTH_SCOPES` | OIDC scopes | `openid,profile,email` |
 
 #### Namespace-to-Org Mapping
-Temporal namespaces map 1:1 to Hanzo orgs. Users see only namespaces matching their IAM
+Tasks namespaces map 1:1 to Hanzo orgs. Users see only namespaces matching their IAM
 org memberships. The JWT `permissions` claim carries `namespace:role` pairs (e.g.,
-`hanzo:admin`, `lux:read`). The default claim mapper parses these into Temporal's
-internal permission model.
+`hanzo:admin`, `lux:read`). The default claim mapper parses these into the internal
+permission model.
 
 ### K8s Manifests
 - Canonical source: `k8s/` in this repo
