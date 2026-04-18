@@ -1,8 +1,6 @@
-# Develop Temporal Server
+# Develop Hanzo Tasks Server
 
-This doc is for contributors to Temporal Server (hopefully that's you!)
-
-**Note:** All contributors also need to fill out the [Temporal Contributor License Agreement](./docs/development/temporal-cla.md) before we can merge in any of your changes.
+This doc is for contributors to Hanzo Tasks (hopefully that's you!)
 
 ## Prerequisites
 
@@ -14,19 +12,16 @@ This doc is for contributors to Temporal Server (hopefully that's you!)
 - [Protocol buffers compiler](https://github.com/protocolbuffers/protobuf/) (only if you are going to change `proto` files):
   - Install on macOS with `brew install protobuf`.
   - Download all other versions from [protoc release page](https://github.com/protocolbuffers/protobuf/releases).
-- [Temporal CLI](https://github.com/temporalio/cli)
-  - Homebrew `brew install temporal`
-  - Or download it from here https://github.com/temporalio/cli
 
 ### Runtime (server and tests) prerequisites
 
 - [docker](https://docs.docker.com/engine/install/)
 
-> Note: it is possible to run Temporal server without a `docker`. If for some reason (for example, performance on macOS)
+> Note: it is possible to run the Tasks server without `docker`. If for some reason (for example, performance on macOS)
 > you want to run dependencies on the host OS, please follow the [doc](./docs/development/run-dependencies-host.md).
 
-- Runtime dependencies are optional support services that can be helpful during development and testing, providing: 1) UI, 2) 
-databases, and 3) metrics services via `docker compose`. By default, the server utilizes SQLite as an in-memory 
+- Runtime dependencies are optional support services that can be helpful during development and testing, providing: 1) UI, 2)
+databases, and 3) metrics services via `docker compose`. By default, the server utilizes SQLite as an in-memory
 database, so the runtime dependencies are optional. To start dependencies, open new terminal window and run:
 
 ```bash
@@ -44,10 +39,10 @@ For developing on Windows, install [Windows Subsystem for Linux 2 (WSL2)](https:
 
 ## Check out the code
 
-Temporal uses go modules, there is no dependency on `$GOPATH` variable. Clone the repo into the preferred location:
+Hanzo Tasks uses go modules, there is no dependency on `$GOPATH` variable. Clone the repo into the preferred location:
 
 ```bash
-git clone https://github.com/temporalio/temporal.git
+git clone https://github.com/hanzoai/tasks.git
 ```
 
 ## Build
@@ -74,9 +69,9 @@ We defined three categories of tests.
 
 - Unit test: Those tests should not have dependencies other than the test target and go mock. We should have unit test coverage as much as possible.
 - Integration test: Those tests cover the integration between the server and the dependencies (Cassandra, SQL, ES etc.).
-- Functional test: Those tests cover the E2E functionality of Temporal server. They are all under ./tests directory.
+- Functional test: Those tests cover the E2E functionality of the Tasks server. They are all under ./tests directory.
 
-Integration and functional tests require [runtime dependencies](#runtime-server-and-tests-prerequisites), 
+Integration and functional tests require [runtime dependencies](#runtime-server-and-tests-prerequisites),
 when running with a persistence option that is not SQLite. If running unit tests, no need to start the dependencies.
 
 Run unit tests:
@@ -112,7 +107,7 @@ go test -v <path> -run <TestSuite> -testify.m <TestSpecificTaskName>
 for example:
 
 ```bash
-go test -v github.com/temporalio/temporal/common/persistence -run TestCassandraPersistenceSuite -testify.m TestPersistenceStartWorkflow
+go test -v github.com/hanzoai/tasks/common/persistence -run TestCassandraPersistenceSuite -testify.m TestPersistenceStartWorkflow
 ```
 
 When you are done, don't forget to stop `docker compose` (with `Ctrl+C`) and clean up all dependencies:
@@ -121,7 +116,7 @@ When you are done, don't forget to stop `docker compose` (with `Ctrl+C`) and cle
 make stop-dependencies
 ```
 
-## Run Temporal Server locally
+## Run Hanzo Tasks Server locally
 
 First, start the optional [runtime dependencies](#runtime-server-and-tests-prerequisites) if needed for the desired persistence option.
 
@@ -158,17 +153,21 @@ make install-schema-mysql
 make start-mysql
 ```
 
-Now you can create a namespace with the Temporal CLI (While you can select any name for a namespace, we reccomend using `default` while learning, because a number of samples assume there is a namespace named `default`):
+Once the server is up, use the in-process client at `pkg/tasks` from Go:
 
-```bash
-temporal operator namespace create -n default
+```go
+import "github.com/hanzoai/tasks/pkg/tasks"
+
+c := tasks.New(os.Getenv("TASKS_URL"), os.Getenv("TASKS_ZAP"), handler)
+c.Add("settlement", "30s", func() { /* ... */ })
+c.Now("webhook.deliver", payload)
 ```
 
-and run samples from the samples repos ([Go](https://github.com/temporalio/samples-go) | [Java](https://github.com/temporalio/samples-java) | [TypeScript](https://github.com/temporalio/samples-typescript) | [.NET](https://github.com/temporalio/samples-dotnet) | [Python](https://github.com/temporalio/samples-python) | [Ruby](https://github.com/temporalio/samples-ruby)). If you are new to Temporal, helloworld ([Go](https://github.com/temporalio/samples-go/tree/main/helloworld) | [Java](https://github.com/temporalio/samples-java/tree/main/core/src/main/java/io/temporal/samples/hello) | [TypeScript](https://github.com/temporalio/samples-typescript/tree/main/hello-world) | [.NET](https://github.com/temporalio/sdk-dotnet?tab=readme-ov-file#implementing-a-workflow-and-activity) | [Python](https://github.com/temporalio/samples-python/tree/main/hello) | [Ruby](https://github.com/temporalio/sdk-ruby?tab=readme-ov-file#implementing-a-workflow-and-activity)) is a very good sample to start with.  Also, if you have started the runtime dependencies, you can access the web UI at `localhost:8080` which is a good way to visualize work done by the server and deepen your knowledge of Temporal.
+If you have started the runtime dependencies, you can access the web UI at `localhost:8080` which is a good way to visualize work done by the server.
 
-When you are done, press `Ctrl+C` to stop the server. 
+When you are done, press `Ctrl+C` to stop the server.
 
-If you started [runtime dependencies](#runtime-server-and-tests-prerequisites), don't forget to stop dependencies 
+If you started [runtime dependencies](#runtime-server-and-tests-prerequisites), don't forget to stop dependencies
 (with `Ctrl+C`) and clean up resources:
 
 ```bash
@@ -185,7 +184,7 @@ For general instructions, see [GoLand Debugging](https://www.jetbrains.com/help/
 
 First, start the optional [runtime dependencies](#runtime-server-and-tests-prerequisites) if needed for the desired persistence option.
 
-To run the server, ensure the Run Type is package. In "Package path", enter `github.com/hanzoai/tasks/cmd/tasksd`. 
+To run the server, ensure the Run Type is package. In "Package path", enter `github.com/hanzoai/tasks/cmd/tasksd`.
 In the "Program arguments" field, add the following:
 
 ```
@@ -199,44 +198,6 @@ For example, to run with Postgres:
 
 See Makefile for other environments.
 
-## Working with merged API changes
-
-gRPC / protobuf changes merged to the [api](https://github.com/temporalio/api) repo automatically trigger a commit in [api-go](https://github.com/temporalio/api-go).
-To bring such changes into your feature branch, use `make update-go-api`.
-
-## Working with local API changes
-
-If you need to make changes to the gRPC / protobuf definitions while also working on code in this repo, do the following:
-
-1. Checkout [api](https://github.com/temporalio/api), [api-go](https://github.com/temporalio/api-go), and [sdk-go](https://github.com/temporalio/sdk-go)
-2. Make your changes to `api`, commit to a branch.
-3. In your copy of `api-go`:
-   1. Initialize submodules: `git submodule update --init --recursive`
-   2. Point api submodule at your branch. If you make more commits to the api repo, run the last command again.
-      ```bash
-      git submodule set-url proto/api ../api
-      git submodule set-branch --branch mystuff proto/api
-      git submodule update --remote proto/api
-      ```
-   3. Compile protos: `make proto`
-4. (Optional, if SDK changes are required:) In your copy of `sdk-go`:
-   1. Point `go.mod` at local `api-go`:
-      ```
-      replace (
-          go.temporal.io/api => ../api-go
-      )
-      ```
-   2. Compile & fix errors: `make bins`
-5. In this repo:
-   1. Point `go.mod` at local `api-go` and `sdk-go`:
-      ```
-      replace (
-          go.temporal.io/api => ../api-go
-          go.temporal.io/sdk => ../sdk-go
-      )
-      ```
-   2. Build & fix errors: `make proto && make bins`
-
 ## License headers
 
 This project is Open Source Software, and requires a header at the beginning of
@@ -248,8 +209,7 @@ make copyright
 
 ## Commit Messages And Titles of Pull Requests
 
-Overcommit adds some requirements to your commit messages. At Temporal, we follow the
-[Chris Beams](http://chris.beams.io/posts/git-commit/) guide to writing git
+Follow the [Chris Beams](http://chris.beams.io/posts/git-commit/) guide to writing git
 commit messages. Read it, follow it, learn it, love it.
 
 All commit messages are from the titles of your pull requests. So make sure follow the rules when titling them.
