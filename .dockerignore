@@ -1,15 +1,24 @@
+.git
+.github
 .coverage
 .testoutput
-.github
 .idea
 .vscode
 *.md
+!CLAUDE.md
 
-develop/docker-compose
+# Large dirs not needed for build
+docs
+develop
+docker
+tests
+temporaltest
+k8s
+scripts
+tools/tdbg
+tools/cassandra
 
-.git
-
-# exclude binaries from the docker build context
+# Binaries
 tdbg
 tasksd
 temporal-cassandra-tool
