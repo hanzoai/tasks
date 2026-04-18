@@ -3,8 +3,9 @@
 // Two methods, two use cases:
 //
 //	client := tasks.New(os.Getenv("TASKS_URL"), os.Getenv("TASKS_ZAP"), nil)
-//	client.Add("settlement.process", "30s", fn)   // recurring schedule
-//	client.Now("webhook.deliver", payload)          // fire once immediately
+//	client.Add("settlement.process", "30s", fn)   // recurring schedule (duration)
+//	client.Add("audit.archive", "0 3 * * *", fn)  // recurring schedule (cron)
+//	client.Now("webhook.deliver", payload)         // fire once immediately
 //
 // Transport priority: ZAP (binary, low-latency) > HTTP > local goroutine.
 // When TASKS_ZAP is set, tasks submit over ZAP binary protocol.
