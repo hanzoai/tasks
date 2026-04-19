@@ -60,9 +60,8 @@ go build ./cmd/tasksd/
 
 #### Embedded Config Template Auth Env Vars (server)
 
-> The `TEMPORAL_*` prefix on these env vars is intentionally preserved for wire compatibility
-> with the upstream config template parser. Treat them as opaque wire keys; the Hanzo Tasks
-> runtime reads them unchanged.
+> Canonical `TASKS_*` env var names. The binary reads these directly via the embedded
+> config template parser.
 
 | Env Var | Purpose | Value in K8s |
 |---------|---------|-------------|
