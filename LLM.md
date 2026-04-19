@@ -66,11 +66,11 @@ go build ./cmd/tasksd/
 
 | Env Var | Purpose | Value in K8s |
 |---------|---------|-------------|
-| `TEMPORAL_JWT_KEY_SOURCE1` | JWKS URI for key fetching | `http://iam.hanzo.svc/.well-known/jwks` |
-| `TEMPORAL_JWT_KEY_REFRESH` | Key refresh interval | `5m` |
-| `TEMPORAL_AUTH_AUTHORIZER` | Authorizer type | `default` |
-| `TEMPORAL_AUTH_CLAIM_MAPPER` | Claim mapper type | `default` |
-| `TEMPORAL_JWT_PERMISSIONS_CLAIM` | JWT claim for permissions | `permissions` |
+| `TASKS_JWT_KEY_SOURCE1` | JWKS URI for key fetching | `http://iam.hanzo.svc/.well-known/jwks` |
+| `TASKS_JWT_KEY_REFRESH` | Key refresh interval | `5m` |
+| `TASKS_AUTH_AUTHORIZER` | Authorizer type | `default` |
+| `TASKS_AUTH_CLAIM_MAPPER` | Claim mapper type | `default` |
+| `TASKS_JWT_PERMISSIONS_CLAIM` | JWT claim for permissions | `permissions` |
 
 #### UI Auth Env Vars (tasks-ui container)
 | Env Var | Purpose | Value in K8s |

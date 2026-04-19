@@ -118,11 +118,11 @@ spec:
             #
             # Env vars for future enablement:
             #   USE_INTERNAL_FRONTEND: "true"
-            #   TEMPORAL_JWT_KEY_SOURCE1: "http://iam.hanzo.svc/.well-known/jwks"
-            #   TEMPORAL_JWT_KEY_REFRESH: "5m"
-            #   TEMPORAL_AUTH_AUTHORIZER: "default"
-            #   TEMPORAL_AUTH_CLAIM_MAPPER: "default"
-            #   TEMPORAL_JWT_PERMISSIONS_CLAIM: "permissions"
+            #   TASKS_JWT_KEY_SOURCE1: "http://iam.hanzo.svc/.well-known/jwks"
+            #   TASKS_JWT_KEY_REFRESH: "5m"
+            #   TASKS_AUTH_AUTHORIZER: "default"
+            #   TASKS_AUTH_CLAIM_MAPPER: "default"
+            #   TASKS_JWT_PERMISSIONS_CLAIM: "permissions"
 
             # -- OTEL Tracing --
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
