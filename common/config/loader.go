@@ -27,21 +27,21 @@ var (
 
 const (
 	// EnvKeyRoot the environment variable key for runtime root dir
-	EnvKeyRoot = "TEMPORAL_ROOT"
+	EnvKeyRoot = "TASKS_ROOT"
 	// EnvKeyConfigDir the environment variable key for config dir
-	EnvKeyConfigDir = "TEMPORAL_CONFIG_DIR"
+	EnvKeyConfigDir = "TASKS_CONFIG_DIR"
 	// EnvKeyEnvironment is the environment variable key for environment
-	EnvKeyEnvironment = "TEMPORAL_ENVIRONMENT"
+	EnvKeyEnvironment = "TASKS_ENVIRONMENT"
 	// EnvKeyAvailabilityZone is the environment variable key for AZ
-	EnvKeyAvailabilityZone = "TEMPORAL_AVAILABILITY_ZONE"
+	EnvKeyAvailabilityZone = "TASKS_AVAILABILITY_ZONE"
 	// EnvKeyAvailabilityZoneTypo is the old environment variable key for AZ that
 	// included a typo. This is deprecated and only here to support backwards
 	// compatibility.
-	EnvKeyAvailabilityZoneTypo = "TEMPORAL_AVAILABILTY_ZONE"
+	EnvKeyAvailabilityZoneTypo = "TASKS_AVAILABILTY_ZONE"
 	// EnvKeyAllowNoAuth is the environment variable key for setting no authorizer
-	EnvKeyAllowNoAuth = "TEMPORAL_ALLOW_NO_AUTH"
+	EnvKeyAllowNoAuth = "TASKS_ALLOW_NO_AUTH"
 	// EnvKeyConfigFile is the environment variable key for specifying a config file path
-	EnvKeyConfigFile = "TEMPORAL_SERVER_CONFIG_FILE_PATH"
+	EnvKeyConfigFile = "TASKS_SERVER_CONFIG_FILE_PATH"
 )
 
 const (
