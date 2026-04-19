@@ -159,32 +159,32 @@ persistence:
 global:
     membership:
         maxJoinDuration: 30s
-        broadcastAddress: "{{ env "TEMPORAL_BROADCAST_ADDRESS" }}"
+        broadcastAddress: "{{ env "TASKS_BROADCAST_ADDRESS" }}"
     pprof:
         port: {{ default "0" (env "PPROF_PORT") }}
     tls:
-        refreshInterval: {{ default "0s" (env "TEMPORAL_TLS_REFRESH_INTERVAL") }}
+        refreshInterval: {{ default "0s" (env "TASKS_TLS_REFRESH_INTERVAL") }}
         expirationChecks:
-            warningWindow: {{ default "0s" (env "TEMPORAL_TLS_EXPIRATION_CHECKS_WARNING_WINDOW") }}
-            errorWindow: {{ default "0s" (env "TEMPORAL_TLS_EXPIRATION_CHECKS_ERROR_WINDOW") }}
-            checkInterval: {{ default "0s" (env "TEMPORAL_TLS_EXPIRATION_CHECKS_CHECK_INTERVAL") }}
+            warningWindow: {{ default "0s" (env "TASKS_TLS_EXPIRATION_CHECKS_WARNING_WINDOW") }}
+            errorWindow: {{ default "0s" (env "TASKS_TLS_EXPIRATION_CHECKS_ERROR_WINDOW") }}
+            checkInterval: {{ default "0s" (env "TASKS_TLS_EXPIRATION_CHECKS_CHECK_INTERVAL") }}
         internode:
             # This server section configures the TLS certificate that internal temporal
             # cluster nodes (history, matching, and internal-frontend) present to other
             # clients within the Temporal Cluster.
             server:
-                requireClientAuth: {{ default "false" (env "TEMPORAL_TLS_REQUIRE_CLIENT_AUTH") }}
+                requireClientAuth: {{ default "false" (env "TASKS_TLS_REQUIRE_CLIENT_AUTH") }}
 
-                certFile: {{ env "TEMPORAL_TLS_SERVER_CERT" }}
-                keyFile: {{ env "TEMPORAL_TLS_SERVER_KEY" }}
-                {{- with env "TEMPORAL_TLS_SERVER_CA_CERT" }}
+                certFile: {{ env "TASKS_TLS_SERVER_CERT" }}
+                keyFile: {{ env "TASKS_TLS_SERVER_KEY" }}
+                {{- with env "TASKS_TLS_SERVER_CA_CERT" }}
                 clientCaFiles:
                     - {{ . }}
                 {{- end }}
 
-                certData: {{ env "TEMPORAL_TLS_SERVER_CERT_DATA" }}
-                keyData: {{ env "TEMPORAL_TLS_SERVER_KEY_DATA" }}
-                {{- with env "TEMPORAL_TLS_SERVER_CA_CERT_DATA" }}
+                certData: {{ env "TASKS_TLS_SERVER_CERT_DATA" }}
+                keyData: {{ env "TASKS_TLS_SERVER_KEY_DATA" }}
+                {{- with env "TASKS_TLS_SERVER_CA_CERT_DATA" }}
                 clientCaData:
                     - {{ . }}
                 {{- end }}
@@ -193,13 +193,13 @@ global:
             # the Temporal Cluster that connect to an Internode (history, matching, or
             # internal-frontend)
             client:
-                serverName: {{ env "TEMPORAL_TLS_INTERNODE_SERVER_NAME" }}
-                disableHostVerification: {{ default "false" (env "TEMPORAL_TLS_INTERNODE_DISABLE_HOST_VERIFICATION") }}
-                {{- with env "TEMPORAL_TLS_SERVER_CA_CERT" }}
+                serverName: {{ env "TASKS_TLS_INTERNODE_SERVER_NAME" }}
+                disableHostVerification: {{ default "false" (env "TASKS_TLS_INTERNODE_DISABLE_HOST_VERIFICATION") }}
+                {{- with env "TASKS_TLS_SERVER_CA_CERT" }}
                 rootCaFiles:
                     - {{ . }}
                 {{- end }}
-                {{- with env "TEMPORAL_TLS_SERVER_CA_CERT_DATA" }}
+                {{- with env "TASKS_TLS_SERVER_CA_CERT_DATA" }}
                 rootCaData:
                     - {{ . }}
                 {{- end }}
@@ -207,33 +207,33 @@ global:
             # This server section configures the TLS certificate that the Frontend
             # server presents to external clients.
             server:
-                requireClientAuth: {{ default "false" (env "TEMPORAL_TLS_REQUIRE_CLIENT_AUTH") }}
-                certFile: {{ env "TEMPORAL_TLS_FRONTEND_CERT" }}
-                keyFile: {{ env "TEMPORAL_TLS_FRONTEND_KEY" }}
-                {{- if env "TEMPORAL_TLS_CLIENT1_CA_CERT" }}
+                requireClientAuth: {{ default "false" (env "TASKS_TLS_REQUIRE_CLIENT_AUTH") }}
+                certFile: {{ env "TASKS_TLS_FRONTEND_CERT" }}
+                keyFile: {{ env "TASKS_TLS_FRONTEND_KEY" }}
+                {{- if env "TASKS_TLS_CLIENT1_CA_CERT" }}
                 clientCaFiles:
-                    - {{ env "TEMPORAL_TLS_CLIENT1_CA_CERT" }}
-                    - {{ env "TEMPORAL_TLS_CLIENT2_CA_CERT" }}
+                    - {{ env "TASKS_TLS_CLIENT1_CA_CERT" }}
+                    - {{ env "TASKS_TLS_CLIENT2_CA_CERT" }}
                 {{- end }}
 
-                certData: {{ env "TEMPORAL_TLS_FRONTEND_CERT_DATA" }}
-                keyData: {{ env "TEMPORAL_TLS_FRONTEND_KEY_DATA" }}
-                {{- if env "TEMPORAL_TLS_CLIENT1_CA_CERT_DATA" }}
+                certData: {{ env "TASKS_TLS_FRONTEND_CERT_DATA" }}
+                keyData: {{ env "TASKS_TLS_FRONTEND_KEY_DATA" }}
+                {{- if env "TASKS_TLS_CLIENT1_CA_CERT_DATA" }}
                 clientCaData:
-                    - {{ env "TEMPORAL_TLS_CLIENT1_CA_CERT_DATA" }}
-                    - {{ env "TEMPORAL_TLS_CLIENT2_CA_CERT_DATA" }}
+                    - {{ env "TASKS_TLS_CLIENT1_CA_CERT_DATA" }}
+                    - {{ env "TASKS_TLS_CLIENT2_CA_CERT_DATA" }}
                 {{- end }}
 
             # This client section is used to configure the TLS clients within
             # the Temporal Cluster (specifically the Worker role) that connect to the Frontend service
             client:
-                serverName: {{ env "TEMPORAL_TLS_FRONTEND_SERVER_NAME" }}
-                disableHostVerification: {{ default "false" (env "TEMPORAL_TLS_FRONTEND_DISABLE_HOST_VERIFICATION") }}
-                {{- with env "TEMPORAL_TLS_SERVER_CA_CERT" }}
+                serverName: {{ env "TASKS_TLS_FRONTEND_SERVER_NAME" }}
+                disableHostVerification: {{ default "false" (env "TASKS_TLS_FRONTEND_DISABLE_HOST_VERIFICATION") }}
+                {{- with env "TASKS_TLS_SERVER_CA_CERT" }}
                 rootCaFiles:
                     - {{ . }}
                 {{- end }}
-                {{- with env "TEMPORAL_TLS_SERVER_CA_CERT_DATA" }}
+                {{- with env "TASKS_TLS_SERVER_CA_CERT_DATA" }}
                 rootCaData:
                     - {{ . }}
                 {{- end }}
@@ -252,17 +252,17 @@ global:
     authorization:
         jwtKeyProvider:
             keySourceURIs:
-                {{- with env "TEMPORAL_JWT_KEY_SOURCE1" }}
+                {{- with env "TASKS_JWT_KEY_SOURCE1" }}
                 - {{ . }}
                 {{- end }}
-                {{- with env "TEMPORAL_JWT_KEY_SOURCE2" }}
+                {{- with env "TASKS_JWT_KEY_SOURCE2" }}
                 - {{ . }}
                 {{- end }}
-            refreshInterval: {{ default "1m" (env "TEMPORAL_JWT_KEY_REFRESH") }}
-        permissionsClaimName: {{ default "permissions" (env "TEMPORAL_JWT_PERMISSIONS_CLAIM") }}
-        permissionsRegex: {{ default "" (env "TEMPORAL_JWT_PERMISSIONS_REGEX") }}
-        authorizer: {{ env "TEMPORAL_AUTH_AUTHORIZER" }}
-        claimMapper: {{ env "TEMPORAL_AUTH_CLAIM_MAPPER" }}
+            refreshInterval: {{ default "1m" (env "TASKS_JWT_KEY_REFRESH") }}
+        permissionsClaimName: {{ default "permissions" (env "TASKS_JWT_PERMISSIONS_CLAIM") }}
+        permissionsRegex: {{ default "" (env "TASKS_JWT_PERMISSIONS_REGEX") }}
+        authorizer: {{ env "TASKS_AUTH_AUTHORIZER" }}
+        claimMapper: {{ env "TASKS_AUTH_CLAIM_MAPPER" }}
 
 {{- $temporalGrpcPort := default "7233" (env "FRONTEND_GRPC_PORT") }}
 {{- $temporalHTTPPort := default "7243" (env "FRONTEND_HTTP_PORT") }}
@@ -343,7 +343,7 @@ namespaceDefaults:
       state: "disabled"
       URI: "file:///tmp/temporal_vis_archival/development"
 
-{{- if or (env "USE_INTERNAL_FRONTEND") (and (not (env "TEMPORAL_AUTH_AUTHORIZER")) (not (env "TEMPORAL_AUTH_CLAIM_MAPPER"))) }}
+{{- if or (env "USE_INTERNAL_FRONTEND") (and (not (env "TASKS_AUTH_AUTHORIZER")) (not (env "TASKS_AUTH_CLAIM_MAPPER"))) }}
 {{/* publicClient is not needed with internal frontend, or if not using authorizer + claim mapper */}}
 {{- else }}
 {{ $publicIp := default "127.0.0.1" (env "BIND_ON_IP") -}}
