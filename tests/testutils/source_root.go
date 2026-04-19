@@ -19,7 +19,7 @@ func GetRepoRootDirectory(opts ...Option) string {
 	for _, opt := range opts {
 		opt(p)
 	}
-	if customRootDirectory := p.Getenv("TEMPORAL_ROOT"); customRootDirectory != "" {
+	if customRootDirectory := p.Getenv("TASKS_ROOT"); customRootDirectory != "" {
 		return customRootDirectory
 	}
 	return rootDirectory
