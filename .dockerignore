@@ -14,7 +14,14 @@ docker
 tests/functional
 tests/xdc
 tests/testdata
-temporaltest
+# temporaltest contains the embedded LiteServer wrapper used by tasksd
+# embedded-sqlite — keep the embedded + internal subpackages; only skip
+# the test files at the package root.
+temporaltest/server.go
+temporaltest/server_test.go
+temporaltest/onebox.go
+temporaltest/onebox_test.go
+temporaltest/embedded/server_test.go
 k8s
 scripts
 tools/tdbg
