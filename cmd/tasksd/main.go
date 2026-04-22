@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	stdlog "log"
 	"os"
+	"os/signal"
 	"path"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"text/template"
 	_ "time/tzdata" // embed tzdata as a fallback
 
@@ -22,6 +26,7 @@ import (
 	_ "github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/postgresql" // needed to load postgresql plugin
 	_ "github.com/hanzoai/tasks/common/persistence/sql/sqlplugin/sqlite"     // needed to load sqlite plugin
 	"github.com/hanzoai/tasks/temporal"
+	embedded "github.com/hanzoai/tasks/temporaltest/embedded"
 )
 
 // main entry point for the Hanzo Tasks server
@@ -241,6 +246,86 @@ func buildCLI() *cli.App {
 					return cli.Exit(fmt.Sprintf("Unable to start server. Error: %v", err), 1)
 				}
 				return cli.Exit("All services are stopped.", 0)
+			},
+		},
+		{
+			// embedded-sqlite wraps temporaltest/embedded.LiteServer so schema
+			// migrations (sqlite/v1/...) run automatically on first boot. The
+			// plain `start` command loads config-driven persistence but does not
+			// bootstrap a fresh sqlite database. Use this command for single-pod
+			// deployments backed by a persistent volume; HA callers should front
+			// with a K8s Lease and run worker-only replicas.
+			Name:      "embedded-sqlite",
+			Usage:     "Start Hanzo Tasks with embedded sqlite persistence (auto schema bootstrap)",
+			ArgsUsage: " ",
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:    "namespace",
+					Value:   "default",
+					Usage:   "primary namespace to pre-register",
+					EnvVars: []string{"TASKS_NAMESPACE"},
+				},
+				&cli.StringFlag{
+					Name:    "db-path",
+					Value:   "/data/tasks.db",
+					Usage:   "sqlite database file path (parent dir must exist and be writable)",
+					EnvVars: []string{"TASKS_DB_PATH"},
+				},
+				&cli.StringFlag{
+					Name:    "bind-ip",
+					Value:   "0.0.0.0",
+					Usage:   "frontend gRPC bind address",
+					EnvVars: []string{"TASKS_BIND_IP"},
+				},
+				&cli.IntFlag{
+					Name:    "port",
+					Value:   7233,
+					Usage:   "frontend gRPC port",
+					EnvVars: []string{"TASKS_PORT"},
+				},
+				&cli.IntFlag{
+					Name:    "http-port",
+					Value:   7234,
+					Usage:   "frontend HTTP API port (0 disables)",
+					EnvVars: []string{"TASKS_HTTP_PORT"},
+				},
+			},
+			Action: func(c *cli.Context) error {
+				ns := c.String("namespace")
+				dbPath := c.String("db-path")
+				if dir := filepath.Dir(dbPath); dir != "" {
+					if err := os.MkdirAll(dir, 0o755); err != nil {
+						return cli.Exit(fmt.Sprintf("mkdir %s: %v", dir, err), 1)
+					}
+				}
+
+				stdlog.Printf("tasksd embedded-sqlite: namespace=%s db=%s bind=%s:%d http=%d\n",
+					ns, dbPath, c.String("bind-ip"), c.Int("port"), c.Int("http-port"))
+
+				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+
+				srv, err := embedded.Start(ctx, embedded.Config{
+					Namespace:        ns,
+					Backend:          embedded.BackendSQLite,
+					Path:             dbPath,
+					FrontendIP:       c.String("bind-ip"),
+					FrontendPort:     c.Int("port"),
+					FrontendHTTPPort: c.Int("http-port"),
+				})
+				if err != nil {
+					return cli.Exit(fmt.Sprintf("embedded-sqlite start: %v", err), 1)
+				}
+
+				stdlog.Printf("tasksd embedded-sqlite ready: %s\n", srv.FrontendHostPort())
+
+				<-ctx.Done()
+				stdlog.Println("tasksd shutdown signal received, stopping...")
+				if err := srv.Stop(); err != nil {
+					stdlog.Printf("tasksd stop error: %v\n", err)
+					return cli.Exit("shutdown returned error", 1)
+				}
+				return cli.Exit("tasksd stopped", 0)
 			},
 		},
 	}
