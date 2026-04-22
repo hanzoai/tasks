@@ -11160,7 +11160,7 @@ const file_temporal_server_api_historyservice_v1_request_response_proto_rawDesc 
 	"\x1a\bshard_id\"j\n" +
 	"\x1cCancelNexusOperationResponse\x12J\n" +
 	"\bresponse\x18\x01 \x01(\v2..temporal.api.nexus.v1.CancelOperationResponseR\bresponse:t\n" +
-	"\arouting\x12\x1f.google.protobuf.MessageOptions\x18\xc28 \x01(\v25.temporal.server.api.historyservice.v1.RoutingOptionsR\arouting\x88\x01\x01B<Z:github.com/hanzoai/tasks/api/historyservice/v1;historyserviceb\x06proto3"
+	"\arouting\x12\x1f.google.protobuf.MessageOptions\x18\xc28 \x01(\v25.temporal.server.api.historyservice.v1.RoutingOptionsR\arouting\x88\x01\x01B<Z:go.temporal.io/server/api/historyservice/v1;historyserviceb\x06proto3"
 
 var (
 	file_temporal_server_api_historyservice_v1_request_response_proto_rawDescOnce sync.Once

@@ -821,7 +821,7 @@ const file_temporal_server_api_persistence_v1_task_queues_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v29.temporal.server.api.persistence.v1.TaskQueueTypeUserDataR\x05value:\x028\x01\"\x81\x01\n" +
 	"\x1aVersionedTaskQueueUserData\x12I\n" +
 	"\x04data\x18\x01 \x01(\v25.temporal.server.api.persistence.v1.TaskQueueUserDataR\x04data\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversionB6Z4github.com/hanzoai/tasks/api/persistence/v1;persistenceb\x06proto3"
+	"\aversion\x18\x02 \x01(\x03R\aversionB6Z4go.temporal.io/server/api/persistence/v1;persistenceb\x06proto3"
 
 var (
 	file_temporal_server_api_persistence_v1_task_queues_proto_rawDescOnce sync.Once

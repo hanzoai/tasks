@@ -6163,7 +6163,7 @@ const file_temporal_server_api_matchingservice_v1_request_response_proto_rawDesc
 	"\tis_member\x18\x01 \x01(\bR\bisMember\"L\n" +
 	"\x0ePollConditions\x12!\n" +
 	"\fmin_priority\x18\x01 \x01(\x05R\vminPriority\x12\x17\n" +
-	"\ano_wait\x18\x02 \x01(\bR\x06noWaitB>Z<github.com/hanzoai/tasks/api/matchingservice/v1;matchingserviceb\x06proto3"
+	"\ano_wait\x18\x02 \x01(\bR\x06noWaitB>Z<go.temporal.io/server/api/matchingservice/v1;matchingserviceb\x06proto3"
 
 var (
 	file_temporal_server_api_matchingservice_v1_request_response_proto_rawDescOnce sync.Once

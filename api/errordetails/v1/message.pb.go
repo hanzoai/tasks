@@ -543,7 +543,7 @@ const file_temporal_server_api_errordetails_v1_message_proto_rawDesc = "" +
 	"\x1eStickyWorkerUnavailableFailure\" \n" +
 	"\x1eObsoleteDispatchBuildIdFailure\"\x1d\n" +
 	"\x1bObsoleteMatchingTaskFailure\"&\n" +
-	"$ActivityStartDuringTransitionFailureB8Z6github.com/hanzoai/tasks/api/errordetails/v1;errordetailsb\x06proto3"
+	"$ActivityStartDuringTransitionFailureB8Z6go.temporal.io/server/api/errordetails/v1;errordetailsb\x06proto3"
 
 var (
 	file_temporal_server_api_errordetails_v1_message_proto_rawDescOnce sync.Once
