@@ -86,6 +86,11 @@ type Config struct {
 	// gets its own loopback-only frontend).
 	FrontendPort int
 
+	// FrontendHTTPPort enables Temporal's HTTP API on the given port. When 0,
+	// only the gRPC frontend listens (HTTP API disabled). Required for clients
+	// that POST to /api/v1/namespaces/{ns}/workflows or /schedules.
+	FrontendHTTPPort int
+
 	// SearchAttributes registers custom search attributes on the default
 	// namespace at startup (workflow.Info queries). Optional.
 	SearchAttributes map[string]enumspb.IndexedValueType
@@ -148,6 +153,7 @@ func Start(ctx context.Context, cfg Config) (*Server, error) {
 		DatabaseFilePath: cfg.Path,
 		FrontendIP:       frontendIP,
 		FrontendPort:     cfg.FrontendPort,
+		FrontendHTTPPort: cfg.FrontendHTTPPort,
 		Namespaces:       []string{cfg.Namespace},
 		Logger:           logger,
 		SearchAttributes: cfg.SearchAttributes,

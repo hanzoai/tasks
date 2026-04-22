@@ -34,7 +34,7 @@ steps:
           .
 substitutions:
   _IMAGE_BASE: us-docker.pkg.dev/liquidity-registry/liquidityio/tasks
-  _VERSION: v2.0.0
+  _VERSION: v2.0.2
   _GITHUB_TOKEN: ''
 options:
   machineType: E2_HIGHCPU_32
