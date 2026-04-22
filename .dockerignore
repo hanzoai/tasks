@@ -11,16 +11,19 @@
 docs
 develop
 docker
-tests
+tests/functional
+tests/xdc
+tests/testdata
 temporaltest
 k8s
 scripts
 tools/tdbg
 tools/cassandra
 
-# Binaries
-tdbg
-tasksd
-temporal-cassandra-tool
-temporal-sql-tool
-temporal-elasticsearch-tool
+# Binaries at repo root (built in Docker, don't ship into builder)
+# Anchor to root so we don't strip cmd/tasksd/ source dir
+/tdbg
+/tasksd
+/temporal-cassandra-tool
+/temporal-sql-tool
+/temporal-elasticsearch-tool
