@@ -10,7 +10,12 @@ docker
 tests/functional
 tests/xdc
 tests/testdata
-temporaltest
+# Keep temporaltest/embedded + internal — required by cmd/tasksd embedded-sqlite.
+temporaltest/server.go
+temporaltest/server_test.go
+temporaltest/onebox.go
+temporaltest/onebox_test.go
+temporaltest/embedded/server_test.go
 k8s
 scripts
 tools/tdbg
