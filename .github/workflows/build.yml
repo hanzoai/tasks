@@ -11,7 +11,12 @@ permissions:
   packages: write
 
 env:
-  REGISTRY: ghcr.io/hanzoai/tasks
+  # Using -server suffix because the legacy 'hanzoai/tasks' GHCR package
+  # is orphaned from this repo (no linked Repository field on the
+  # package record) so GITHUB_TOKEN hits `permission_denied: write_package`
+  # when pushing. A fresh package name is created and owned by this repo
+  # on first push, which lets the token push future tags cleanly.
+  REGISTRY: ghcr.io/hanzoai/tasks-server
 
 jobs:
   build-amd64:
