@@ -648,7 +648,7 @@ const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"\bpriority\x18\x01 \x01(\x05R\bpriority\"[\n" +
 	"\aTaskKey\x127\n" +
 	"\tfire_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bfireTime\x12\x17\n" +
-	"\atask_id\x18\x02 \x01(\x03R\x06taskIdB6Z4github.com/hanzoai/tasks/api/persistence/v1;persistenceb\x06proto3"
+	"\atask_id\x18\x02 \x01(\x03R\x06taskIdB6Z4go.temporal.io/server/api/persistence/v1;persistenceb\x06proto3"
 
 var (
 	file_temporal_server_api_persistence_v1_tasks_proto_rawDescOnce sync.Once

@@ -732,7 +732,7 @@ const file_temporal_server_chasm_lib_scheduler_proto_v1_request_response_proto_r
 	"\x1fCreateFromMigrationStateRequest\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12[\n" +
 	"\x05state\x18\x02 \x01(\v2E.temporal.server.chasm.lib.scheduler.proto.v1.SchedulerMigrationStateR\x05state\"\"\n" +
-	" CreateFromMigrationStateResponseBGZEgithub.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb;schedulerpbb\x06proto3"
+	" CreateFromMigrationStateResponseBGZEgo.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb;schedulerpbb\x06proto3"
 
 var (
 	file_temporal_server_chasm_lib_scheduler_proto_v1_request_response_proto_rawDescOnce sync.Once
