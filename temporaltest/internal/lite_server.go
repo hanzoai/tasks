@@ -44,6 +44,11 @@ type LiteServerConfig struct {
 	FrontendIP string
 	// Port on which frontend service should listen.
 	FrontendPort int
+	// FrontendHTTPPort enables the Temporal HTTP API on this port. When 0,
+	// the HTTP API is not started and only the gRPC frontend is available.
+	// Required for clients that POST workflows/schedules over HTTP rather
+	// than dial gRPC directly.
+	FrontendHTTPPort int
 	// WithMetricsPort sets the listening port for the default Prometheus metrics handler.
 	//
 	// When unspecified, the port will be system-chosen.
@@ -369,6 +374,11 @@ func (cfg *LiteServerConfig) mustGetService(frontendPortOffset int) config.Servi
 	if frontendPortOffset == 0 && cfg.FrontendIP != "" {
 		svc.RPC.BindOnLocalHost = false
 		svc.RPC.BindOnIP = cfg.FrontendIP
+	}
+
+	// Wire HTTP API on the frontend service only.
+	if frontendPortOffset == 0 && cfg.FrontendHTTPPort != 0 {
+		svc.RPC.HTTPPort = cfg.FrontendHTTPPort
 	}
 
 	return svc
