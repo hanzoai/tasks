@@ -86,7 +86,12 @@ func resolveGitInfo() (ref string, sha string, err error) {
 	return ref, sha, nil
 }
 
-// setImageTags generates Docker image tags from branch name and commit SHA
+// setImageTags generates Docker image tags from branch name and commit SHA.
+// For semver tag refs (vX.Y.Z) it additionally emits a bare "vX.Y.Z"
+// output so downstream bake configs can publish conventional semver
+// image tags alongside the sha+branch tags. Liquidity consumers pin
+// image: tasks:v1.32.0 in their K8s manifests; without the semver output
+// the only tags on the registry are sha-* and branch-v1-32-0 (ugly).
 func setImageTags() error {
 	ref, sha, err := resolveGitInfo()
 	if err != nil {
@@ -96,6 +101,20 @@ func setImageTags() error {
 	// Remove refs/heads/ or refs/tags/ prefix
 	ref = strings.TrimPrefix(ref, "refs/heads/")
 	ref = strings.TrimPrefix(ref, "refs/tags/")
+
+	// Semver match — export as a separate "semver" output used by
+	// docker-bake.hcl to add a bare vX.Y.Z image tag on releases.
+	// Matches whether resolveGitInfo returned a refs/tags/... path OR a
+	// bare tag name from `git describe --tags --exact-match HEAD` in the
+	// CI's detached-HEAD checkout. A branch literally named "v1.32.0"
+	// would trigger this too; we accept that since semver-shaped branch
+	// names are wildly uncommon and the same tag just gets the same
+	// image twice.
+	semverRe := regexp.MustCompile(`^v\d+\.\d+\.\d+([-+].*)?$`)
+	semverTag := ""
+	if semverRe.MatchString(ref) {
+		semverTag = ref
+	}
 
 	// Sanitize ref name first
 	// Replace any non-alphanumeric (except .-_) with dash
@@ -150,6 +169,9 @@ func setImageTags() error {
 	}
 	if err := setOutput("git-sha", sha); err != nil {
 		return fmt.Errorf("failed to set git-sha output: %w", err)
+	}
+	if err := setOutput("semver", semverTag); err != nil {
+		return fmt.Errorf("failed to set semver output: %w", err)
 	}
 
 	return nil
