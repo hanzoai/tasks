@@ -5111,7 +5111,7 @@ const file_temporal_server_api_persistence_v1_executions_proto_rawDesc = "" +
 	"\bidentity\x18\x02 \x01(\tR\bidentity\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x04 \x01(\tR\trequestIdB6Z4github.com/hanzoai/tasks/api/persistence/v1;persistenceb\x06proto3"
+	"request_id\x18\x04 \x01(\tR\trequestIdB6Z4go.temporal.io/server/api/persistence/v1;persistenceb\x06proto3"
 
 var (
 	file_temporal_server_api_persistence_v1_executions_proto_rawDescOnce sync.Once
