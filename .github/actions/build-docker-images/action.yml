@@ -44,6 +44,9 @@ outputs:
   sha-full-tag:
     description: "Docker full SHA tag (e.g., sha-abcdef123456...)"
     value: ${{ steps.image-tags.outputs.sha-full }}
+  semver-tag:
+    description: "Bare semver tag for tag-ref builds (e.g., v1.32.0); empty otherwise"
+    value: ${{ steps.image-tags.outputs.semver }}
 
 runs:
   using: composite
@@ -115,6 +118,7 @@ runs:
         IMAGE_SHA_SHORT_TAG: ${{ steps.image-tags.outputs.sha }}
         IMAGE_SHA_FULL_TAG: ${{ steps.image-tags.outputs.sha-full }}
         IMAGE_BRANCH_TAG: ${{ steps.image-tags.outputs.tag }}
+        IMAGE_SEMVER_TAG: ${{ steps.image-tags.outputs.semver }}
         TEMPORAL_SHA: ${{ steps.image-tags.outputs.git-sha }}
         TAG_LATEST: ${{ inputs.tag-latest }}
         ALPINE_TAG: ${{ inputs.alpine-tag }}
@@ -143,6 +147,7 @@ runs:
         IMAGE_SHA_SHORT_TAG: ${{ steps.image-tags.outputs.sha }}
         IMAGE_SHA_FULL_TAG: ${{ steps.image-tags.outputs.sha-full }}
         IMAGE_BRANCH_TAG: ${{ steps.image-tags.outputs.tag }}
+        IMAGE_SEMVER_TAG: ${{ steps.image-tags.outputs.semver }}
         TEMPORAL_SHA: ${{ steps.image-tags.outputs.git-sha }}
         TAG_LATEST: ${{ inputs.tag-latest }}
         ALPINE_TAG: ${{ inputs.alpine-tag }}
