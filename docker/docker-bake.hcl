@@ -26,6 +26,13 @@ variable "SAFE_IMAGE_BRANCH_TAG" {
   default = join("-", [for c in regexall("[a-z0-9]+", lower(IMAGE_BRANCH_TAG)) : c])
 }
 
+# Bare semver tag (e.g. v1.32.0) emitted only for tag-ref builds. Publishes
+# conventional semver image tags alongside the sha+branch tags so K8s
+# manifests pin `image: tasks:v1.32.0` instead of `tasks:branch-v-1-32-0`.
+variable "IMAGE_SEMVER_TAG" {
+  default = ""
+}
+
 variable "TEMPORAL_SHA" {
   default = ""
 }
@@ -53,6 +60,7 @@ target "admin-tools" {
     "${IMAGE_REPO}/tasks-admin-tools:${IMAGE_SHA_SHORT_TAG}",
     "${IMAGE_REPO}/tasks-admin-tools:${IMAGE_SHA_FULL_TAG}",
     "${IMAGE_REPO}/tasks-admin-tools:${SAFE_IMAGE_BRANCH_TAG}",
+    IMAGE_SEMVER_TAG != "" ? "${IMAGE_REPO}/tasks-admin-tools:${IMAGE_SEMVER_TAG}" : "",
     TAG_LATEST ? "${IMAGE_REPO}/tasks-admin-tools:latest" : "",
   ])
   platforms = ["linux/amd64", "linux/arm64"]
@@ -79,6 +87,7 @@ target "server" {
     "${IMAGE_REPO}/tasks:${IMAGE_SHA_SHORT_TAG}",
     "${IMAGE_REPO}/tasks:${IMAGE_SHA_FULL_TAG}",
     "${IMAGE_REPO}/tasks:${SAFE_IMAGE_BRANCH_TAG}",
+    IMAGE_SEMVER_TAG != "" ? "${IMAGE_REPO}/tasks:${IMAGE_SEMVER_TAG}" : "",
     TAG_LATEST ? "${IMAGE_REPO}/tasks:latest" : "",
   ])
   platforms = ["linux/amd64", "linux/arm64"]
