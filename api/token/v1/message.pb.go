@@ -719,7 +719,7 @@ const file_temporal_server_api_token_v1_message_proto_rawDesc = "" +
 	"\x03ref\x18\x04 \x01(\v23.temporal.server.api.persistence.v1.StateMachineRefR\x03ref\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x05 \x01(\tR\trequestId\x12#\n" +
-	"\rcomponent_ref\x18\x06 \x01(\fR\fcomponentRefB*Z(github.com/hanzoai/tasks/api/token/v1;tokenb\x06proto3"
+	"\rcomponent_ref\x18\x06 \x01(\fR\fcomponentRefB*Z(go.temporal.io/server/api/token/v1;tokenb\x06proto3"
 
 var (
 	file_temporal_server_api_token_v1_message_proto_rawDescOnce sync.Once
