@@ -5,6 +5,8 @@ package temporalite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -229,14 +231,22 @@ func NewLiteServer(liteConfig *LiteServerConfig, opts ...temporal.ServerOption) 
 	sqlConfig := liteConfig.BaseConfig.Persistence.DataStores[sqliteplugin.PluginName].SQL
 
 	if !liteConfig.Ephemeral {
-		// Apply migrations if file does not already exist
-		if _, err := os.Stat(liteConfig.DatabaseFilePath); os.IsNotExist(err) {
-			// Check if any of the parent dirs are missing
-			dir := filepath.Dir(liteConfig.DatabaseFilePath)
-			if _, err := os.Stat(dir); err != nil {
-				return nil, fmt.Errorf("error setting up schema: %w", err)
-			}
+		// Apply migrations when the file is missing OR when the file
+		// exists but the schema was never installed (empty DB left behind
+		// by a PV mount, interrupted init, or crashed first boot). The
+		// old implementation only ran schema when Stat returned IsNotExist,
+		// which silently skipped setup for any pre-created empty file and
+		// manifested at first query as `no such table: cluster_metadata_info`.
+		dir := filepath.Dir(liteConfig.DatabaseFilePath)
+		if _, err := os.Stat(dir); err != nil {
+			return nil, fmt.Errorf("error setting up schema: %w", err)
+		}
 
+		needsSchema, err := sqliteNeedsSchema(liteConfig.DatabaseFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("error inspecting database: %w", err)
+		}
+		if needsSchema {
 			if err := sqlite.SetupSchema(sqlConfig); err != nil {
 				return nil, fmt.Errorf("error setting up schema: %w", err)
 			}
@@ -342,6 +352,57 @@ func (s *LiteServer) NewClientWithOptions(ctx context.Context, options client.Op
 // NewClient or NewClientWithOptions should be used instead.
 func (s *LiteServer) FrontendHostPort() string {
 	return s.frontendHostPort
+}
+
+// sqliteNeedsSchema reports whether the database at path requires a fresh
+// schema setup. It returns true when the file is missing OR when it exists
+// but has no `cluster_metadata_info` table (the canonical persistence root).
+// This guards against a zero-byte file left behind by a Kubernetes
+// PersistentVolume mount, a crashed first boot, or a manual `touch`, which
+// otherwise silently skip migrations and surface at runtime as
+// "no such table: cluster_metadata_info".
+func sqliteNeedsSchema(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	// Zero-byte file means nothing has been written; schema has not run.
+	if info.Size() == 0 {
+		return true, nil
+	}
+
+	// File has content. Confirm the canonical table is present. If the
+	// DB is corrupt or unreadable, surface the error rather than silently
+	// attempting to re-run SetupSchema (which will fail with "table
+	// already exists" against a partial install).
+	dsn := fmt.Sprintf("file:%s?mode=rw&cache=shared", path)
+	conn, err := sql.Open("sqlite_temporal", dsn)
+	if err != nil {
+		return false, fmt.Errorf("open sqlite for schema probe: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// Short timeout — this is a readiness probe, not a recovery path.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var name string
+	row := conn.QueryRowContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='table' AND name='cluster_metadata_info' LIMIT 1`)
+	switch err := row.Scan(&name); {
+	case err == nil:
+		// Table exists, schema already installed.
+		return false, nil
+	case errors.Is(err, sql.ErrNoRows):
+		// No such table — file is either empty DB or the schema was
+		// never applied. Setup needs to run.
+		return true, nil
+	default:
+		return false, fmt.Errorf("probe cluster_metadata_info: %w", err)
+	}
 }
 
 var supportedPragmas = map[string]struct{}{
