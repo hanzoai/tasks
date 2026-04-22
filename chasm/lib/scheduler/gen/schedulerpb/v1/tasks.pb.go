@@ -230,7 +230,7 @@ const file_temporal_server_chasm_lib_scheduler_proto_v1_tasks_proto_rawDesc = ""
 	"\rGeneratorTask\"\x1a\n" +
 	"\x18InvokerProcessBufferTask\"\x14\n" +
 	"\x12InvokerExecuteTask\"\x10\n" +
-	"\x0eBackfillerTaskBGZEgithub.com/hanzoai/tasks/chasm/lib/scheduler/gen/schedulerpb;schedulerpbb\x06proto3"
+	"\x0eBackfillerTaskBGZEgo.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb;schedulerpbb\x06proto3"
 
 var (
 	file_temporal_server_chasm_lib_scheduler_proto_v1_tasks_proto_rawDescOnce sync.Once

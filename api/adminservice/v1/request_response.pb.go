@@ -6171,7 +6171,7 @@ const file_temporal_server_api_adminservice_v1_request_response_proto_rawDesc = 
 	"\x1cSCHEDULER_TARGET_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16SCHEDULER_TARGET_CHASM\x10\x01\x12\x1d\n" +
 	"\x19SCHEDULER_TARGET_WORKFLOW\x10\x02\"\x19\n" +
-	"\x17MigrateScheduleResponseB8Z6github.com/hanzoai/tasks/api/adminservice/v1;adminserviceb\x06proto3"
+	"\x17MigrateScheduleResponseB8Z6go.temporal.io/server/api/adminservice/v1;adminserviceb\x06proto3"
 
 var (
 	file_temporal_server_api_adminservice_v1_request_response_proto_rawDescOnce sync.Once

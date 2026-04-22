@@ -2300,7 +2300,7 @@ const file_temporal_server_api_replication_v1_message_proto_rawDesc = "" +
 	"\vbusiness_id\x18\x01 \x01(\tR\n" +
 	"workflowId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12!\n" +
-	"\farchetype_id\x18\x03 \x01(\rR\varchetypeIdB5Z3github.com/hanzoai/tasks/api/replication/v1;repicationb\x06proto3"
+	"\farchetype_id\x18\x03 \x01(\rR\varchetypeIdB5Z3go.temporal.io/server/api/replication/v1;repicationb\x06proto3"
 
 var (
 	file_temporal_server_api_replication_v1_message_proto_rawDescOnce sync.Once
