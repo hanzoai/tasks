@@ -1,19 +1,41 @@
 steps:
+  # Set up QEMU for cross-arch emulation
   - name: 'gcr.io/cloud-builders/docker'
+    id: qemu
+    entrypoint: 'sh'
     args:
-      - 'build'
-      - '--build-arg'
-      - 'GITHUB_TOKEN=${_GITHUB_TOKEN}'
-      - '-t'
-      - '${_IMAGE}'
-      - '.'
+      - '-c'
+      - |
+        docker run --privileged --rm tonistiigi/binfmt --install all
+
+  # Create buildx builder
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_IMAGE}']
+    id: buildx-init
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        docker buildx create --use --name multiarch-builder --driver docker-container
+        docker buildx inspect --bootstrap
+
+  # Build and push multi-arch (linux/amd64 + linux/arm64) via manifest list
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build-push
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          --build-arg GITHUB_TOKEN=${_GITHUB_TOKEN} \
+          --tag ${_IMAGE_BASE}:${_VERSION} \
+          --tag ${_IMAGE_BASE}:latest \
+          --push \
+          .
 substitutions:
-  _IMAGE: us-docker.pkg.dev/liquidity-registry/liquidityio/tasks:v1.0.0
+  _IMAGE_BASE: us-docker.pkg.dev/liquidity-registry/liquidityio/tasks
+  _VERSION: v2.0.0
   _GITHUB_TOKEN: ''
-images:
-  - '${_IMAGE}'
 options:
-  machineType: E2_HIGHCPU_8
-timeout: 600s
+  machineType: E2_HIGHCPU_32
+timeout: 2400s

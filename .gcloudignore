@@ -7,7 +7,9 @@
 docs
 develop
 docker
-tests
+tests/functional
+tests/xdc
+tests/testdata
 temporaltest
 k8s
 scripts
@@ -17,3 +19,11 @@ temporal/server_test.go
 *.test
 *.md
 !CLAUDE.md
+
+# Binaries in repo root (built in Docker, not needed in build context)
+# Anchor to repo root so we don't strip cmd/tasksd/ source dir
+/tasksd
+/tdbg
+/temporal-cassandra-tool
+/temporal-sql-tool
+/temporal-elasticsearch-tool
