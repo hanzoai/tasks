@@ -15,6 +15,9 @@ RUN apk add --no-cache ca-certificates sqlite-libs
 COPY --from=build /tasksd /usr/local/bin/tasksd
 COPY config/ /etc/tasks/config/
 RUN mkdir -p /data
-EXPOSE 7233 7243
+EXPOSE 7233 7234 7243
 ENTRYPOINT ["tasksd"]
-CMD ["start", "--env", "embedded-sqlite", "--config", "/etc/tasks/config"]
+# Default to embedded-sqlite command which auto-runs schema migrations on
+# first boot. 7233 = gRPC frontend, 7234 = HTTP API. For Postgres/MySQL,
+# override CMD to invoke `start`.
+CMD ["embedded-sqlite", "--db-path", "/data/tasks.db", "--bind-ip", "0.0.0.0", "--port", "7233", "--http-port", "7234"]
