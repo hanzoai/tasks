@@ -102,6 +102,12 @@ type chanImpl struct {
 	// waiting senders (only on unbuffered): each holds the payload
 	// and a done channel closed once a receiver takes it.
 	sendWaiters []*chanSendWaiter
+
+	// wakers is the set of single-shot one-buffer channels an outside
+	// observer (Selector fan-in) parks on to learn when this channel
+	// becomes readable. Send() and Close() each signal every armed
+	// waker by non-blocking send; wakers auto-remove on consume.
+	wakers []chan struct{}
 }
 
 type chanRecvWaiter struct {
@@ -138,6 +144,46 @@ func NewChannelFromEnv(name string, size int) Channel {
 // user code should use ReceiveAsync.
 func (c *chanImpl) HasValue() bool { return c.hasValue() }
 
+// RegisterReadyWaker attaches a single-shot notification channel. The
+// channel receives a value (non-blocking) as soon as the chan becomes
+// readable — i.e. a value is buffered, an unbuffered sender parks, or
+// the channel is closed. The waker is auto-removed from the set once
+// fired; callers pass a buffered (cap 1) channel so the signal is
+// never dropped.
+//
+// Used by the Selector fan-in to avoid busy-polling. If the channel
+// already has a value at registration time the waker fires
+// immediately (synchronously, before returning).
+func (c *chanImpl) RegisterReadyWaker(w chan struct{}) {
+	if w == nil {
+		return
+	}
+	c.mu.Lock()
+	readable := len(c.buf) > 0 || (c.size == 0 && len(c.sendWaiters) > 0) || c.closed
+	if readable {
+		c.mu.Unlock()
+		select {
+		case w <- struct{}{}:
+		default:
+		}
+		return
+	}
+	c.wakers = append(c.wakers, w)
+	c.mu.Unlock()
+}
+
+// signalWakersLocked fires every registered waker (non-blocking) and
+// drops them from the slice. Caller must hold c.mu.
+func (c *chanImpl) signalWakersLocked() {
+	for _, w := range c.wakers {
+		select {
+		case w <- struct{}{}:
+		default:
+		}
+	}
+	c.wakers = nil
+}
+
 // Name implements ReceiveChannel.
 func (c *chanImpl) Name() string { return c.name }
 
@@ -171,13 +217,18 @@ func (c *chanImpl) Send(ctx Context, val any) error {
 	// Buffered channel with room: enqueue.
 	if c.size > 0 && len(c.buf) < c.size {
 		c.buf = append(c.buf, payload)
+		c.signalWakersLocked()
 		c.mu.Unlock()
 		return nil
 	}
 
-	// Block: park as a send-waiter.
+	// Block: park as a send-waiter. For unbuffered channels a parked
+	// sender means Receive can now satisfy, so wake observers.
 	w := &chanSendWaiter{done: make(chan struct{}), payload: payload}
 	c.sendWaiters = append(c.sendWaiters, w)
+	if c.size == 0 {
+		c.signalWakersLocked()
+	}
 	c.mu.Unlock()
 
 	select {
@@ -308,6 +359,9 @@ func (c *chanImpl) Close() {
 		close(r.done)
 	}
 	c.recvWaiters = nil
+	// Closed channel is readable (Receive returns ok=false). Notify
+	// any Selector fan-in observers.
+	c.signalWakersLocked()
 	c.mu.Unlock()
 }
 

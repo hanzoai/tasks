@@ -141,7 +141,8 @@ func TestNewTimer_FiresWithNilError(t *testing.T) {
 	env := workflow.NewStubEnv()
 	ctx := workflow.NewContextFromEnv(env)
 
-	f := workflow.NewTimer(ctx, 3*time.Second)
+	// Real wall-clock timer: use a small duration so the test is fast.
+	f := workflow.NewTimer(ctx, 20*time.Millisecond)
 	if err := f.Get(ctx, nil); err != nil {
 		t.Fatalf("timer Get: %v", err)
 	}
@@ -383,14 +384,16 @@ func TestSelector_AddDefaultFiresWhenNothingReady(t *testing.T) {
 	ctx := workflow.NewContextFromEnv(env)
 
 	ch := workflow.GetSignalChannel(ctx, "empty")
-	f := workflow.NewTimer(ctx, time.Hour) // will be marked ready in stub because stub fires timers eagerly
-	// Drain the timer first so it's no longer ready
-	_ = f.Get(ctx, nil)
-
-	fu2 := workflow.NewFuture() // unsettled
+	// Two unsettled futures — neither will be ready when Select runs
+	// so the default case must fire. (Prior to PR-C this test created
+	// a 1h timer and "drained" it, which exercised the stub's old
+	// eager-fire bug; real timers don't pre-fire.)
+	fu1 := workflow.NewFuture()
+	fu2 := workflow.NewFuture()
 	defFired := int32(0)
 	sel := workflow.NewSelector(ctx)
 	sel.AddReceive(ch, func(workflow.ReceiveChannel, bool) {})
+	sel.AddFuture(fu1, func(workflow.Future) {})
 	sel.AddFuture(fu2, func(workflow.Future) {})
 	sel.AddDefault(func() { atomic.StoreInt32(&defFired, 1) })
 	sel.Select(ctx)
