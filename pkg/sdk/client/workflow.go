@@ -9,14 +9,37 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/hanzoai/tasks/pkg/sdk/converter"
 )
 
-// WorkflowRun is the handle returned by ExecuteWorkflow. Get blocks until
-// the workflow terminates and decodes the result into `valuePtr`.
+// WorkflowRun is the handle returned by ExecuteWorkflow /
+// SignalWithStartWorkflow / GetWorkflow. Get blocks until the workflow
+// terminates and decodes the result into `valuePtr`.
 type WorkflowRun interface {
+	// Get blocks until the workflow terminates and decodes the
+	// result into valuePtr. When the workflow continues-as-new the
+	// default behaviour follows the chain to the final run.
 	Get(ctx context.Context, valuePtr any) error
+
+	// GetWithOptions is the option-parameterised form of Get. When
+	// opts.DisableFollowingRuns is true, Get stops at the current
+	// run rather than following a continue-as-new chain to the final
+	// run.
+	GetWithOptions(ctx context.Context, valuePtr any, opts WorkflowRunGetOptions) error
+
 	GetID() string
 	GetRunID() string
+}
+
+// WorkflowRunGetOptions tunes WorkflowRun.GetWithOptions. Mirrors the
+// upstream shape so caller code compiles unchanged after the import
+// swap.
+type WorkflowRunGetOptions struct {
+	// DisableFollowingRuns, when true, prevents Get from walking
+	// the continue-as-new chain. It returns when the current run
+	// terminates even if a successor run was started.
+	DisableFollowingRuns bool
 }
 
 // WorkflowExecutionInfo mirrors schema/tasks.zap WorkflowExecutionInfo
@@ -274,24 +297,26 @@ func (r *workflowRunImpl) GetID() string { return r.id }
 // GetRunID returns the run ID.
 func (r *workflowRunImpl) GetRunID() string { return r.runID }
 
-// Get blocks until the workflow terminates and decodes the result into
-// valuePtr.
-//
-// NOTE (v1 gap, tracked in schema/tasks.zap): the schema does not yet
-// declare a history-fetch RPC (opcode 0x006A reserved). Until pkg/sdk/worker
-// lands with a GetWorkflowHistory / GetWorkflowResult RPC, the best we can
-// do is describe the workflow, wait for a terminal status, and decode the
-// result payload if the server ships one in the DescribeWorkflowResponse.
-// The describe struct does not carry `result` today, so Get returns
-// ErrNotImplementedLocally when a result was requested.
-//
-// Callers that only need to block until termination should use ctx with
-// a deadline; errors other than ErrNotImplementedLocally indicate the
-// workflow did not reach a successful terminal state.
+// Get is GetWithOptions(ctx, valuePtr, zero-options). It follows the
+// continue-as-new chain to the final run.
 func (r *workflowRunImpl) Get(ctx context.Context, valuePtr any) error {
-	// Poll DescribeWorkflow until terminal. The cadence is modest to
-	// avoid hammering the server; the server push-history RPC will
-	// replace this once pkg/sdk/worker exists.
+	return r.GetWithOptions(ctx, valuePtr, WorkflowRunGetOptions{})
+}
+
+// GetWithOptions blocks until the workflow terminates and decodes the
+// result into valuePtr. Poll cadence is exponential (250ms → 5s cap) so
+// the v1 wire does not need a dedicated long-poll history-fetch RPC.
+//
+// NOTE (v1 gap, tracked in schema/tasks.zap): DescribeWorkflowResponse
+// does not yet carry a `result` field, so a completed-workflow result
+// decode surfaces ErrNotImplementedLocally. Callers that only need to
+// block until termination pass valuePtr=nil.
+//
+// opts.DisableFollowingRuns, when true, stops at a ContinuedAsNew
+// terminal and surfaces it as an error. When false (default), a
+// ContinuedAsNew transition is followed: the handle's runID is
+// replaced by the successor and polling resumes.
+func (r *workflowRunImpl) GetWithOptions(ctx context.Context, valuePtr any, opts WorkflowRunGetOptions) error {
 	backoff := 250 * time.Millisecond
 	const maxBackoff = 5 * time.Second
 
@@ -318,7 +343,15 @@ func (r *workflowRunImpl) Get(ctx context.Context, valuePtr any) error {
 		case WorkflowStatusTimedOut:
 			return fmt.Errorf("workflow timed out: %s", info.WorkflowID)
 		case WorkflowStatusContinuedAsNew:
-			return fmt.Errorf("workflow continued as new: %s", info.WorkflowID)
+			if opts.DisableFollowingRuns {
+				return fmt.Errorf("workflow continued as new: %s", info.WorkflowID)
+			}
+			// v1 DescribeWorkflow does not include the successor run
+			// id; clear it and let the next DescribeWorkflow resolve
+			// the current head. Server-side uses workflowID as the
+			// stable lookup key for the latest run.
+			r.runID = ""
+			// fallthrough: loop, re-poll
 		}
 
 		select {
@@ -330,6 +363,133 @@ func (r *workflowRunImpl) Get(ctx context.Context, valuePtr any) error {
 			}
 		}
 	}
+}
+
+// signalWithStartWorkflowRequest is the v1 JSON shape for opcode
+// 0x0066. It is the union of startWorkflowRequest plus signalName /
+// signalInput — the frontend handler decodes it as
+// signalWithStartReq in service/frontend/zap_handler.go.
+type signalWithStartWorkflowRequest struct {
+	Namespace    string         `json:"namespace"`
+	WorkflowID   string         `json:"workflow_id"`
+	WorkflowType string         `json:"workflow_type"`
+	TaskQueue    string         `json:"task_queue"`
+	Input        []any          `json:"input,omitempty"`
+	RetryPolicy  *retryPolicy   `json:"retry_policy,omitempty"`
+	Timeouts     timeouts       `json:"timeouts,omitempty"`
+	Memo         map[string]any `json:"memo,omitempty"`
+	CronSchedule string         `json:"cron_schedule,omitempty"`
+	Identity     string         `json:"identity,omitempty"`
+	SignalName   string         `json:"signal_name"`
+	SignalInput  any            `json:"signal_input,omitempty"`
+}
+
+// queryWorkflowRequest is the v1 JSON shape for opcode 0x0067.
+type queryWorkflowRequest struct {
+	Namespace  string `json:"namespace"`
+	WorkflowID string `json:"workflow_id"`
+	RunID      string `json:"run_id,omitempty"`
+	QueryType  string `json:"query_type"`
+	QueryArgs  []any  `json:"query_args,omitempty"`
+}
+
+// queryWorkflowResponse mirrors the frontend handler's queryResp.
+type queryWorkflowResponse struct {
+	Result []byte `json:"result,omitempty"`
+}
+
+// SignalWithStartWorkflow implements Client. Opcode 0x0066.
+func (c *clientImpl) SignalWithStartWorkflow(
+	ctx context.Context,
+	workflowID, signalName string,
+	signalArg any,
+	opts StartWorkflowOptions,
+	workflow any,
+	workflowArgs ...any,
+) (WorkflowRun, error) {
+	if workflowID == "" {
+		return nil, errors.New("hanzo/tasks/client: workflowID is required")
+	}
+	if signalName == "" {
+		return nil, errors.New("hanzo/tasks/client: signalName is required")
+	}
+	if opts.TaskQueue == "" {
+		return nil, errors.New("hanzo/tasks/client: StartWorkflowOptions.TaskQueue is required")
+	}
+	wfType, err := workflowTypeName(workflow)
+	if err != nil {
+		return nil, err
+	}
+
+	req := signalWithStartWorkflowRequest{
+		Namespace:    c.namespace,
+		WorkflowID:   workflowID,
+		WorkflowType: wfType,
+		TaskQueue:    opts.TaskQueue,
+		Input:        workflowArgs,
+		CronSchedule: opts.CronSchedule,
+		Memo:         opts.Memo,
+		Identity:     c.identity,
+		Timeouts: timeouts{
+			WorkflowExecutionMs: opts.WorkflowExecutionTimeout.Milliseconds(),
+			WorkflowRunMs:       opts.WorkflowRunTimeout.Milliseconds(),
+			WorkflowTaskMs:      opts.WorkflowTaskTimeout.Milliseconds(),
+		},
+		SignalName:  signalName,
+		SignalInput: signalArg,
+	}
+	if rp := opts.RetryPolicy; rp != nil {
+		req.RetryPolicy = &retryPolicy{
+			InitialIntervalMs:      rp.InitialInterval.Milliseconds(),
+			BackoffCoefficient:     rp.BackoffCoefficient,
+			MaximumIntervalMs:      rp.MaximumInterval.Milliseconds(),
+			MaximumAttempts:        rp.MaximumAttempts,
+			NonRetryableErrorTypes: append([]string(nil), rp.NonRetryableErrorTypes...),
+		}
+	}
+
+	var resp startWorkflowResponse
+	if err := c.roundTrip(ctx, opSignalWithStartWorkflow, req, &resp); err != nil {
+		return nil, err
+	}
+	return &workflowRunImpl{id: workflowID, runID: resp.RunID, client: c}, nil
+}
+
+// GetWorkflow implements Client. No RPC is issued; the returned handle
+// polls DescribeWorkflow on Get / GetWithOptions.
+func (c *clientImpl) GetWorkflow(ctx context.Context, workflowID, runID string) WorkflowRun {
+	// ctx is accepted to match upstream — handle construction itself
+	// is local and cannot fail. Subsequent RPCs from the handle honour
+	// the ctx passed at that call site.
+	_ = ctx
+	return &workflowRunImpl{id: workflowID, runID: runID, client: c}
+}
+
+// QueryWorkflow implements Client. Opcode 0x0067. Returns a
+// converter.EncodedValue the caller decodes via Get / HasValue.
+func (c *clientImpl) QueryWorkflow(
+	ctx context.Context,
+	workflowID, runID, queryType string,
+	args ...any,
+) (converter.EncodedValue, error) {
+	if workflowID == "" {
+		return nil, errors.New("hanzo/tasks/client: workflowID is required")
+	}
+	if queryType == "" {
+		return nil, errors.New("hanzo/tasks/client: queryType is required")
+	}
+	req := queryWorkflowRequest{
+		Namespace:  c.namespace,
+		WorkflowID: workflowID,
+		RunID:      runID,
+		QueryType:  queryType,
+		QueryArgs:  args,
+	}
+	var resp queryWorkflowResponse
+	if err := c.roundTrip(ctx, opQueryWorkflow, req, &resp); err != nil {
+		return nil, err
+	}
+	return converter.NewJSONValue(resp.Result), nil
 }
 
 // workflowTypeName returns the wire name for a workflow registered with

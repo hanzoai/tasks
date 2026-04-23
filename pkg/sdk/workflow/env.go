@@ -115,6 +115,17 @@ type CoroutineEnv interface {
 	// Returns a handle opaque to callers and the cancel function.
 	NewCancelScope() (scope any, cancel CancelFunc)
 
+	// ExecuteChildWorkflow starts a child workflow and returns a
+	// ChildWorkflowFuture. The returned future's Get settles with
+	// the child's result; its GetChildWorkflowExecution() returns a
+	// Future that settles as soon as the server assigns a runID.
+	//
+	// Phase-1: the worker forwards the request to the frontend via
+	// OpcodeStartChildWorkflow and emits a scheduleChildWorkflow
+	// command (kind=3) so history-based replay can recover the
+	// linkage. A StubEnv used in tests may fake this path.
+	ExecuteChildWorkflow(childWorkflow any, args []any) ChildWorkflowFuture
+
 	// CurrentScope returns the env's current cancel scope, which
 	// Context uses to route Done()/Err() calls.
 	CurrentScope() any

@@ -50,6 +50,9 @@ type StubEnv struct {
 	// for function values, the literal string for string activities).
 	activities map[string][]stubActivityResponse
 
+	// child-workflow stubs: keyed by child workflow name.
+	childWorkflows map[string][]stubChildWorkflowResponse
+
 	// signal channels by signal name.
 	signals map[string]*chanImpl
 
@@ -64,6 +67,13 @@ type StubEnv struct {
 type stubActivityResponse struct {
 	value any
 	err   error
+}
+
+// stubChildWorkflowResponse is one queued reply for a child workflow.
+type stubChildWorkflowResponse struct {
+	value     any
+	err       error
+	execution WorkflowExecution
 }
 
 // stubScope implements the cancellation scope tracking for the stub.
@@ -89,11 +99,12 @@ func (s *stubScope) cancel() {
 // sets AutoAdvance or calls AdvanceClock.
 func NewStubEnv() *StubEnv {
 	return &StubEnv{
-		clock:      time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		logger:     log.Noop(),
-		activities: make(map[string][]stubActivityResponse),
-		signals:    make(map[string]*chanImpl),
-		rootScope:  newStubScope(),
+		clock:          time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		logger:         log.Noop(),
+		activities:     make(map[string][]stubActivityResponse),
+		childWorkflows: make(map[string][]stubChildWorkflowResponse),
+		signals:        make(map[string]*chanImpl),
+		rootScope:      newStubScope(),
 		info: Info{
 			WorkflowID:   "stub-wf",
 			RunID:        "stub-run",
@@ -292,6 +303,93 @@ func (e *StubEnv) ExecuteActivity(opts ActivityOptions, activity any, args []any
 	return f
 }
 
+// OnChildWorkflow queues a response for a named child workflow. The
+// next ExecuteChildWorkflow invocation with a matching type consumes
+// the queued entry (FIFO). When the queue is empty the stub settles
+// the future with (nil, nil) — same fallback shape as ExecuteActivity.
+func (e *StubEnv) OnChildWorkflow(childWorkflow any) *stubChildWorkflowReg {
+	return &stubChildWorkflowReg{env: e, name: activityName(childWorkflow)}
+}
+
+// stubChildWorkflowReg is the fluent registration handle for child
+// workflows.
+type stubChildWorkflowReg struct {
+	env  *StubEnv
+	name string
+}
+
+// Return queues one response; execution identifiers are populated
+// with deterministic test-stable values.
+func (r *stubChildWorkflowReg) Return(value any, err error) *stubChildWorkflowReg {
+	r.env.mu.Lock()
+	idx := len(r.env.childWorkflows[r.name])
+	r.env.childWorkflows[r.name] = append(r.env.childWorkflows[r.name], stubChildWorkflowResponse{
+		value: value,
+		err:   err,
+		execution: WorkflowExecution{
+			WorkflowID: r.name + "-stub-" + itoa(idx),
+			RunID:      r.name + "-run-" + itoa(idx),
+		},
+	})
+	r.env.mu.Unlock()
+	return r
+}
+
+// itoa avoids pulling strconv for the tiny integer-to-string conversion.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+// ExecuteChildWorkflow implements CoroutineEnv.
+func (e *StubEnv) ExecuteChildWorkflow(childWorkflow any, args []any) ChildWorkflowFuture {
+	cf, result, execution := NewChildWorkflowFuture()
+	name := activityName(childWorkflow)
+	e.mu.Lock()
+	q := e.childWorkflows[name]
+	var resp stubChildWorkflowResponse
+	if len(q) > 0 {
+		resp = q[0]
+		e.childWorkflows[name] = q[1:]
+	}
+	e.mu.Unlock()
+
+	// Resolve execution eagerly so test code observing the returned
+	// future's GetChildWorkflowExecution gets a stable id regardless
+	// of the result settlement.
+	if resp.execution.WorkflowID == "" {
+		resp.execution = WorkflowExecution{WorkflowID: name + "-stub", RunID: name + "-run"}
+	}
+	execBytes, _ := EncodePayload(resp.execution)
+	execution.Settle(execBytes, nil)
+
+	payload, encErr := EncodePayload(resp.value)
+	if encErr != nil {
+		result.Settle(nil, temporal.NewErrorWithCause(encErr.Error(), temporal.CodeApplication, encErr, true))
+		return cf
+	}
+	result.Settle(payload, resp.err)
+	_ = args // reserved for Phase 2 assertions
+	return cf
+}
+
 func (e *StubEnv) GetSignalChannel(name string) ReceiveChannel {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -379,6 +477,13 @@ func (stubEnv) ExecuteActivity(ActivityOptions, any, []any) Future {
 	f := NewFuture()
 	f.Settle(nil, errors.New("workflow: nil env"))
 	return f
+}
+func (stubEnv) ExecuteChildWorkflow(any, []any) ChildWorkflowFuture {
+	cf, result, exec := NewChildWorkflowFuture()
+	err := errors.New("workflow: nil env")
+	result.Settle(nil, err)
+	exec.Settle(nil, err)
+	return cf
 }
 func (stubEnv) GetSignalChannel(name string) ReceiveChannel {
 	c := newChan(name, 0)

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hanzoai/tasks/pkg/sdk/converter"
 	"github.com/luxfi/zap"
 )
 
@@ -21,12 +22,14 @@ import (
 // struct in schema/tasks.zap. Native ZAP serde replaces JSON in a
 // follow-up without changing opcodes.
 const (
-	opStartWorkflow     uint16 = 0x0060
-	opSignalWorkflow    uint16 = 0x0061
-	opCancelWorkflow    uint16 = 0x0062
-	opTerminateWorkflow uint16 = 0x0063
-	opDescribeWorkflow  uint16 = 0x0064
-	opListWorkflows     uint16 = 0x0065
+	opStartWorkflow           uint16 = 0x0060
+	opSignalWorkflow          uint16 = 0x0061
+	opCancelWorkflow          uint16 = 0x0062
+	opTerminateWorkflow       uint16 = 0x0063
+	opDescribeWorkflow        uint16 = 0x0064
+	opListWorkflows           uint16 = 0x0065
+	opSignalWithStartWorkflow uint16 = 0x0066
+	opQueryWorkflow           uint16 = 0x0067
 
 	opCreateSchedule uint16 = 0x0070
 	opListSchedules  uint16 = 0x0071
@@ -104,6 +107,34 @@ type Client interface {
 		arg any,
 	) error
 
+	// SignalWithStartWorkflow atomically delivers a signal to the
+	// workflow identified by workflowID, starting it with the
+	// supplied opts+workflow+args if no matching execution is
+	// running. Opcode 0x0066.
+	SignalWithStartWorkflow(
+		ctx context.Context,
+		workflowID, signalName string,
+		signalArg any,
+		opts StartWorkflowOptions,
+		workflow any,
+		workflowArgs ...any,
+	) (WorkflowRun, error)
+
+	// GetWorkflow returns a handle to an already-started workflow.
+	// No RPC is issued; subsequent Get / GetWithOptions calls on the
+	// handle poll DescribeWorkflow to observe terminal state.
+	GetWorkflow(ctx context.Context, workflowID, runID string) WorkflowRun
+
+	// QueryWorkflow runs a registered query on a (possibly running)
+	// workflow execution and returns the query's encoded result.
+	// Opcode 0x0067. Queries are read-only — they do not mutate
+	// workflow history.
+	QueryWorkflow(
+		ctx context.Context,
+		workflowID, runID, queryType string,
+		args ...any,
+	) (converter.EncodedValue, error)
+
 	// CancelWorkflow asks the server to cancel an execution.
 	CancelWorkflow(ctx context.Context, workflowID, runID string) error
 
@@ -132,11 +163,30 @@ type Client interface {
 	// PauseSchedule toggles a schedule's paused flag.
 	PauseSchedule(ctx context.Context, scheduleID string, paused bool) error
 
-	// Health reports server reachability.
+	// Health reports server reachability as two flat strings.
 	Health(ctx context.Context) (service, status string, err error)
+
+	// CheckHealth is the structured counterpart to Health, matching
+	// the upstream client shape so callers migrating from
+	// go.temporal.io/sdk/client compile unchanged. A nil req is
+	// treated as an empty request. Backed by the same opcode
+	// 0x0090 as Health.
+	CheckHealth(ctx context.Context, req *CheckHealthRequest) (*CheckHealthResponse, error)
 
 	// Close releases the underlying ZAP connection.
 	Close()
+}
+
+// CheckHealthRequest is reserved for future filters; empty in v1.
+type CheckHealthRequest struct{}
+
+// CheckHealthResponse reports the backend's liveness.
+type CheckHealthResponse struct {
+	// Service is the opaque backend identifier ("hanzo-tasks").
+	Service string `json:"service"`
+	// Status is "ok" when the frontend is healthy, anything else on
+	// degradation.
+	Status string `json:"status"`
 }
 
 // ErrClosed is returned by RPCs issued on a Client after Close.
