@@ -11,12 +11,15 @@ permissions:
   packages: write
 
 env:
-  # Using -server suffix because the legacy 'hanzoai/tasks' GHCR package
-  # is orphaned from this repo (no linked Repository field on the
-  # package record) so GITHUB_TOKEN hits `permission_denied: write_package`
-  # when pushing. A fresh package name is created and owned by this repo
-  # on first push, which lets the token push future tags cleanly.
-  REGISTRY: ghcr.io/hanzoai/tasks-server
+  # Canonical image name for the Hanzo Tasks server. Other Hanzo
+  # services (iam, kms, gateway, ingress, …) drop the "-server"
+  # suffix — matching them so universe pins read uniformly.
+  #
+  # If GITHUB_TOKEN hits permission_denied on first push, the
+  # ghcr.io/hanzoai/tasks package may need to be manually re-linked
+  # to this repo in GHCR package settings (source is no longer
+  # orphaned once a fresh build lands).
+  REGISTRY: ghcr.io/hanzoai/tasks
 
 jobs:
   build-amd64:
