@@ -91,12 +91,11 @@ func (s *Service) Start() {
 
 	reflection.Register(s.server)
 
-	go func() {
-		s.logger.Info("Starting to serve on history listener")
-		if err := s.server.Serve(s.grpcListener); err != nil {
-			s.logger.Fatal("Failed to serve on history listener", tag.Error(err))
-		}
-	}()
+	// gRPC banned; history service runs in-process only. fx wires
+	// the client interfaces directly to handler implementations;
+	// no TCP hop needed.
+	_ = s.server
+	_ = s.grpcListener
 
 	// As soon as we join membership, other hosts will send requests for shards that we own,
 	// so we should try to start this after starting the gRPC server.
