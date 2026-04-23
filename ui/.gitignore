@@ -1,0 +1,8 @@
+node_modules/
+# Keep dist/index.html placeholder committed so go:embed works outside
+# the Dockerfile build. CI overwrites this with the real Vite output.
+dist/assets/
+dist/*.js
+dist/*.css
+dist/*.map
+dist/favicon.svg
