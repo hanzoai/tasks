@@ -9,11 +9,15 @@ import (
 	"github.com/luxfi/log"
 )
 
-// StubEnv is a single-goroutine, in-memory CoroutineEnv implementation
-// sufficient for unit-testing workflow code without standing up a real
-// worker. It IS NOT a substitute for the worker runtime; it lacks
-// event-sourced replay, durable timers, and cross-process activity
-// dispatch.
+// StubEnv is a test-only in-memory CoroutineEnv. Unit tests import
+// this directly; PRODUCTION WORKERS DO NOT — they use workerEnv in
+// pkg/sdk/worker, which is wire-backed.
+//
+// NewTimer in the stub uses a real time.Timer goroutine so tests
+// that exercise timer-driven logic don't collapse durations to
+// zero. Tests that want instant firing advance the clock explicitly
+// with AdvanceClock(d) + SetAutoAdvance or use NewTimer(0) which
+// still short-circuits.
 //
 // Typical use:
 //
@@ -234,11 +238,24 @@ func (e *StubEnv) Sleep(d time.Duration) error {
 
 func (e *StubEnv) NewTimer(d time.Duration) Future {
 	f := NewFuture()
-	// Advance the clock and settle immediately. Tests that want to
-	// delay until Advance*/Cancel do so by adding a zero-duration
-	// NewTimer after manually advancing.
-	e.AdvanceClock(d)
-	f.Settle(nil, nil)
+	if d <= 0 {
+		f.Settle(nil, nil)
+		return f
+	}
+	e.mu.Lock()
+	sc := e.rootScope
+	e.mu.Unlock()
+	go func() {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			e.AdvanceClock(d)
+			f.Settle(nil, nil)
+		case <-sc.done:
+			f.Settle(nil, sc.err)
+		}
+	}()
 	return f
 }
 
