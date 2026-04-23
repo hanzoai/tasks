@@ -9,7 +9,7 @@ interface ListResp {
 
 export function SchedulesPage() {
   const { ns } = useParams()
-  const url = `/api/v1/namespaces/${encodeURIComponent(ns!)}/schedules`
+  const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/schedules`
   const { data, error, isLoading } = useSWR<ListResp>(url)
   if (error) return <ErrorState error={error} />
   if (isLoading) return <p className="text-zinc-400">Loading schedules…</p>

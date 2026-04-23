@@ -4,7 +4,7 @@ import type { Namespace } from '../lib/api'
 import { StatusPill } from '../components/StatusPill'
 
 export function NamespacesPage() {
-  const { data, error, isLoading } = useSWR<{ namespaces: Namespace[] }>('/api/v1/namespaces?pageSize=200')
+  const { data, error, isLoading } = useSWR<{ namespaces: Namespace[] }>('/v1/tasks/namespaces?pageSize=200')
   if (error) return <ErrorState error={error} />
   if (isLoading) return <p className="text-zinc-400">Loading namespaces…</p>
   const nss = data?.namespaces ?? []

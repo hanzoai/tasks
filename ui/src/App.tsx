@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useParams } from 'react-router-dom'
-import { Clock, Layers, Workflow } from '@hanzogui/lucide-icons-2'
+import { Clock, Layers, Workflow } from 'lucide-react'
 
 export function App() {
   const { ns } = useParams()
