@@ -27,6 +27,7 @@ import (
 	"github.com/hanzoai/tasks/common/rpc"
 	"github.com/hanzoai/tasks/common/rpc/encryption"
 	"github.com/hanzoai/tasks/common/rpc/interceptor"
+	tasksui "github.com/hanzoai/tasks/ui"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -174,8 +175,18 @@ func NewHTTPAPIServer(
 		return nil, fmt.Errorf("failed registering operatorservice HTTP API handler: %w", err)
 	}
 
-	// Set the / handler as our function that wraps serve mux.
-	router.PathPrefix("/").HandlerFunc(h.serveHTTP)
+	// Register UI + API catch-alls in priority order.
+	//
+	// gorilla/mux dispatches in registration order, so:
+	//   1. /api/*  → Temporal gRPC-Gateway (serveHTTP wraps h.serveMux)
+	//   2. /       → embedded SPA (react-router client-side routing)
+	//
+	// Anything under /api/ is forwarded to the gRPC-Gateway mux which
+	// knows the full Temporal HTTP surface (100+ RPCs). Anything else
+	// renders the UI shell — including unknown client-routed paths
+	// like /namespaces/default/workflows so deep links survive reload.
+	router.PathPrefix("/api/").HandlerFunc(h.serveHTTP)
+	router.PathPrefix("/").Handler(tasksui.Handler())
 	// Register the router as the HTTP server handler.
 	h.server.Handler = router
 
