@@ -6,7 +6,7 @@ import { ErrorState } from './Namespaces'
 
 export function WorkflowsPage() {
   const { ns } = useParams()
-  const url = `/api/v1/namespaces/${encodeURIComponent(ns!)}/workflows?query=${encodeURIComponent('')}&pageSize=50`
+  const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/workflows?query=${encodeURIComponent('')}&pageSize=50`
   const { data, error, isLoading } = useSWR<{ executions?: WorkflowExecution[] }>(url)
   if (error) return <ErrorState error={error} />
   if (isLoading) return <p className="text-zinc-400">Loading workflows…</p>

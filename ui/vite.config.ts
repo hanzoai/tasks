@@ -26,10 +26,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // During dev, tasksd runs on 7234 and the Vite dev server
-      // proxies /api/* to it so the frontend can call the real
-      // Temporal gRPC-Gateway routes.
-      '/api': 'http://localhost:7234',
+      // During dev, tasksd runs on :7234 and serves the canonical
+      // hanzoai/tasks HTTP surface at /v1/tasks/*. Vite proxies the
+      // same path so the SPA can call it with a relative URL. There
+      // is no /api/ mount — the former gRPC-Gateway is gone.
+      '/v1/tasks': 'http://localhost:7234',
     },
   },
 })
