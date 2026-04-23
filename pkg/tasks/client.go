@@ -251,7 +251,7 @@ func (c *Client) connectZAP() error {
 	c.zapOnce.Do(func() {
 		c.zapNode = zap.NewNode(zap.NodeConfig{
 			NodeID:      "tasks-sdk",
-			ServiceType: "_tasks-sdk._tcp",
+			ServiceType: "_tasks._tcp",
 			Port:        0, // ephemeral
 			Logger:      c.logger,
 			NoDiscovery: true,
