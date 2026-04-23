@@ -205,6 +205,51 @@ struct RecordActivityTaskHeartbeatRequest
 struct RecordActivityTaskHeartbeatResponse
   cancelRequested Bool
 
+# ── Worker → server: in-workflow activity scheduling ───────────
+#
+# When a workflow coroutine calls ExecuteActivity the worker asks
+# the server to (a) mint a new ActivityTask (taskQueue addressed
+# by name), and (b) hand back a stable id the worker can poll on
+# for the final result. Two opcodes, one request each:
+#
+#   scheduleActivity   (0x006B) — workflow ── commands ──> server
+#                       request  : ScheduleActivityRequest
+#                       response : ScheduleActivityResponse
+#
+#   waitActivityResult (0x006C) — workflow ── long-poll ──> server
+#                       request  : WaitActivityResultRequest
+#                       response : WaitActivityResultResponse
+#
+# Design tradeoff: long-polled waitActivityResult — not server push —
+# because the worker already maintains a cheap client→server poll
+# loop (pollWorkflowTask) and adding a second polled opcode keeps
+# the single-direction (client→server) transport contract. A server
+# push channel would require a persistent subscription connection,
+# extra auth state, and back-pressure handling — all of which have
+# zero upside when we already poll for workflow tasks. The long-poll
+# has an explicit deadline (caller ctx); idle returns settle
+# {ready=false} so workers that want to cancel the wait can do so.
+
+struct ScheduleActivityRequest
+  taskQueue Text
+  activityType Text
+  input Bytes              # encoded arguments (JSON v1)
+  startToCloseMs Int64
+  heartbeatMs Int64
+  retryPolicy RetryPolicy
+
+struct ScheduleActivityResponse
+  activityTaskId Text      # stable id; bind a Future to this
+
+struct WaitActivityResultRequest
+  activityTaskId Text
+  waitMs Int64             # long-poll deadline; 0 = poll once
+
+struct WaitActivityResultResponse
+  ready Bool               # false → still pending, try again
+  result Bytes             # encoded value (JSON v1); empty on pending/error
+  failure Bytes            # encoded *temporal.Error; empty on pending/success
+
 # ── Canonical RPC service ──────────────────────────────────────
 
 interface Tasks
