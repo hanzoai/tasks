@@ -6,3 +6,4 @@ dist/*.js
 dist/*.css
 dist/*.map
 dist/favicon.svg
+*.tsbuildinfo
