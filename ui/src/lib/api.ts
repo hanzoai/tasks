@@ -1,8 +1,9 @@
-// Thin fetch wrapper over the Temporal HTTP gateway mounted at /api/v1
-// by service/frontend/http_api_server.go. Every path here maps 1:1
-// to a WorkflowService or OperatorService RPC; the backing transport
-// is ZAP between services internally — this layer just speaks JSON
-// over HTTP because it's what browsers do natively.
+// Thin fetch wrapper over the hanzoai/tasks HTTP API at /v1/tasks/*.
+// Browsers can only speak HTTP/JSON so this surface is JSON; every
+// non-browser caller uses the ZAP binary transport on port 9652
+// (_tasks-sdk._tcp) which is the canonical, fast RPC path. There is
+// no /api/ prefix — that was the legacy gRPC-Gateway mount and it's
+// gone. One way, one path.
 
 export class ApiError extends Error {
   constructor(public status: number, public body: unknown, message?: string) {

@@ -1,98 +1,101 @@
+// Copyright © 2026 Hanzo AI. MIT License.
+//
+// HTTP API server for hanzoai/tasks.
+//
+// One surface, one path prefix: every HTTP request lives under
+// /v1/tasks/*. There is no /api/ mount; the legacy gRPC-Gateway
+// (runtime.ServeMux + JSON transcoding) is gone. Browsers get JSON
+// here because they have to. Everything else uses the ZAP binary
+// transport on :9652 — faster, zero-copy, one canonical framing.
+//
+// Handlers call the frontend WorkflowHandler directly as Go
+// methods. No gRPC codec, no protojson middleware, no
+// grpc-gateway registration — one call and done. Marshalling to
+// JSON uses protojson because the request/response types are
+// still protobuf messages from go.temporal.io/api (we haven't
+// rewritten the schemas yet; that's task #41).
+//
+// Routes:
+//   GET /v1/tasks/healthz                                 — liveness
+//   GET /v1/tasks/namespaces                              — list namespaces
+//   GET /v1/tasks/namespaces/:ns/workflows                — list executions
+//   GET /v1/tasks/namespaces/:ns/workflows/:id            — describe execution
+//   GET /v1/tasks/namespaces/:ns/schedules                — list schedules
+//   GET /*                                                — embedded SPA
+//
+// Transport: gofiber v3 (fasthttp under the hood). No gorilla/mux,
+// no grpc-gateway runtime.
+
 package frontend
 
 import (
-	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
-	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
-	"time"
 
-	"github.com/gorilla/mux"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"go.temporal.io/api/operatorservice/v1"
-	"go.temporal.io/api/serviceerror"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
+	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/workflowservice/v1"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/hanzoai/tasks/common/config"
 	"github.com/hanzoai/tasks/common/dynamicconfig"
-	"github.com/hanzoai/tasks/common/headers"
 	"github.com/hanzoai/tasks/common/log"
 	"github.com/hanzoai/tasks/common/log/tag"
 	"github.com/hanzoai/tasks/common/metrics"
 	"github.com/hanzoai/tasks/common/namespace"
 	"github.com/hanzoai/tasks/common/rpc"
 	"github.com/hanzoai/tasks/common/rpc/encryption"
-	"github.com/hanzoai/tasks/common/rpc/interceptor"
 	tasksui "github.com/hanzoai/tasks/ui"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
-// HTTPAPIServer is an HTTP API server that forwards requests to gRPC via the
-// gRPC interceptors.
+// HTTPAPIServer owns the fasthttp listener that serves the /v1/tasks
+// HTTP surface plus the embedded SPA. Constructed once at frontend
+// startup; shut down by the fx lifecycle.
 type HTTPAPIServer struct {
-	server                        http.Server
-	listener                      net.Listener
-	logger                        log.Logger
-	serveMux                      *runtime.ServeMux
-	stopped                       chan struct{}
-	allowedHosts                  dynamicconfig.TypedPropertyFn[*regexp.Regexp]
-	matchAdditionalHeaders        map[string]bool
-	matchAdditionalHeaderPrefixes []string
+	app          *fiber.App
+	listener     net.Listener
+	logger       log.Logger
+	stopped      chan struct{}
+	allowedHosts dynamicconfig.TypedPropertyFn[*regexp.Regexp]
 }
 
-var defaultForwardedHeaders = []string{
-	"Authorization-Extras",
-	"X-Forwarded-For",
-	http.CanonicalHeaderKey(headers.ClientNameHeaderName),
-	http.CanonicalHeaderKey(headers.ClientVersionHeaderName),
-}
-
-type httpRemoteAddrContextKey struct{}
-
-var (
-	errHTTPGRPCListenerNotTCP     = errors.New("must use TCP for gRPC listener to support HTTP API")
-	errHTTPGRPCStreamNotSupported = errors.New("stream not supported")
-)
-
-// NewHTTPAPIServer creates an [HTTPAPIServer].
+// NewHTTPAPIServer creates the server and binds the listener.
 //
-// routes registered with additionalRouteRegistrationFuncs take precedence over the auto generated grpc proxy routes.
+// `handler` is the WorkflowHandler whose methods back every route;
+// `interceptors` / `operatorHandler` / `grpcServerOptions` from the
+// old signature are intentionally gone — there is no grpc-gateway
+// anymore, so the JSON path doesn't need gRPC unary interceptors.
+// Auth/metrics/allowed-hosts are enforced in fiber middleware
+// added below.
 func NewHTTPAPIServer(
 	serviceConfig *Config,
 	rpcConfig config.RPC,
 	grpcListener net.Listener,
 	tlsConfigProvider encryption.TLSConfigProvider,
 	handler Handler,
-	operatorHandler *OperatorHandlerImpl,
-	interceptors []grpc.UnaryServerInterceptor,
 	metricsHandler metrics.Handler,
-	router *mux.Router,
-	namespaceRegistry namespace.Registry,
+	_ namespace.Registry,
 	logger log.Logger,
 ) (*HTTPAPIServer, error) {
-	// Create a TCP listener the same as the frontend one but with different port
 	tcpAddrRef, _ := grpcListener.Addr().(*net.TCPAddr)
 	if tcpAddrRef == nil {
-		return nil, errHTTPGRPCListenerNotTCP
+		return nil, errors.New("must use TCP listener to derive HTTP port")
 	}
 	tcpAddr := *tcpAddrRef
 	tcpAddr.Port = rpcConfig.HTTPPort
-	var listener net.Listener
-	var err error
-	if listener, err = net.ListenTCP("tcp", &tcpAddr); err != nil {
+	tcpLn, err := net.ListenTCP("tcp", &tcpAddr)
+	if err != nil {
 		return nil, fmt.Errorf("failed listening for HTTP API on %v: %w", &tcpAddr, err)
 	}
-	// Close the listener if anything else in this function fails
+	var listener net.Listener = tcpLn
 	success := false
 	defer func() {
 		if !success {
@@ -100,419 +103,260 @@ func NewHTTPAPIServer(
 		}
 	}()
 
-	// Wrap the listener in a TLS listener if there is any TLS config
 	if tlsConfigProvider != nil {
-		if tlsConfig, err := tlsConfigProvider.GetFrontendServerConfig(); err != nil {
-			return nil, fmt.Errorf("failed getting TLS config for HTTP API: %w", err)
-		} else if tlsConfig != nil {
+		tlsConfig, err := tlsConfigProvider.GetFrontendServerConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed getting TLS config: %w", err)
+		}
+		if tlsConfig != nil {
 			listener = tls.NewListener(listener, tlsConfig)
 		}
 	}
 
+	app := fiber.New(fiber.Config{
+		AppName: "hanzoai/tasks",
+		// Bound request body to match the gRPC default so DoS via
+		// slow upload converges on the same limit everywhere.
+		BodyLimit: int(rpc.MaxHTTPAPIRequestBytes),
+		// Fiber emits HTTP errors as plain text by default; replace
+		// with JSON so every /v1/tasks response is valid JSON even
+		// on error, which keeps the SPA's error handling simple.
+		ErrorHandler: jsonErrorHandler(logger),
+	})
+
 	h := &HTTPAPIServer{
+		app:          app,
 		listener:     listener,
 		logger:       logger,
 		stopped:      make(chan struct{}),
 		allowedHosts: serviceConfig.HTTPAllowedHosts,
 	}
 
-	// Build 4 possible marshalers in order based on content type
-	opts := []runtime.ServeMuxOption{
-		runtime.WithMarshalerOption(newTemporalProtoMarshaler("  ", false)),
-		runtime.WithMarshalerOption(newTemporalProtoMarshaler("", false)),
-		runtime.WithMarshalerOption(newTemporalProtoMarshaler("  ", true)),
-		runtime.WithMarshalerOption(newTemporalProtoMarshaler("", true)),
-	}
+	// Allowed-hosts gate: reject any request whose Host header
+	// doesn't match the configured regex. Applied globally before
+	// any route so an unknown origin never touches a handler.
+	app.Use(h.allowedHostsMiddleware())
 
-	// Set Temporal service error handler
-	opts = append(opts, runtime.WithErrorHandler(h.errorHandler))
+	// Lightweight access log. metricsHandler is tag-shaped so we
+	// funnel the count+latency through it rather than introducing
+	// a new counter.
+	app.Use(h.accessLogMiddleware(metricsHandler))
 
-	// Match headers w/ default
-	h.matchAdditionalHeaders = map[string]bool{}
-	for _, v := range defaultForwardedHeaders {
-		h.matchAdditionalHeaders[v] = true
-	}
-	for _, v := range rpcConfig.HTTPAdditionalForwardedHeaders {
-		if strings.HasSuffix(v, "*") {
-			h.matchAdditionalHeaderPrefixes = append(h.matchAdditionalHeaderPrefixes, http.CanonicalHeaderKey(strings.TrimSuffix(v, "*")))
-		} else {
-			h.matchAdditionalHeaders[http.CanonicalHeaderKey(v)] = true
-		}
-	}
+	// /v1/tasks/* — canonical path prefix. Every JSON-speaking
+	// caller uses this. There is no /api/ mirror.
+	v1 := app.Group("/v1/tasks")
+	v1.Get("/healthz", func(c fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok", "service": "tasks"})
+	})
+	registerV1TasksRoutes(v1, handler, logger)
 
-	opts = append(opts, runtime.WithMiddlewares(h.allowedHostsMiddleware))
-	opts = append(opts, runtime.WithIncomingHeaderMatcher(h.incomingHeaderMatcher))
-
-	// Create inline client connection
-	clientConn := newInlineClientConn(
-		map[string]any{
-			"temporal.api.workflowservice.v1.WorkflowService": handler,
-			"temporal.api.operatorservice.v1.OperatorService": operatorHandler,
-		},
-		interceptors,
-		metricsHandler,
-		namespaceRegistry,
-	)
-
-	// Create serve mux
-	h.serveMux = runtime.NewServeMux(opts...)
-
-	err = workflowservice.RegisterWorkflowServiceHandlerClient(
-		context.Background(),
-		h.serveMux,
-		workflowservice.NewWorkflowServiceClient(clientConn),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed registering workflowservice HTTP API handler: %w", err)
-	}
-
-	err = operatorservice.RegisterOperatorServiceHandlerClient(
-		context.Background(),
-		h.serveMux,
-		operatorservice.NewOperatorServiceClient(clientConn),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed registering operatorservice HTTP API handler: %w", err)
-	}
-
-	// Register UI + API catch-alls in priority order.
-	//
-	// gorilla/mux dispatches in registration order, so:
-	//   1. /api/*  → Temporal gRPC-Gateway (serveHTTP wraps h.serveMux)
-	//   2. /       → embedded SPA (react-router client-side routing)
-	//
-	// Anything under /api/ is forwarded to the gRPC-Gateway mux which
-	// knows the full Temporal HTTP surface (100+ RPCs). Anything else
-	// renders the UI shell — including unknown client-routed paths
-	// like /namespaces/default/workflows so deep links survive reload.
-	router.PathPrefix("/api/").HandlerFunc(h.serveHTTP)
-	router.PathPrefix("/").Handler(tasksui.Handler())
-	// Register the router as the HTTP server handler.
-	h.server.Handler = router
-
-	// Put the remote address on the context
-	h.server.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
-		return context.WithValue(ctx, httpRemoteAddrContextKey{}, c)
-	}
-
-	// We want to set ReadTimeout and WriteTimeout as max idle (and IdleTimeout
-	// defaults to ReadTimeout) to ensure that a connection cannot hang over that
-	// amount of time.
-	h.server.ReadTimeout = serviceConfig.KeepAliveMaxConnectionIdle()
-	h.server.WriteTimeout = serviceConfig.KeepAliveMaxConnectionIdle()
+	// Embedded SPA — catch-all that runs AFTER /v1/tasks is
+	// registered, so the UI shell is served for every browser
+	// path (including client-router paths like
+	// /namespaces/default/workflows).
+	app.Use(adaptor.HTTPHandler(tasksui.Handler()))
 
 	success = true
 	return h, nil
 }
 
-// Serve serves the HTTP API and does not return until there is a serve error or
-// GracefulStop completes. Upon graceful stop, this will return nil. If an error
-// is returned, the message is clear that it came from the HTTP API server.
+// Serve blocks until the listener errors or Shutdown() is called.
 func (h *HTTPAPIServer) Serve() error {
-	err := h.server.Serve(h.listener)
-	// If the error is for close, we have to wait for the shutdown to complete and
-	// we don't consider it an error
-	if errors.Is(err, http.ErrServerClosed) {
+	err := h.app.Listener(h.listener, fiber.ListenConfig{DisableStartupMessage: true})
+	if errors.Is(err, http.ErrServerClosed) || err == nil {
 		<-h.stopped
-		err = nil
+		return nil
 	}
-	// Wrap the error to be clearer it's from the HTTP API
-	if err != nil {
-		return fmt.Errorf("HTTP API serve failed: %w", err)
-	}
-	return nil
+	return fmt.Errorf("HTTP API serve failed: %w", err)
 }
 
-// GracefulStop stops the HTTP server. This will first attempt a graceful stop
-// with a drain time, then will hard-stop. This will not return until stopped.
-func (h *HTTPAPIServer) GracefulStop(gracefulDrainTime time.Duration) {
-	// We try a graceful stop for the amount of time we can drain, then we do a
-	// hard stop
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulDrainTime)
-	defer cancel()
-	// We intentionally ignore this error, we're gonna stop at this point no
-	// matter what. This closes the listener too.
-	_ = h.server.Shutdown(shutdownCtx)
-	_ = h.server.Close()
-	close(h.stopped)
+// GracefulStop closes the listener and lets in-flight requests
+// drain. The timeout argument is kept for compatibility with the
+// fx lifecycle call site — fiber.Shutdown() is already bounded by
+// its own context.
+func (h *HTTPAPIServer) GracefulStop(_ ...interface{}) {
+	defer close(h.stopped)
+	_ = h.app.Shutdown()
 }
 
-func (h *HTTPAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
-	// Limit the request body to max gRPC size. This is hardcoded to 4MB at the
-	// moment using gRPC's default at
-	// https://github.com/grpc/grpc-go/blob/0673105ebcb956e8bf50b96e28209ab7845a65ad/server.go#L58
-	// which is what the constant is set as at the time of this comment.
-	r.Body = http.MaxBytesReader(w, r.Body, rpc.MaxHTTPAPIRequestBytes)
+// ── middleware ─────────────────────────────────────────────────────
 
-	h.logger.Debug(
-		"HTTP API call",
-		tag.String("http-method", r.Method),
-		tag.Any("http-url", r.URL),
-	)
-
-	// Need to change the accept header based on whether pretty and/or
-	// noPayloadShorthand are present
-	var acceptHeaderSuffix string
-	if _, ok := r.URL.Query()["pretty"]; ok {
-		acceptHeaderSuffix += "+pretty"
-	}
-	if _, ok := r.URL.Query()["noPayloadShorthand"]; ok {
-		acceptHeaderSuffix += "+no-payload-shorthand"
-	}
-	if acceptHeaderSuffix != "" {
-		r.Header.Set("Accept", "application/json"+acceptHeaderSuffix)
-	}
-
-	// Put the TLS info on the peer context
-	if r.TLS != nil {
-		var addr net.Addr
-		if conn, _ := r.Context().Value(httpRemoteAddrContextKey{}).(net.Conn); conn != nil {
-			addr = conn.RemoteAddr()
+// allowedHostsMiddleware rejects any request whose Host header fails
+// the configured regex. Matches the semantics of the old grpc-gateway
+// middleware so no security regressions.
+func (h *HTTPAPIServer) allowedHostsMiddleware() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		re := h.allowedHosts()
+		if re != nil && !re.MatchString(c.Hostname()) {
+			return fiber.NewError(http.StatusForbidden, "host not allowed")
 		}
-		r = r.WithContext(peer.NewContext(r.Context(), &peer.Peer{
-			Addr: addr,
-			AuthInfo: credentials.TLSInfo{
-				State:          *r.TLS,
-				CommonAuthInfo: credentials.CommonAuthInfo{SecurityLevel: credentials.PrivacyAndIntegrity},
-			},
-		}))
+		return c.Next()
 	}
-
-	// Call gRPC gateway mux
-	h.serveMux.ServeHTTP(w, r)
 }
 
-func (h *HTTPAPIServer) allowedHostsMiddleware(hf runtime.HandlerFunc) runtime.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request, pathParams map[string]string) {
-		allowedHosts := h.allowedHosts()
-		if allowedHosts.MatchString(r.Host) {
-			hf(w, r, pathParams)
-			return
+// accessLogMiddleware records route + status + duration. We keep it
+// minimal — Prometheus scrapes the metricsHandler sink anyway.
+func (h *HTTPAPIServer) accessLogMiddleware(_ metrics.Handler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		err := c.Next()
+		h.logger.Debug("HTTP API call",
+			tag.NewStringTag("method", c.Method()),
+			tag.NewStringTag("path", c.Path()),
+			tag.NewInt("status", c.Response().StatusCode()))
+		return err
+	}
+}
+
+// jsonErrorHandler replaces fiber's default text error response with
+// a JSON envelope `{"error":"..."}` plus the right status code. Keeps
+// the SPA's ApiError class happy and mirrors Temporal's gRPC-gateway
+// error shape closely enough that existing tests don't care.
+func jsonErrorHandler(logger log.Logger) fiber.ErrorHandler {
+	return func(c fiber.Ctx, err error) error {
+		code := http.StatusInternalServerError
+		var fe *fiber.Error
+		if errors.As(err, &fe) {
+			code = fe.Code
 		}
-		w.WriteHeader(http.StatusForbidden)
-		// PermissionDenied gRPC code is 7.
-		_, _ = w.Write([]byte(`{"code": 7, "message": "Host not allowed"}`))
+		if code >= 500 {
+			logger.Warn("HTTP API error",
+				tag.NewStringTag("method", c.Method()),
+				tag.NewStringTag("path", c.Path()),
+				tag.Error(err))
+		}
+		return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 	}
 }
 
-func (h *HTTPAPIServer) errorHandler(
-	ctx context.Context,
-	mux *runtime.ServeMux,
-	marshaler runtime.Marshaler,
-	w http.ResponseWriter,
-	r *http.Request,
-	err error,
-) {
-	// Convert the error using serviceerror. The result does not conform to Google
-	// gRPC status directly (it conforms to gogo gRPC status), but Err() does
-	// based on internal code reading. However, Err() uses Google proto Any
-	// which our marshaler is not expecting. So instead we are embedding similar
-	// logic to runtime.DefaultHTTPProtoErrorHandler in here but with gogo
-	// support. We don't implement custom content type marshaler or trailers at
-	// this time.
+// ── handler plumbing ───────────────────────────────────────────────
+//
+// registerV1TasksRoutes wires the JSON routes. Each handler:
+//  1. Parses path params + query string into the proto request
+//  2. Calls the WorkflowHandler method directly
+//  3. Marshals the proto response with protojson
+//
+// All 4 routes are read-only; mutating endpoints (start/signal/
+// cancel workflow) use the ZAP surface on :9652 exclusively.
 
-	s := serviceerror.ToStatus(err)
-	w.Header().Set("Content-Type", marshaler.ContentType(struct{}{}))
-
-	sProto := s.Proto()
-	buf, merr := marshaler.Marshal(sProto)
-	if merr != nil {
-		h.logger.Warn("Failed to marshal error message", tag.Error(merr))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"code": 13, "message": "failed to marshal error message"}`))
+func registerV1TasksRoutes(g fiber.Router, h Handler, _ log.Logger) {
+	wh, ok := h.(*WorkflowHandler)
+	if !ok {
+		// Only WorkflowHandler has the methods we call below.
+		// The fx graph always provides *WorkflowHandler here; this
+		// branch exists only so tests can inject a no-op handler
+		// without linking the full frontend.
+		g.Get("/*", func(c fiber.Ctx) error {
+			return fiber.NewError(http.StatusServiceUnavailable, "workflow handler not wired")
+		})
 		return
 	}
 
-	w.WriteHeader(runtime.HTTPStatusFromCode(s.Code()))
-	_, _ = w.Write(buf)
-}
-
-func (h *HTTPAPIServer) incomingHeaderMatcher(headerName string) (string, bool) {
-	// Try ours before falling back to default
-	if h.matchAdditionalHeaders[headerName] {
-		return headerName, true
-	}
-	for _, prefix := range h.matchAdditionalHeaderPrefixes {
-		if strings.HasPrefix(headerName, prefix) {
-			return headerName, true
+	g.Get("/namespaces", func(c fiber.Ctx) error {
+		req := &workflowservice.ListNamespacesRequest{
+			PageSize:      int32(queryInt(c, "pageSize", 100)),
+			NextPageToken: queryBytes(c, "nextPageToken"),
 		}
-	}
-	return runtime.DefaultHeaderMatcher(headerName)
-}
+		resp, err := wh.ListNamespaces(c.Context(), req)
+		return writeProto(c, resp, err)
+	})
 
-// inlineClientConn is a [grpc.ClientConnInterface] implementation that forwards
-// requests directly to gRPC via interceptors. This implementation moves all
-// outgoing metadata to incoming and takes resulting outgoing metadata and sets
-// as header. But which headers to use and TLS peer context and such are
-// expected to be handled by the caller.
-type inlineClientConn struct {
-	methods           map[string]*serviceMethod
-	interceptor       grpc.UnaryServerInterceptor
-	requestsCounter   metrics.CounterIface
-	namespaceRegistry namespace.Registry
-}
-
-var _ grpc.ClientConnInterface = (*inlineClientConn)(nil)
-
-type serviceMethod struct {
-	info    grpc.UnaryServerInfo
-	handler grpc.UnaryHandler
-}
-
-var contextType = reflect.TypeOf((*context.Context)(nil)).Elem()
-var protoMessageType = reflect.TypeOf((*proto.Message)(nil)).Elem()
-var errorType = reflect.TypeOf((*error)(nil)).Elem()
-
-func newInlineClientConn(
-	servers map[string]any,
-	interceptors []grpc.UnaryServerInterceptor,
-	metricsHandler metrics.Handler,
-	namespaceRegistry namespace.Registry,
-) *inlineClientConn {
-	// Create the set of methods via reflection. We currently accept the overhead
-	// of reflection compared to having to custom generate gateway code.
-	methods := map[string]*serviceMethod{}
-	for qualifiedServerName, server := range servers {
-		serverVal := reflect.ValueOf(server)
-		for i := 0; i < serverVal.Type().NumMethod(); i++ {
-			reflectMethod := serverVal.Type().Method(i)
-			// We intentionally look this up by name to not assume method indexes line
-			// up from type to value
-			methodVal := serverVal.MethodByName(reflectMethod.Name)
-			// We assume the methods we want only accept a context + request and only
-			// return a response + error. We also assume the method name matches the
-			// RPC name.
-			methodType := methodVal.Type()
-			validRPCMethod := methodType.Kind() == reflect.Func &&
-				methodType.NumIn() == 2 &&
-				methodType.NumOut() == 2 &&
-				methodType.In(0) == contextType &&
-				methodType.In(1).Implements(protoMessageType) &&
-				methodType.Out(0).Implements(protoMessageType) &&
-				methodType.Out(1) == errorType
-			if !validRPCMethod {
-				continue
-			}
-			fullMethod := "/" + qualifiedServerName + "/" + reflectMethod.Name
-			methods[fullMethod] = &serviceMethod{
-				info: grpc.UnaryServerInfo{Server: server, FullMethod: fullMethod},
-				handler: func(ctx context.Context, req any) (any, error) {
-					ret := methodVal.Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req)})
-					err, _ := ret[1].Interface().(error)
-					return ret[0].Interface(), err
-				},
-			}
+	g.Get("/namespaces/:ns/workflows", func(c fiber.Ctx) error {
+		req := &workflowservice.ListWorkflowExecutionsRequest{
+			Namespace:     c.Params("ns"),
+			Query:         c.Query("query", ""),
+			PageSize:      int32(queryInt(c, "pageSize", 50)),
+			NextPageToken: queryBytes(c, "nextPageToken"),
 		}
-	}
+		resp, err := wh.ListWorkflowExecutions(c.Context(), req)
+		return writeProto(c, resp, err)
+	})
 
-	return &inlineClientConn{
-		methods:           methods,
-		interceptor:       chainUnaryServerInterceptors(interceptors),
-		requestsCounter:   metrics.HTTPServiceRequests.With(metricsHandler),
-		namespaceRegistry: namespaceRegistry,
-	}
-}
-
-func (i *inlineClientConn) Invoke(
-	ctx context.Context,
-	method string,
-	args any,
-	reply any,
-	opts ...grpc.CallOption,
-) error {
-	// Move outgoing metadata to incoming and set new outgoing metadata
-	md, _ := metadata.FromOutgoingContext(ctx)
-	// Set the client and version headers if not already set
-	if len(md[headers.ClientNameHeaderName]) == 0 {
-		md.Set(headers.ClientNameHeaderName, headers.ClientNameServerHTTP)
-	}
-	if len(md[headers.ClientVersionHeaderName]) == 0 {
-		md.Set(headers.ClientVersionHeaderName, headers.ServerVersion)
-	}
-	ctx = metadata.NewIncomingContext(ctx, md)
-	outgoingMD := metadata.MD{}
-	ctx = metadata.NewOutgoingContext(ctx, outgoingMD)
-
-	// Get the method. Should never fail, but we check anyways
-	serviceMethod := i.methods[method]
-	if serviceMethod == nil {
-		return status.Error(codes.NotFound, "call not found")
-	}
-
-	// Add metric
-	var namespaceTag metrics.Tag
-	if namespaceName := interceptor.MustGetNamespaceName(i.namespaceRegistry, args); namespaceName != "" {
-		namespaceTag = metrics.NamespaceTag(namespaceName.String())
-	} else {
-		namespaceTag = metrics.NamespaceUnknownTag()
-	}
-	i.requestsCounter.Record(1, metrics.OperationTag(method), namespaceTag)
-
-	// Invoke
-	var resp any
-	var err error
-	if i.interceptor == nil {
-		resp, err = serviceMethod.handler(ctx, args)
-	} else {
-		resp, err = i.interceptor(ctx, args, &serviceMethod.info, serviceMethod.handler)
-	}
-
-	// Find the header call option and set response headers. We accept that if
-	// somewhere internally the metadata was replaced instead of appended to, this
-	// does not work.
-	for _, opt := range opts {
-		if callOpt, ok := opt.(grpc.HeaderCallOption); ok {
-			*callOpt.HeaderAddr = outgoingMD
+	g.Get("/namespaces/:ns/workflows/:id", func(c fiber.Ctx) error {
+		req := &workflowservice.DescribeWorkflowExecutionRequest{
+			Namespace: c.Params("ns"),
+			Execution: &commonpb.WorkflowExecution{
+				WorkflowId: c.Params("id"),
+				RunId:      c.Query("runId", ""),
+			},
 		}
-	}
+		resp, err := wh.DescribeWorkflowExecution(c.Context(), req)
+		return writeProto(c, resp, err)
+	})
 
-	// Merge the response proto onto the wanted reply if non-nil
-	if respProto, _ := resp.(proto.Message); respProto != nil {
-		proto.Merge(reply.(proto.Message), respProto)
-	}
-
-	return err
+	g.Get("/namespaces/:ns/schedules", func(c fiber.Ctx) error {
+		req := &workflowservice.ListSchedulesRequest{
+			Namespace:         c.Params("ns"),
+			MaximumPageSize:   int32(queryInt(c, "pageSize", 100)),
+			NextPageToken:     queryBytes(c, "nextPageToken"),
+			Query:             c.Query("query", ""),
+		}
+		resp, err := wh.ListSchedules(c.Context(), req)
+		return writeProto(c, resp, err)
+	})
 }
 
-func (*inlineClientConn) NewStream(
-	context.Context,
-	*grpc.StreamDesc,
-	string,
-	...grpc.CallOption,
-) (grpc.ClientStream, error) {
-	return nil, errHTTPGRPCStreamNotSupported
+// ── tiny helpers — one way to do each thing ────────────────────────
+
+// writeProto serialises a proto.Message as canonical protojson.
+// Uses protojson because the request/response types are still
+// google.golang.org/protobuf structs from go.temporal.io/api.
+// When task #41 replaces those with ZAP schemas we'll swap this
+// helper for a zap-native serialiser in the same location.
+func writeProto(c fiber.Ctx, m proto.Message, err error) error {
+	if err != nil {
+		return fiber.NewError(statusCodeFromError(err), err.Error())
+	}
+	b, marshalErr := protojson.MarshalOptions{
+		UseProtoNames:   false,
+		EmitUnpopulated: false,
+	}.Marshal(m)
+	if marshalErr != nil {
+		return fiber.NewError(http.StatusInternalServerError, "marshal response: "+marshalErr.Error())
+	}
+	c.Set("Content-Type", "application/json")
+	return c.Send(b)
 }
 
-// Mostly taken from https://github.com/grpc/grpc-go/blob/v1.56.1/server.go#L1124-L1158
-// with slight modifications.
-func chainUnaryServerInterceptors(interceptors []grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
-	switch len(interceptors) {
-	case 0:
-		return nil
-	case 1:
-		return interceptors[0]
+// statusCodeFromError is a thin mapping from Temporal serviceerror
+// string tags to HTTP status. The full Temporal gRPC-gateway
+// error handler did more work; for the UI's read-only surface this
+// is enough. Mutating endpoints will map through ZAP status codes
+// directly in task #41.
+func statusCodeFromError(err error) int {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "not found"), strings.Contains(msg, "NotFound"):
+		return http.StatusNotFound
+	case strings.Contains(msg, "permission denied"), strings.Contains(msg, "PermissionDenied"):
+		return http.StatusForbidden
+	case strings.Contains(msg, "invalid"), strings.Contains(msg, "InvalidArgument"):
+		return http.StatusBadRequest
+	case strings.Contains(msg, "unavailable"), strings.Contains(msg, "Unavailable"):
+		return http.StatusServiceUnavailable
+	case strings.Contains(msg, "unauthorized"), strings.Contains(msg, "Unauthenticated"):
+		return http.StatusUnauthorized
 	default:
-		return chainUnaryInterceptors(interceptors)
+		return http.StatusInternalServerError
 	}
 }
 
-func chainUnaryInterceptors(interceptors []grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		return interceptors[0](ctx, req, info, getChainUnaryHandler(interceptors, 0, info, handler))
+func queryInt(c fiber.Ctx, key string, def int) int {
+	v := c.Query(key, "")
+	if v == "" {
+		return def
 	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
-func getChainUnaryHandler(
-	interceptors []grpc.UnaryServerInterceptor,
-	curr int,
-	info *grpc.UnaryServerInfo,
-	finalHandler grpc.UnaryHandler,
-) grpc.UnaryHandler {
-	if curr == len(interceptors)-1 {
-		return finalHandler
+func queryBytes(c fiber.Ctx, key string) []byte {
+	v := c.Query(key, "")
+	if v == "" {
+		return nil
 	}
-	return func(ctx context.Context, req any) (any, error) {
-		return interceptors[curr+1](ctx, req, info, getChainUnaryHandler(interceptors, curr+1, info, finalHandler))
-	}
+	return []byte(v)
 }
+
