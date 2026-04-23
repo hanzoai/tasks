@@ -48,12 +48,34 @@ func (w *workerImpl) workflowPollLoop(id int) {
 			// Idle. Re-poll immediately.
 			continue
 		}
+		// Honour MaxConcurrentWorkflowTaskExecutionSize if set. Nil
+		// semaphore = unlimited.
+		if w.workflowExecSem != nil {
+			select {
+			case w.workflowExecSem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			case <-w.stopCh:
+				return
+			}
+		}
 		w.dispatchWorkflowTask(ctx, task)
+		if w.workflowExecSem != nil {
+			<-w.workflowExecSem
+		}
 	}
 }
 
 // activityPollLoop is one activity-task poller. Structure mirrors
 // workflowPollLoop; the dispatch path differs per-task-type.
+//
+// Rate-limit wiring (§2 gap — worker.Options rate fields):
+//   - w.activityLimiter.Wait gates every dispatch to the
+//     WorkerActivitiesPerSecond rate.
+//   - w.taskQueueLimiter.Wait additionally gates against the
+//     TaskQueueActivitiesPerSecond rate. Enforced per-worker in v1 —
+//     true cross-worker coordination arrives with server-side limits.
+//   - Nil limiters are a no-op (unlimited).
 func (w *workerImpl) activityPollLoop(id int) {
 	defer w.wg.Done()
 	ctx, cancel := w.ctxWithStop(context.Background())
@@ -82,6 +104,19 @@ func (w *workerImpl) activityPollLoop(id int) {
 		}
 		if task == nil {
 			continue
+		}
+		// Block on configured rate limits before dispatching. A
+		// cancelled ctx (Stop) causes Wait to return an error, which
+		// we treat as "don't dispatch; loop out."
+		if w.activityLimiter != nil {
+			if err := w.activityLimiter.Wait(ctx); err != nil {
+				return
+			}
+		}
+		if w.taskQueueLimiter != nil {
+			if err := w.taskQueueLimiter.Wait(ctx); err != nil {
+				return
+			}
 		}
 		w.dispatchActivityTask(ctx, task)
 	}
