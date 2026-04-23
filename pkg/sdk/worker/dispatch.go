@@ -66,10 +66,19 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 		return
 	}
 
-	// Build the per-task env. StubEnv is fully coroutine-safe and
-	// lets the workflow fn call ExecuteActivity / Sleep / Now; Phase 2
-	// replaces this with a worker-owned replay env.
-	env := workflow.NewStubEnv()
+	// Build the per-task env. workerEnv is the real wire-backed
+	// runtime: ExecuteActivity dispatches over ZAP, NewTimer uses
+	// time.NewTimer, Select uses a fan-in wake channel (no spin).
+	info := workflow.Info{
+		WorkflowID:   task.WorkflowID,
+		RunID:        task.RunID,
+		WorkflowType: task.WorkflowTypeName,
+		TaskQueue:    w.taskQueue,
+		Namespace:    w.namespace,
+		Attempt:      1,
+	}
+	env := newWorkerEnv(ctx, w.transport, info, w.taskQueue, w.logger)
+	defer env.cancelAll()
 	ctx2 := workflow.NewContextFromEnv(env)
 
 	// Decode input JSON into the fn's arg types. First argument is
@@ -84,27 +93,27 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 		_ = w.transport.RespondWorkflowTaskCompleted(ctx,
 			client.RespondWorkflowTaskCompletedRequest{
 				TaskToken: task.TaskToken,
-				Commands:  emptyCommandsJSON,
+				Commands:  failureCommandsJSON(decodeErr),
 			})
 		return
 	}
 
-	// Invoke synchronously. Errors from the workflow itself are
-	// captured by the engine — the worker's job is to ship commands;
-	// errors manifest as commands in Phase 2.
-	_ = invokeFunc(fn, args)
+	// Invoke synchronously. Workflow-level errors surface as a
+	// FailureCommand (schema v1) so the frontend can fail the
+	// execution per its retry policy. Phase 2 will move errors into
+	// the history log; the schema shape stays the same.
+	runErr := invokeFunc(fn, args)
 
-	// Phase 1: commands list is empty — the Phase-1 StubEnv runs
-	// activities in-process via its registered mocks, so a real
-	// workflow that called ExecuteActivity will NOT emit outbound
-	// commands. Phase 2's worker-owned env will record the
-	// ExecuteActivity calls as outbound commands instead.
-	commands, err := json.Marshal(commandsEnvelope{Version: 1, Commands: nil})
-	if err != nil {
-		// json.Marshal of a zero struct cannot fail — if it does, log
-		// and bail.
-		w.logger.Error("commands encode", "err", err)
-		return
+	var commands []byte
+	if runErr != nil {
+		commands = failureCommandsJSON(runErr)
+	} else {
+		var merr error
+		commands, merr = json.Marshal(commandsEnvelope{Version: 1, Commands: nil})
+		if merr != nil {
+			w.logger.Error("commands encode", "err", merr)
+			return
+		}
 	}
 
 	if err := w.transport.RespondWorkflowTaskCompleted(ctx,
@@ -117,6 +126,20 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 			"err", err,
 		)
 	}
+}
+
+// failureCommandsJSON encodes a single failure command envelope
+// carrying the workflow's return error. Non-retryable errors are
+// surfaced as-is; generic errors wrap in a *temporal.Error so the
+// frontend sees a typed failure.
+func failureCommandsJSON(err error) []byte {
+	failureBytes, _ := temporal.Encode(err)
+	cmd := rawCommand{
+		Kind:    "workflow_failure",
+		Payload: failureBytes,
+	}
+	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: []rawCommand{cmd}})
+	return out
 }
 
 // dispatchActivityTask runs the registered activity function for an
