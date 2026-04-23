@@ -25,7 +25,7 @@ export function WorkflowDetailPage() {
   const [sp] = useSearchParams()
   const runId = sp.get('runId') ?? ''
   const qs = new URLSearchParams({ 'execution.workflowId': workflowId!, 'execution.runId': runId }).toString()
-  const url = `/api/v1/namespaces/${encodeURIComponent(ns!)}/workflows/${encodeURIComponent(workflowId!)}?${qs}`
+  const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/workflows/${encodeURIComponent(workflowId!)}?${qs}`
   const { data, error, isLoading } = useSWR<DescribeResp>(url)
 
   if (error) return <ErrorState error={error} />

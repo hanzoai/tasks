@@ -946,16 +946,21 @@ func HTTPAPIServerProvider(
 		return nil, nil
 	}
 	rpcConfig := cfg.Services[string(serviceName)].RPC
+	// NB: operatorHandler, grpcServerOptions.UnaryInterceptors, and the
+	// shared *mux.Router were all plumbed through for the old
+	// gRPC-Gateway mount that's now gone. Keep them in this function
+	// signature only as long as fx requires the deps to be satisfied;
+	// the new HTTP server uses gofiber and takes none of them.
+	_ = operatorHandler
+	_ = grpcServerOptions
+	_ = router
 	return NewHTTPAPIServer(
 		serviceConfig,
 		rpcConfig,
 		grpcListener,
 		tlsConfigProvider,
 		handler,
-		operatorHandler,
-		grpcServerOptions.UnaryInterceptors,
 		metricsHandler,
-		router,
 		namespaceRegistry,
 		logger,
 	)
