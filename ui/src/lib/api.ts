@@ -1,7 +1,7 @@
 // Thin fetch wrapper over the hanzoai/tasks HTTP API at /v1/tasks/*.
 // Browsers can only speak HTTP/JSON so this surface is JSON; every
 // non-browser caller uses the ZAP binary transport on port 9652
-// (_tasks-sdk._tcp) which is the canonical, fast RPC path. There is
+// (_tasks._tcp) which is the canonical, fast RPC path. There is
 // no /api/ prefix — that was the legacy gRPC-Gateway mount and it's
 // gone. One way, one path.
 

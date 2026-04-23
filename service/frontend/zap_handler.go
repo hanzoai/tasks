@@ -63,7 +63,7 @@ func NewZAPHandler(handler Handler, logger *slog.Logger) *ZAPHandler {
 		logger:  logger,
 		node: zap.NewNode(zap.NodeConfig{
 			NodeID:      nodeID + "-sdk",
-			ServiceType: "_tasks-sdk._tcp",
+			ServiceType: "_tasks._tcp",
 			Port:        port,
 			Logger:      logger,
 			NoDiscovery: true,

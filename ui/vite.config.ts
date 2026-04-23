@@ -12,24 +12,22 @@ import react from '@vitejs/plugin-react'
 //
 // Routing: react-router renders client-side. Server serves index.html
 // for every unknown path (except /api/*) so deep links survive reload.
+// One and one way only:
+//   UI:  /_/tasks/*          (embedded SPA)
+//   API: /v1/tasks/*         (gofiber JSON over ZAP-backed handlers)
+// No /api/, no split paths, no dual mounts.
 export default defineConfig({
   plugins: [react()],
-  base: '/',
+  base: '/_/tasks/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
-    // Inline assets <16KB to reduce round-trips. Bigger assets stay
-    // in /assets/ with 1-year immutable cache (handled in Go).
     assetsInlineLimit: 16 * 1024,
   },
   server: {
     port: 5173,
     proxy: {
-      // During dev, tasksd runs on :7234 and serves the canonical
-      // hanzoai/tasks HTTP surface at /v1/tasks/*. Vite proxies the
-      // same path so the SPA can call it with a relative URL. There
-      // is no /api/ mount — the former gRPC-Gateway is gone.
       '/v1/tasks': 'http://localhost:7234',
     },
   },

@@ -142,19 +142,36 @@ func NewHTTPAPIServer(
 	// a new counter.
 	app.Use(h.accessLogMiddleware(metricsHandler))
 
-	// /v1/tasks/* — canonical path prefix. Every JSON-speaking
-	// caller uses this. There is no /api/ mirror.
-	v1 := app.Group("/v1/tasks")
-	v1.Get("/healthz", func(c fiber.Ctx) error {
+	// One and one way only:
+	//   /_/tasks/*   — embedded admin SPA (dark UI)
+	//   /v1/tasks/*  — JSON API (browser path; ZAP on :9652 is the
+	//                  canonical non-browser path)
+	// No /api/, no /, no split. Anything outside these two prefixes
+	// 404s — there is no implicit route.
+	// Health endpoints:
+	//   /healthz            — k8s / docker HEALTHCHECK probe
+	//                         (Hanzo service convention, matches
+	//                         ~/work/hanzo/kms cmd/kmsd/main.go)
+	//   /v1/tasks/health    — per-service REST health, survives
+	//                         API-gateway multi-service fan-in
+	//                         without colliding at root
+	//   /v1/tasks/healthz   — alias for tooling that expects
+	//                         `healthz` regardless of prefix
+	// Same handler, same body — one definition.
+	healthHandler := func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok", "service": "tasks"})
-	})
+	}
+	app.Get("/healthz", healthHandler)
+
+	v1 := app.Group("/v1/tasks")
+	v1.Get("/health", healthHandler)
+	v1.Get("/healthz", healthHandler)
 	registerV1TasksRoutes(v1, handler, logger)
 
-	// Embedded SPA — catch-all that runs AFTER /v1/tasks is
-	// registered, so the UI shell is served for every browser
-	// path (including client-router paths like
-	// /namespaces/default/workflows).
-	app.Use(adaptor.HTTPHandler(tasksui.Handler()))
+	// SPA at /_/tasks/*. The embed.Handler strips the prefix
+	// before reading from the built Vite bundle so the same
+	// handler works at any mount point.
+	app.Use("/_/tasks", adaptor.HTTPHandler(tasksui.Handler()))
 
 	success = true
 	return h, nil
