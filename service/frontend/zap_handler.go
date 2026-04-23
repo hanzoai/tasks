@@ -139,6 +139,7 @@ type ZAPHandler struct {
 	node    *zap.Node
 	port    int
 	logger  *slog.Logger
+	broker  *frontendActivityBroker
 }
 
 // NewZAPHandler creates a ZAP handler backed by the frontend workflow handler.
@@ -160,6 +161,7 @@ func NewZAPHandler(handler Handler, logger *slog.Logger) *ZAPHandler {
 		handler: handler,
 		port:    port,
 		logger:  logger,
+		broker:  newActivityBroker(),
 		node: zap.NewNode(zap.NodeConfig{
 			NodeID:      nodeID + "-sdk",
 			ServiceType: "_tasks._tcp",
@@ -858,32 +860,40 @@ func (z *ZAPHandler) handleQueryWorkflow(ctx context.Context, _ string, msg *zap
 // ---- In-workflow activity / child ops (Phase-1 stubs) -------------------
 
 func (z *ZAPHandler) handleScheduleActivity(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
-	// Phase-1 shape: server accepts the request and mints an id. The
-	// actual dispatch happens via the normal pollActivityTask flow —
-	// this opcode is here so workers that use a worker-owned env can
-	// reach it without a protocol break. A follow-up will route this
-	// to the matching service for real scheduling.
+	// Mint a stable activityTaskId and register it with the broker.
+	// The worker executes the activity out-of-band and delivers the
+	// result by calling RespondActivityTaskCompleted/Failed with a
+	// TaskToken that has the "zapact:<id>" prefix (see
+	// frontendActivityBroker).
 	var req scheduleActivityReq
 	if err := json.Unmarshal(envelopeBodyBytes(msg), &req); err != nil {
 		return z.errEnvelope(400, err)
 	}
-	resp := scheduleActivityResp{
-		ActivityTaskID: fmt.Sprintf("%s/%s/%d", req.WorkflowID, req.ActivityType, time.Now().UnixNano()),
+	id := fmt.Sprintf("%s/%s/%d", req.WorkflowID, req.ActivityType, time.Now().UnixNano())
+	ttl := time.Duration(req.StartToCloseMs) * time.Millisecond
+	if ttl <= 0 {
+		ttl = 10 * time.Minute
 	}
+	z.broker.Register(id, ttl)
+	resp := scheduleActivityResp{ActivityTaskID: id}
 	out, _ := json.Marshal(resp)
 	return z.okEnvelope(out)
 }
 
 func (z *ZAPHandler) handleWaitActivityResult(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
-	// Phase-1: no result bookkeeping yet. Return ready=false so the
-	// caller falls back to the task-queue path (workerEnv dispatch in
-	// pkg/sdk/worker). Follow-up will attach the real result store.
+	// Long-poll the broker for the activityTaskId's outcome. WaitMs=0
+	// means single-poll (non-blocking).
 	var req waitActivityResultReq
 	if err := json.Unmarshal(envelopeBodyBytes(msg), &req); err != nil {
 		return z.errEnvelope(400, err)
 	}
-	_ = req
-	out, _ := json.Marshal(waitActivityResultResp{Ready: false})
+	wait := time.Duration(req.WaitMs) * time.Millisecond
+	ready, result, failure := z.broker.Wait(req.ActivityTaskID, wait)
+	out, _ := json.Marshal(waitActivityResultResp{
+		Ready:   ready,
+		Result:  result,
+		Failure: failure,
+	})
 	return z.okEnvelope(out)
 }
 
@@ -1175,6 +1185,13 @@ func (z *ZAPHandler) handleRespondActivityTaskCompleted(ctx context.Context, _ s
 	token := root.Bytes(fTaskToken)
 	result := root.Bytes(fResultBytes)
 
+	// Broker-owned token: deliver to the waiter and short-circuit. No
+	// upstream call because there is no server-side activity record
+	// for broker-scheduled activities.
+	if z.broker.Complete(token, result) {
+		return z.workerOKEnvelope(), nil
+	}
+
 	preq := &workflowservice.RespondActivityTaskCompletedRequest{
 		TaskToken: token,
 		Result:    &commonpb.Payloads{Payloads: []*commonpb.Payload{{Data: result}}},
@@ -1189,6 +1206,11 @@ func (z *ZAPHandler) handleRespondActivityTaskFailed(ctx context.Context, _ stri
 	root := msg.Root()
 	token := root.Bytes(fTaskToken)
 	failure := root.Bytes(fFailureBytes)
+
+	// Broker-owned token: deliver the failure bytes and stop.
+	if z.broker.Fail(token, failure) {
+		return z.workerOKEnvelope(), nil
+	}
 
 	// failure is a serialised temporal.*Error envelope; the history
 	// service decodes it. We forward as a Failure with Message=raw
