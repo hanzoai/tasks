@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	stdlog "log"
 	"os"
 	"os/signal"
 	"path"
@@ -162,7 +161,7 @@ func buildCLI() *cli.App {
 
 				// For backward compatibility to support old flag format (i.e. `--services=frontend,history,matching`).
 				if c.IsSet("services") {
-					stdlog.Println("WARNING: --services flag is deprecated. Specify multiply --service flags instead.")
+					log.NewCLILogger().Warn("--services flag is deprecated; pass multiple --service flags instead")
 					services = strings.Split(c.String("services"), ",")
 				}
 
@@ -299,8 +298,13 @@ func buildCLI() *cli.App {
 					}
 				}
 
-				stdlog.Printf("tasksd embedded-sqlite: namespace=%s db=%s bind=%s:%d http=%d\n",
-					ns, dbPath, c.String("bind-ip"), c.Int("port"), c.Int("http-port"))
+				logger := log.NewCLILogger()
+				logger.Info("tasksd embedded-sqlite",
+					tag.NewStringTag("namespace", ns),
+					tag.NewStringTag("db", dbPath),
+					tag.NewStringTag("bind", c.String("bind-ip")),
+					tag.NewInt("port", c.Int("port")),
+					tag.NewInt("http-port", c.Int("http-port")))
 
 				ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
@@ -317,12 +321,13 @@ func buildCLI() *cli.App {
 					return cli.Exit(fmt.Sprintf("embedded-sqlite start: %v", err), 1)
 				}
 
-				stdlog.Printf("tasksd embedded-sqlite ready: %s\n", srv.FrontendHostPort())
+				logger.Info("tasksd embedded-sqlite ready",
+					tag.NewStringTag("addr", srv.FrontendHostPort()))
 
 				<-ctx.Done()
-				stdlog.Println("tasksd shutdown signal received, stopping...")
+				logger.Info("tasksd shutdown signal received, stopping...")
 				if err := srv.Stop(); err != nil {
-					stdlog.Printf("tasksd stop error: %v\n", err)
+					logger.Error("tasksd stop error", tag.Error(err))
 					return cli.Exit("shutdown returned error", 1)
 				}
 				return cli.Exit("tasksd stopped", 0)
