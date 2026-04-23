@@ -29,6 +29,12 @@ type Future interface {
 	// non-blocking peeks inside a Selector callback; most code
 	// calls Get directly.
 	IsReady() bool
+
+	// ReadyCh returns a channel that is closed once the Future has
+	// settled. It is used by the Selector fan-in so a blocking Select
+	// can park on a single receive instead of polling. Stable across
+	// calls: the same channel is returned every time.
+	ReadyCh() <-chan struct{}
 }
 
 // Settleable is the env-facing side of a Future. The worker owns a
@@ -44,8 +50,8 @@ type Settleable interface {
 }
 
 // future is the default Settleable. It holds a one-shot result slot
-// and a channel used by Get to wait. The env closes settleCh on
-// Settle; Get then reads the slot and returns.
+// and a channel used by Get (and the Selector fan-in) to wait. The
+// env closes settleCh on Settle; Get and Selector both block on it.
 type future struct {
 	mu        sync.Mutex
 	settled   bool
@@ -82,17 +88,13 @@ func (f *future) IsReady() bool {
 	return f.settled
 }
 
+// ReadyCh returns the channel closed by Settle. Safe for any number of
+// concurrent receivers.
+func (f *future) ReadyCh() <-chan struct{} { return f.settleCh }
+
 // Get blocks on settleCh; once the future settles it decodes the
 // payload into valPtr. If ctx is canceled first, returns the
 // scope's Err.
-//
-// Note: Get intentionally uses the coroutine's Select / Sleep path
-// indirectly via the env's AwaitFuture? No — in Phase 1 the
-// worker's event loop resolves futures on the same goroutine that
-// called Get, so a naive channel receive here parks the goroutine
-// in exactly the way Phase 1 expects. Phase 2 will swap this for a
-// scheduler-driven block to survive replay. The public API does
-// not change.
 func (f *future) Get(ctx Context, valPtr any) error {
 	if ctx == nil {
 		return errors.New("workflow.Future.Get: nil context")

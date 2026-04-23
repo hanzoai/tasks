@@ -15,6 +15,11 @@ import (
 // event-sourced replay, durable timers, and cross-process activity
 // dispatch.
 //
+// StubEnv is test-only. Production workflow dispatch uses
+// workerEnv (pkg/sdk/worker/env.go). Do NOT depend on StubEnv from
+// non-test code — its API surface is intentionally unstable and may
+// add / remove deterministic-testing hooks over time.
+//
 // Typical use:
 //
 //	env := workflow.NewStubEnv()
@@ -26,6 +31,13 @@ import (
 // The stub processes activities synchronously: ExecuteActivity looks
 // up the registered response by matching function name / string and
 // settles the Future on the same goroutine before returning it.
+//
+// Timers in the stub run against a real wall clock via workflow.Timer
+// so that tests observe the same scheduling semantics as production
+// (a Future that settles after d, cancelable via scope). Tests that
+// want deterministic-time assertions use short durations (tens of
+// milliseconds) or AdvanceClock in combination with the Now()
+// helpers — AdvanceClock no longer force-fires timers.
 type StubEnv struct {
 	mu sync.Mutex
 
@@ -148,12 +160,15 @@ func (e *StubEnv) SignalAsync(name string, val any) {
 		r.ok = true
 		close(r.done)
 	}
+	ch.signalWakersLocked()
 	ch.mu.Unlock()
 }
 
-// AdvanceClock manually advances workflow time by d. Use this in
-// tests that want to validate timer-driven behaviour without
-// actually sleeping.
+// AdvanceClock manually advances workflow Now() by d. It does NOT
+// fire pending timers: timers are wall-clock-based so their firing
+// is driven by the real OS scheduler. Tests that want to observe
+// timer firing should either use small durations or run them on a
+// separate goroutine.
 func (e *StubEnv) AdvanceClock(d time.Duration) {
 	e.mu.Lock()
 	e.clock = e.clock.Add(d)
@@ -218,8 +233,11 @@ func (e *StubEnv) Logger() log.Logger {
 }
 
 func (e *StubEnv) Sleep(d time.Duration) error {
-	// Synchronous: advance the clock. Tests that want to simulate
-	// cancellation during Sleep should call Cancel before Sleep.
+	// Synchronous: advance the deterministic clock. Tests that want
+	// to simulate cancellation during Sleep call Cancel before Sleep.
+	// Unlike NewTimer, Sleep is a pure clock-only primitive in the
+	// stub — wall-clock delay would make determnistic Now() assertions
+	// flaky.
 	e.mu.Lock()
 	sc := e.rootScope
 	e.mu.Unlock()
@@ -232,14 +250,14 @@ func (e *StubEnv) Sleep(d time.Duration) error {
 	return nil
 }
 
+// NewTimer schedules a wall-clock timer using the real workflow.Timer
+// helper. The returned Future settles with (nil, nil) after d, or
+// with temporal.Canceled if the root scope cancels first.
 func (e *StubEnv) NewTimer(d time.Duration) Future {
-	f := NewFuture()
-	// Advance the clock and settle immediately. Tests that want to
-	// delay until Advance*/Cancel do so by adding a zero-duration
-	// NewTimer after manually advancing.
-	e.AdvanceClock(d)
-	f.Settle(nil, nil)
-	return f
+	e.mu.Lock()
+	sc := e.rootScope
+	e.mu.Unlock()
+	return NewWallClockTimer(d, sc.done, func() error { return sc.err })
 }
 
 func (e *StubEnv) ExecuteActivity(opts ActivityOptions, activity any, args []any) Future {
@@ -289,26 +307,16 @@ func (e *StubEnv) NewChannel(name string, buffered int) Channel {
 	return newChan(name, buffered)
 }
 
+// Select blocks until exactly one case is ready and returns its
+// index. It uses the Selector fan-in (ReadyCh / RegisterReadyWaker)
+// instead of a 1 ms polling spin: each case parks on the underlying
+// Future's ReadyCh or the channel's waker, and the scope's done chan
+// cancels the whole wait.
 func (e *StubEnv) Select(cases []SelectCase) int {
-	// Phase-1 stub Select: spin with a short sleep between polls.
-	// Real worker will park the coroutine on a scheduler; we just
-	// need enough to unblock tests where signals/futures arrive
-	// from another goroutine.
 	e.mu.Lock()
 	sc := e.rootScope
 	e.mu.Unlock()
-
-	for {
-		if idx := readyIndex(cases); idx >= 0 {
-			return idx
-		}
-		select {
-		case <-sc.done:
-			return -1
-		case <-time.After(time.Millisecond):
-			// re-check
-		}
-	}
+	return SelectFanIn(cases, sc.done)
 }
 
 func (e *StubEnv) NewCancelScope() (any, CancelFunc) {
@@ -359,8 +367,8 @@ func (e *StubEnv) WorkflowInfo() Info {
 // either harmless or clearly-broken so tests notice.
 type stubEnv struct{}
 
-func (stubEnv) Now() time.Time        { return time.Time{} }
-func (stubEnv) Logger() log.Logger    { return log.Noop() }
+func (stubEnv) Now() time.Time            { return time.Time{} }
+func (stubEnv) Logger() log.Logger        { return log.Noop() }
 func (stubEnv) Sleep(time.Duration) error { return errors.New("workflow: nil env") }
 func (stubEnv) NewTimer(time.Duration) Future {
 	f := NewFuture()
