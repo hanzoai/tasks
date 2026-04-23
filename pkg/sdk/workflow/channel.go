@@ -122,6 +122,22 @@ func newChan(name string, size int) *chanImpl {
 	return &chanImpl{name: name, size: size}
 }
 
+// NewChannelFromEnv mints a Channel without needing a Context. The
+// worker env uses this so it can satisfy its CoroutineEnv.NewChannel
+// contract without a chicken-and-egg dependency on a Context that
+// carries the env.
+func NewChannelFromEnv(name string, size int) Channel {
+	if size < 0 {
+		size = 0
+	}
+	return newChan(name, size)
+}
+
+// HasValue reports whether the channel has a value ready (buffered
+// or a waiting sender). Exported for the worker env's Select fan-in;
+// user code should use ReceiveAsync.
+func (c *chanImpl) HasValue() bool { return c.hasValue() }
+
 // Name implements ReceiveChannel.
 func (c *chanImpl) Name() string { return c.name }
 

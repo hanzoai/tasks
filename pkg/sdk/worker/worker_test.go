@@ -95,6 +95,25 @@ func (f *fakeTransport) RecordActivityTaskHeartbeat(ctx context.Context, req cli
 	return false, nil
 }
 
+// ScheduleActivity satisfies WorkerTransport. The default
+// implementation is a no-op; tests that exercise wire-backed
+// activity dispatch embed fakeTransport and override.
+func (f *fakeTransport) ScheduleActivity(ctx context.Context, req client.ScheduleActivityRequest) (*client.ScheduleActivityResponse, error) {
+	return &client.ScheduleActivityResponse{ActivityTaskID: "stub-id"}, nil
+}
+
+// WaitActivityResult satisfies WorkerTransport. Returns ready=false
+// so workflows that exercise the wire path fall out via ctx
+// deadline; tests wanting completion override this.
+func (f *fakeTransport) WaitActivityResult(ctx context.Context, req client.WaitActivityResultRequest) (*client.WaitActivityResultResponse, error) {
+	return &client.WaitActivityResultResponse{Ready: false}, nil
+}
+
+// StartChildWorkflow satisfies WorkerTransport.
+func (f *fakeTransport) StartChildWorkflow(ctx context.Context, req client.StartChildWorkflowRequest) (*client.StartChildWorkflowResponse, error) {
+	return &client.StartChildWorkflowResponse{RunID: "stub-run-id"}, nil
+}
+
 // queueWorkflow enqueues one workflow task. Input is marshalled as a
 // JSON array so decodeWorkflowArgs can pull args out.
 func (f *fakeTransport) queueWorkflow(t *client.WorkflowTask) {

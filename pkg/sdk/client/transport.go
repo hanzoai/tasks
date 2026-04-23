@@ -26,6 +26,14 @@ const (
 	OpcodeRespondActivityTaskFailed     uint16 = 0x00A4
 	OpcodeRecordActivityTaskHeartbeat   uint16 = 0x00A5
 
+	// In-workflow activity scheduling (see schema/tasks.zap §
+	// "Worker → server: in-workflow activity scheduling"). The
+	// workerEnv uses these to dispatch activities without racing
+	// against the worker's own pollActivityTask loop.
+	OpcodeScheduleActivity   uint16 = 0x006B
+	OpcodeWaitActivityResult uint16 = 0x006C
+	OpcodeStartChildWorkflow uint16 = 0x006D
+
 	// OpcodeError is the generic error response. Any handler can
 	// return this shape regardless of the request opcode.
 	OpcodeError uint16 = 0x00FF
@@ -110,6 +118,92 @@ type WorkerTransport interface {
 	// activity. Returns cancelRequested=true if the server wants
 	// the activity to stop.
 	RecordActivityTaskHeartbeat(ctx context.Context, req RecordActivityTaskHeartbeatRequest) (bool, error)
+
+	// ScheduleActivity asks the frontend to mint an activity task for
+	// the given type + input and return a stable id (schema/tasks.zap
+	// opcode 0x006B). The workerEnv in pkg/sdk/worker uses this from
+	// inside a workflow to dispatch activities without racing the
+	// worker's own pollActivityTask loop.
+	ScheduleActivity(ctx context.Context, req ScheduleActivityRequest) (*ScheduleActivityResponse, error)
+
+	// WaitActivityResult long-polls for the result of an activity id
+	// previously returned by ScheduleActivity (opcode 0x006C). A
+	// response with ready=false means "still pending" — the caller
+	// re-issues. The ctx deadline bounds a single round-trip.
+	WaitActivityResult(ctx context.Context, req WaitActivityResultRequest) (*WaitActivityResultResponse, error)
+
+	// StartChildWorkflow asks the server to start a workflow whose
+	// parent is recorded for linkage (opcode 0x006D). Returns the
+	// run id; Phase-1 does not wait for child completion — the
+	// caller uses DescribeWorkflow or a follow-up
+	// WaitChildWorkflowResult when Phase-2 lands.
+	StartChildWorkflow(ctx context.Context, req StartChildWorkflowRequest) (*StartChildWorkflowResponse, error)
+}
+
+// ScheduleActivityRequest mirrors schema/tasks.zap:ScheduleActivityRequest.
+type ScheduleActivityRequest struct {
+	Namespace      string
+	WorkflowID     string
+	RunID          string
+	TaskQueue      string
+	ActivityType   string
+	Input          []byte
+	StartToCloseMs int64
+	HeartbeatMs    int64
+	RetryPolicy    *RetryPolicyJSON
+}
+
+// RetryPolicyJSON is the Go-side retry-policy shape passed to schedule
+// RPCs. Milliseconds on the wire; zero means "SDK default".
+type RetryPolicyJSON struct {
+	InitialIntervalMs      int64    `json:"initial_interval_ms,omitempty"`
+	BackoffCoefficient     float64  `json:"backoff_coefficient,omitempty"`
+	MaximumIntervalMs      int64    `json:"maximum_interval_ms,omitempty"`
+	MaximumAttempts        int32    `json:"maximum_attempts,omitempty"`
+	NonRetryableErrorTypes []string `json:"non_retryable_error_types,omitempty"`
+}
+
+// ScheduleActivityResponse mirrors schema/tasks.zap:ScheduleActivityResponse.
+type ScheduleActivityResponse struct {
+	ActivityTaskID string
+}
+
+// WaitActivityResultRequest mirrors schema/tasks.zap:WaitActivityResultRequest.
+type WaitActivityResultRequest struct {
+	ActivityTaskID string
+	WaitMs         int64
+}
+
+// WaitActivityResultResponse mirrors schema/tasks.zap:WaitActivityResultResponse.
+type WaitActivityResultResponse struct {
+	Ready   bool
+	Result  []byte
+	Failure []byte
+}
+
+// StartChildWorkflowRequest mirrors schema/tasks.zap StartChildWorkflowRequest.
+type StartChildWorkflowRequest struct {
+	Namespace    string
+	ParentID     string
+	ParentRunID  string
+	WorkflowID   string
+	WorkflowType string
+	TaskQueue    string
+	Input        []any
+	RetryPolicy  *RetryPolicyJSON
+	TimeoutsMs   TimeoutsJSON
+}
+
+// TimeoutsJSON is the timeout triple in ms.
+type TimeoutsJSON struct {
+	WorkflowExecutionMs int64 `json:"workflow_execution_ms,omitempty"`
+	WorkflowRunMs       int64 `json:"workflow_run_ms,omitempty"`
+	WorkflowTaskMs      int64 `json:"workflow_task_ms,omitempty"`
+}
+
+// StartChildWorkflowResponse mirrors schema/tasks.zap.
+type StartChildWorkflowResponse struct {
+	RunID string
 }
 
 // PollWorkflowTaskRequest mirrors schema/tasks.zap:PollWorkflowTaskRequest.
