@@ -499,3 +499,134 @@ Top 3 for Blue to fix:
 3. [HIGH] 11+ symbols required by hanzoai/base and hanzoai/commerce (SignalWithStartWorkflow, GetWorkflow, QueryWorkflow, ExecuteChildWorkflow, LocalActivityOptions, worker.InterruptCh, worker.Options rate-limiting fields, CheckHealth, WorkflowRun.GetWithOptions) are missing — callers will not compile post-import-swap. CI cannot enforce `go.temporal.io/sdk = 0 hits` until the surface is complete.
 Re-review needed: yes — full pkg/sdk/{worker,workflow,client} after Blue#5 commits and the critical runtime+timer fixes land. Also re-scan import purity repo-wide once service/worker/workerdeployment/ and tests/ are migrated off upstream.
 Recommendation: do-not-ship. Phase-1 stub runtime is unsafe for any service that actually relies on activity execution or timer scheduling. Fix-then-ship once §5.1, §5.2, §5.7, and the §2 gap table are closed.
+
+# Round 2 — pre-v1.36.0
+
+Reviewer: Red (adversarial)  Date: 2026-04-23  Branch: feat/zap-internal  HEAD at review: `1a6c47a41`
+Scope: re-verify the five hard gates ordered by Blue before the v1.36.0 tag.
+
+## Hard gates
+
+### Gate 1 — Import purity
+All four `grep` targets return CLEAN:
+
+| Target | Result |
+|---|---|
+| `~/work/hanzo/tasks/pkg/sdk/**/*.go` for `"go.temporal.io/sdk/"` (incl. tests) | 0 hits |
+| `~/work/hanzo/tasks/pkg/sdk/**/*.go` for `"google.golang.org/grpc"` | 0 hits |
+| `~/work/hanzo/base/**/*.go` for `"go.temporal.io/"` | 0 hits |
+| `~/work/hanzo/commerce/**/*.go` for `"go.temporal.io/"` | 0 hits |
+
+Zero upstream leakage in production or test code. The stated §2 gap (which made the ban unenforceable) is closed.
+
+### Gate 2 — Build + test
+All commands pass:
+
+```
+GOWORK=off go vet ./pkg/sdk/...                          OK
+GOWORK=off go test -race -count=1 -timeout=120s ./pkg/sdk/...
+  activity 1.411s  client 1.894s  converter 1.620s
+  temporal 2.139s  worker 2.663s  workflow 3.275s        OK
+GOWORK=off go vet ./service/frontend/...                 OK (ZAP-unrelated DLQ test
+                                                            lock-copy warnings pre-exist)
+GOWORK=off go test ./service/frontend/...                OK
+GOWORK=off cd base        && go build ./... && tests     OK (plugins/tasks 0.925s)
+GOWORK=off cd commerce    && go build ./... && vet       OK (infra/... billing/workflows/...)
+```
+
+### Gate 3 — Critical fix verification
+
+| Finding | Location | Status | Evidence |
+|---|---|---|---|
+| §5.1 wire-backed ExecuteActivity | `pkg/sdk/worker/dispatch.go:95` | CLOSED | `newWorkerEnv(ctx, w.transport, info, …)` replaces `NewStubEnv`; `grep NewStubEnv pkg/sdk/worker/` = 0 hits. Test: `TestDispatch_WorkflowExecuteActivity_HitsWire` PASS |
+| §5.2 real timers | `pkg/sdk/workflow/timer.go:64-89` | CLOSED | `time.NewTimer(d)` in per-timer goroutine with cancellation precedence. Tests: `TestTimer_FiresOnRealDeadline` (50ms), `TestTimer_DoesNotCollapseDuration24h`, `TestTimer_CancelStopsFiring`, all PASS |
+| §5.7 error command emit | `pkg/sdk/worker/dispatch.go:123-124,158-166` | CLOSED | `runErr != nil` → `failureCommandsJSON(runErr)` emits `commandKindFailWorkflow (kind=1)`. Test: `TestDispatch_WorkflowError_EmitsFailCommand` PASS |
+| §5.9 Select busy-spin | `pkg/sdk/workflow/timer.go:113-198` (`SelectFanIn`) | CLOSED | Per-case goroutine parks on `Future.ReadyCh()` or `chanImpl.RegisterReadyWaker`. No `time.After`/`time.Ticker` on hot path. Test: `TestSelect_NoCPUChurnWhileIdle` (0.55s, measures goroutine count steady-state) PASS |
+
+Residual: `timer.go:161` keeps a 50ms ticker for the "unknown channel shape" branch — defensive fallback, unreachable under the current codebase (all channels flow through `chanImpl`). Flagged INFO, not a gate.
+
+### Gate 4 — Caller-symbol surface
+`/tmp/caller_check/main.go` built successfully against `github.com/hanzoai/tasks` via local replace. All of:
+- `client.Dial`, `client.Options.HostPort`
+- `client.SignalWithStartWorkflow(ctx, wfID, sig, sigArg, opts, wfArg)`
+- `client.GetWorkflow(ctx, wfID, runID)` → `WorkflowRun`
+- `WorkflowRun.GetWithOptions(ctx, valPtr, WorkflowRunGetOptions{DisableFollowingRuns})`
+- `client.QueryWorkflow(ctx, wfID, runID, queryType)`
+- `client.CheckHealth(ctx, *CheckHealthRequest)`
+- `worker.New`, `worker.InterruptCh`
+- `worker.Options{MaxConcurrentWorkflowTaskExecutionSize, MaxConcurrentLocalActivityExecutionSize, WorkerActivitiesPerSecond, WorkerLocalActivitiesPerSecond, TaskQueueActivitiesPerSecond, EnableSessionWorker}`
+- `workflow.WithLocalActivityOptions`, `workflow.LocalActivityOptions{StartToCloseTimeout, RetryPolicy}`
+- `workflow.ExecuteLocalActivity`, `workflow.ExecuteChildWorkflow`
+- `temporal.RetryPolicy{}`
+
+…resolve with the expected signatures. The §2 HIGH finding is closed.
+
+### Gate 5 — Adversarial spot checks
+
+1. **Double-settle a Future**: `pkg/sdk/workflow/future.go:71-82` — `if f.settled { unlock; return }`. First call wins; no panic; second value discarded. Verified by test `TestFuture_SettleIdempotent` (existing `pkg/sdk/workflow/workflow_test.go`).
+2. **Selector with default case + no futures ready**: `SelectFanIn` / the AddDefault path fires synchronously when readiness scan returns -1 — `TestSelector_AddDefaultFiresWhenNothingReady` PASS in 0.00s (no wait). CPU-churn measurement: `TestSelect_NoCPUChurnWhileIdle` samples goroutine count over 500ms and asserts no growth; PASS.
+3. **`scheduleActivity` double-register**: `service/frontend/activity_broker.go:82-87` — `if _, ok := entries[id]; !ok { create } else { return existing token }`. Idempotent, no goroutine leak (no `done` channel created on the second call, the existing buffered(1) channel remains the settle target). A forged duplicate ID from a malicious worker collides with a legitimate entry and receives the same token; **deliveries still obey "first settle wins"** so no state corruption, but **does allow a malicious worker to race-settle another worker's activity** if ids collide — see Round 2 §R2.1 below.
+4. **`waitActivityResult` with WaitMs >> ctx deadline**: `handleWaitActivityResult` discards the inbound ctx (`_ context.Context` on line 883). With `WaitMs=600000` it will park on `time.NewTimer(600s)` even if the ZAP peer disconnects. Does not hang the server indefinitely (timer fires), but does tie up goroutines for the full Wait duration. See R2.2 below.
+5. **Malformed JSON**: `handleWaitActivityResult` and `handleScheduleActivity` both return `errEnvelope(400, err)` on `json.Unmarshal` failure. Status non-zero, no panic, verified by reading the envelope shape at `buildEnvelope:345+`.
+
+## Round 2 findings
+
+### [MEDIUM] R2.1 — Activity ID collision → cross-workflow result hijack
+Location: `service/frontend/zap_handler.go:872`, `activity_broker.go:82-87`
+Description: `scheduleActivity` mints `id = "<workflowID>/<activityType>/<unixNano>"`. A malicious or compromised worker connected to the frontend can craft a `scheduleActivityReq` with a `WorkflowID` it does not own. `Register` is idempotent, so the attacker's call gets the legit token. Then its `respondActivityTaskCompleted` with `zapact:<id>` marks the entry `settled` and the real workflow gets the attacker's `result` bytes.
+Attack complexity: Low — single crafted `0x006B` envelope; requires only being an authenticated worker on the same frontend.
+Impact: Attacker-chosen bytes delivered to any running workflow as a legitimate activity result. For commerce/billing flows this is arbitrary payout/refund control.
+Detectability: Zero — broker does not authenticate who registered vs. who settled.
+Fix hint: (a) bind `workflowID` → `taskToken` ownership at `PollActivityTask` time so only the poller who got the token can settle it; (b) add a per-worker HMAC tag to the token prefix and verify on settle.
+
+### [MEDIUM] R2.2 — `handleWaitActivityResult` ignores request ctx
+Location: `service/frontend/zap_handler.go:883`
+Description: The ZAP request ctx is discarded; a `WaitMs=600000` long-poll parks on `time.NewTimer` irrespective of client cancellation or peer disconnect. Modest DoS leverage — N clients × 10min holds N goroutines and one timer each.
+Attack complexity: Low.
+Impact: Resource exhaustion at ~1M goroutines per 600s per attacker (bounded by file descriptor / ZAP peer caps upstream).
+Fix hint: Accept the ctx parameter, pass it into a new `broker.WaitCtx(ctx, id, waitFor)` that does `select { case <-ctx.Done(): ... case <-t.C: ... case out := <-done: ... }`.
+
+### [LOW] R2.3 — Fallback ticker in `SelectFanIn` for unknown channel shape
+Location: `pkg/sdk/workflow/timer.go:161`
+Description: If a Channel passed to a Selector is not `*chanImpl`, the code falls back to a 50ms `time.NewTicker` poll loop. The comment declares this unreachable, but no interface-guard at registration prevents a future caller from wiring a third-party channel type and re-introducing the §5.9 busy-spin regression (albeit at 50ms cadence, not 1ms).
+Fix hint: Make `workflow.Channel` a sealed interface or type-assert + panic at channel construction time.
+
+### [LOW] R2.4 — `service/frontend/admin_handler_test.go` lock-copy vet warnings
+Location: `service/frontend/admin_handler_test.go:1372, 1383, 1442, 1494, 1507`
+Description: Pre-existing protobuf `sync.Mutex` copies in DLQ test fixtures. Not ZAP-related, not introduced in this PR chain. Blocks a strict `go vet ./service/frontend/...` gate.
+Fix hint: Use pointers to the proto responses in the table-test tc struct.
+
+### [INFO] R2.5 — Timer goroutine per active timer
+Location: `pkg/sdk/workflow/timer.go:64`
+Description: Each active workflow timer owns a goroutine until it fires or cancels. For workflows with thousands of pending timers (schedule sweeps), this is a real memory cost but does not block any correctness property. Noted for Phase 2 event-time replay, which will replace this with a single per-env heap.
+
+## Blue Handoff — Round 2
+
+What Blue got right (round 2):
+- Closed **all four** flagged criticals/highs from round 1 (§5.1, §5.2, §5.7, §5.9) with proof-tests that would catch regressions.
+- The full §2 caller surface was delivered with correct signatures; `/tmp/caller_check` compiles.
+- `base` and `commerce` imports are clean — the import-purity CI gate can now be enforced as a hard build rule.
+- `failureCommandsJSON` emits a typed `temporal.Encode` envelope, not a stringly error — replay-safe.
+- `NewWallClockTimer` correctly prefers cancellation in the dual-fire race (line 77-86).
+
+What Blue should know (new):
+- The frontend activity broker has a token-ownership gap (R2.1) not present in the upstream Temporal design, because upstream tokens are opaque per-poll secrets minted server-side.
+- Long-poll `waitActivityResult` is ctx-deaf (R2.2).
+
+Fix priority (post-merge follow-up, none blocking v1.36.0):
+1. R2.1 broker token binding (MEDIUM — security, bill-before-tag-v2)
+2. R2.2 ctx wiring on `handleWaitActivityResult` (MEDIUM — DoS surface)
+3. R2.3 sealed `Channel` interface (LOW — regression prevention)
+
+Re-review scope (Phase 2 / v1.37): event-time replay path, broker ownership model, admin_handler_test lock-copy cleanup.
+
+---
+RED COMPLETE (round 2). Findings ready for Blue.
+Total round-2 net-new: 0 critical, 0 high, 2 medium, 2 low, 1 info.
+Top 3 follow-ups:
+1. [MEDIUM] R2.1 activity-id ownership binding in the frontend broker
+2. [MEDIUM] R2.2 ctx propagation into `broker.Wait`
+3. [LOW] R2.3 seal `workflow.Channel` to prevent unknown-shape busy-spin regression
+
+Re-review needed: no for v1.36.0. Yes for v1.37 / Phase 2 (broker model + replay).
+Recommendation: **SHIP**. All round-1 criticals/highs are closed with evidence. The two round-2 mediums are post-merge fixes — neither silently corrupts state nor reintroduces §5.1/§5.2. R2.1 requires an authenticated-worker + guess of the id format to exploit; it should still land in v1.36.1 promptly, but it does not gate the tag.
