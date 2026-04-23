@@ -73,12 +73,9 @@ func (s *Service) Start() {
 
 	reflection.Register(s.server)
 
-	go func() {
-		s.logger.Info("Starting to serve on matching listener")
-		if err := s.server.Serve(s.grpcListener); err != nil {
-			s.logger.Fatal("Failed to serve on matching listener", tag.Error(err))
-		}
-	}()
+	// gRPC banned — matching runs in-process, fx-wired.
+	_ = s.server
+	_ = s.grpcListener
 
 	go s.membershipMonitor.Start()
 }
