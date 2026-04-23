@@ -168,10 +168,12 @@ func NewHTTPAPIServer(
 	v1.Get("/healthz", healthHandler)
 	registerV1TasksRoutes(v1, handler, logger)
 
-	// SPA at /_/tasks/*. The embed.Handler strips the prefix
-	// before reading from the built Vite bundle so the same
-	// handler works at any mount point.
-	app.Use("/_/tasks", adaptor.HTTPHandler(tasksui.Handler()))
+	// SPA at /_/tasks/*. fiber.Use does not strip the prefix from
+	// r.URL.Path before passing to the adapted handler, so we wrap
+	// with http.StripPrefix — otherwise embed.FS lookups like
+	// `_/tasks/assets/foo.js` miss and every asset falls back to
+	// index.html.
+	app.Use("/_/tasks", adaptor.HTTPHandler(http.StripPrefix("/_/tasks", tasksui.Handler())))
 
 	success = true
 	return h, nil
