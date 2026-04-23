@@ -5,6 +5,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 
 	"github.com/luxfi/zap"
@@ -105,6 +106,164 @@ func (w *workerTransport) RecordActivityTaskHeartbeat(ctx context.Context, req R
 		return false, fmt.Errorf("worker heartbeat: %w", err)
 	}
 	return decodeHeartbeatResp(respBytes), nil
+}
+
+// ScheduleActivity issues opcode 0x006B. The body is a JSON document
+// matching the v1 envelope used for user-facing RPCs; the frontend
+// decodes it into its native schedule-activity request.
+func (w *workerTransport) ScheduleActivity(ctx context.Context, req ScheduleActivityRequest) (*ScheduleActivityResponse, error) {
+	bodyJSON := struct {
+		Namespace      string           `json:"namespace"`
+		WorkflowID     string           `json:"workflow_id"`
+		RunID          string           `json:"run_id,omitempty"`
+		TaskQueue      string           `json:"task_queue"`
+		ActivityType   string           `json:"activity_type"`
+		Input          []byte           `json:"input,omitempty"`
+		StartToCloseMs int64            `json:"start_to_close_ms,omitempty"`
+		HeartbeatMs    int64            `json:"heartbeat_ms,omitempty"`
+		RetryPolicy    *RetryPolicyJSON `json:"retry_policy,omitempty"`
+	}{
+		Namespace:      req.Namespace,
+		WorkflowID:     req.WorkflowID,
+		RunID:          req.RunID,
+		TaskQueue:      req.TaskQueue,
+		ActivityType:   req.ActivityType,
+		Input:          req.Input,
+		StartToCloseMs: req.StartToCloseMs,
+		HeartbeatMs:    req.HeartbeatMs,
+		RetryPolicy:    req.RetryPolicy,
+	}
+	body, err := json.Marshal(bodyJSON)
+	if err != nil {
+		return nil, fmt.Errorf("schedule activity: marshal: %w", err)
+	}
+	respFrame, err := w.t.Call(ctx, OpcodeScheduleActivity, body)
+	if err != nil {
+		return nil, fmt.Errorf("schedule activity: %w", err)
+	}
+	status, detail, payload, perr := parseEnvelope(respFrame)
+	if perr != nil {
+		return nil, fmt.Errorf("schedule activity decode: %w", perr)
+	}
+	if status != 0 && status != 200 {
+		return nil, fmt.Errorf("schedule activity: status %d: %s", status, detail)
+	}
+	var resp struct {
+		ActivityTaskID string `json:"activity_task_id"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &resp); err != nil {
+			return nil, fmt.Errorf("schedule activity body: %w", err)
+		}
+	}
+	return &ScheduleActivityResponse{ActivityTaskID: resp.ActivityTaskID}, nil
+}
+
+// WaitActivityResult issues opcode 0x006C.
+func (w *workerTransport) WaitActivityResult(ctx context.Context, req WaitActivityResultRequest) (*WaitActivityResultResponse, error) {
+	bodyJSON := struct {
+		ActivityTaskID string `json:"activity_task_id"`
+		WaitMs         int64  `json:"wait_ms,omitempty"`
+	}{
+		ActivityTaskID: req.ActivityTaskID,
+		WaitMs:         req.WaitMs,
+	}
+	body, err := json.Marshal(bodyJSON)
+	if err != nil {
+		return nil, fmt.Errorf("wait activity: marshal: %w", err)
+	}
+	respFrame, err := w.t.Call(ctx, OpcodeWaitActivityResult, body)
+	if err != nil {
+		return nil, fmt.Errorf("wait activity: %w", err)
+	}
+	status, detail, payload, perr := parseEnvelope(respFrame)
+	if perr != nil {
+		return nil, fmt.Errorf("wait activity decode: %w", perr)
+	}
+	if status != 0 && status != 200 {
+		return nil, fmt.Errorf("wait activity: status %d: %s", status, detail)
+	}
+	var resp struct {
+		Ready   bool   `json:"ready"`
+		Result  []byte `json:"result,omitempty"`
+		Failure []byte `json:"failure,omitempty"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &resp); err != nil {
+			return nil, fmt.Errorf("wait activity body: %w", err)
+		}
+	}
+	return &WaitActivityResultResponse{
+		Ready:   resp.Ready,
+		Result:  resp.Result,
+		Failure: resp.Failure,
+	}, nil
+}
+
+// StartChildWorkflow issues opcode 0x006D.
+func (w *workerTransport) StartChildWorkflow(ctx context.Context, req StartChildWorkflowRequest) (*StartChildWorkflowResponse, error) {
+	bodyJSON := struct {
+		Namespace    string           `json:"namespace"`
+		ParentID     string           `json:"parent_id"`
+		ParentRunID  string           `json:"parent_run_id,omitempty"`
+		WorkflowID   string           `json:"workflow_id"`
+		WorkflowType string           `json:"workflow_type"`
+		TaskQueue    string           `json:"task_queue"`
+		Input        []any            `json:"input,omitempty"`
+		RetryPolicy  *RetryPolicyJSON `json:"retry_policy,omitempty"`
+		Timeouts     TimeoutsJSON     `json:"timeouts,omitempty"`
+	}{
+		Namespace:    req.Namespace,
+		ParentID:     req.ParentID,
+		ParentRunID:  req.ParentRunID,
+		WorkflowID:   req.WorkflowID,
+		WorkflowType: req.WorkflowType,
+		TaskQueue:    req.TaskQueue,
+		Input:        req.Input,
+		RetryPolicy:  req.RetryPolicy,
+		Timeouts:     req.TimeoutsMs,
+	}
+	body, err := json.Marshal(bodyJSON)
+	if err != nil {
+		return nil, fmt.Errorf("start child: marshal: %w", err)
+	}
+	respFrame, err := w.t.Call(ctx, OpcodeStartChildWorkflow, body)
+	if err != nil {
+		return nil, fmt.Errorf("start child: %w", err)
+	}
+	status, detail, payload, perr := parseEnvelope(respFrame)
+	if perr != nil {
+		return nil, fmt.Errorf("start child decode: %w", perr)
+	}
+	if status != 0 && status != 200 {
+		return nil, fmt.Errorf("start child: status %d: %s", status, detail)
+	}
+	var resp struct {
+		RunID string `json:"run_id"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &resp); err != nil {
+			return nil, fmt.Errorf("start child body: %w", err)
+		}
+	}
+	return &StartChildWorkflowResponse{RunID: resp.RunID}, nil
+}
+
+// parseEnvelope is worker_transport's copy of the envelope decode
+// used by user-facing RPCs in client.go. Kept here to avoid exporting
+// an internal decode from the client package.
+func parseEnvelope(frame []byte) (uint32, string, []byte, error) {
+	msg, err := zap.Parse(frame)
+	if err != nil {
+		return 0, "", nil, err
+	}
+	root := msg.Root()
+	// Envelope field offsets mirror the constants in client.go.
+	const envBody, envStatus, envError = 0, 8, 12
+	status := root.Uint32(envStatus)
+	detail := string(root.Bytes(envError))
+	body := root.Bytes(envBody)
+	return status, detail, body, nil
 }
 
 // encodePollWorkflowReq serialises a PollWorkflowTaskRequest into the
