@@ -25,17 +25,32 @@ import (
 //
 //  1. Look up the fn by task.WorkflowTypeName.
 //  2. Build a workerEnv (satisfies workflow.CoroutineEnv) seeded
-//     with the task's history + input.
+//     with the task's input.
 //  3. Decode input JSON into the fn's arg types.
 //  4. Invoke fn(ctx, args...) synchronously.
-//  5. Serialise the commands the env collected (Phase 1: activities
-//     that the workflow invoked end up as ExecuteActivity commands).
+//  5. Serialise the commands the env collected + the fn return into a
+//     CommandsEnvelope (schema/tasks.zap).
 //  6. Call RespondWorkflowTaskCompleted.
 //
 // On panic the worker ships a failed-commands response; the server
 // will fail the workflow execution per its retry policy. The panic
 // is logged, not propagated, so one bad workflow does not kill the
 // entire worker goroutine.
+//
+// Phase-1 replay semantics (IMPORTANT — carryover budget):
+//
+//   Event-sourced replay is deferred to Phase 2. Every dispatch
+//   re-runs the workflow function from the top with the same
+//   input, so workflows MUST be pure w.r.t. their inputs:
+//     - no reads from external state,
+//     - no non-deterministic branching on time / rand / env,
+//     - every side-effect goes through an activity.
+//   Activity calls are idempotent by contract; mid-run crashes
+//   restart with the same input. Commands are emitted into
+//   workflow history via the CommandsEnvelope on RespondWorkflow
+//   TaskCompleted — the frontend's handleRespondWorkflowTask
+//   Completed consumes that envelope and mutates history
+//   accordingly.
 func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.WorkflowTask) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -102,18 +117,23 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 	// FailureCommand (schema v1) so the frontend can fail the
 	// execution per its retry policy. Phase 2 will move errors into
 	// the history log; the schema shape stays the same.
-	runErr := invokeFunc(fn, args)
+	runResult, runErr := invokeFunc(fn, args)
 
 	var commands []byte
 	if runErr != nil {
 		commands = failureCommandsJSON(runErr)
 	} else {
-		var merr error
-		commands, merr = json.Marshal(commandsEnvelope{Version: 1, Commands: nil})
-		if merr != nil {
-			w.logger.Error("commands encode", "err", merr)
-			return
+		// Success → emit a single completeWorkflow command carrying
+		// the workflow fn's non-error return (if any) as JSON.
+		var resultBytes []byte
+		if runResult != nil {
+			if enc, merr := json.Marshal(runResult); merr == nil {
+				resultBytes = enc
+			} else {
+				w.logger.Error("workflow result marshal", "err", merr)
+			}
 		}
+		commands = completeCommandsJSON(resultBytes)
 	}
 
 	if err := w.transport.RespondWorkflowTaskCompleted(ctx,
@@ -128,15 +148,45 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 	}
 }
 
-// failureCommandsJSON encodes a single failure command envelope
-// carrying the workflow's return error. Non-retryable errors are
-// surfaced as-is; generic errors wrap in a *temporal.Error so the
-// frontend sees a typed failure.
+// failureCommandsJSON encodes a single FailWorkflow command
+// envelope (kind=1) carrying the workflow's return error.
+// Non-retryable errors are surfaced as-is; generic errors wrap in
+// a *temporal.Error so the frontend sees a typed failure.
+//
+// Red §5.7 fix: previously workflow errors were silently dropped
+// and the task responded with an empty commands list.
 func failureCommandsJSON(err error) []byte {
 	failureBytes, _ := temporal.Encode(err)
 	cmd := rawCommand{
-		Kind:    "workflow_failure",
-		Payload: failureBytes,
+		Kind:    commandKindFailWorkflow,
+		Failure: failureBytes,
+	}
+	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: []rawCommand{cmd}})
+	return out
+}
+
+// completeCommandsJSON encodes a single CompleteWorkflow command
+// envelope (kind=0) carrying the workflow fn's JSON-encoded return
+// value (nil if fn returned only an error or nothing).
+func completeCommandsJSON(result []byte) []byte {
+	cmd := rawCommand{
+		Kind:   commandKindCompleteWorkflow,
+		Result: result,
+	}
+	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: []rawCommand{cmd}})
+	return out
+}
+
+// scheduleActivityCommandsJSON encodes a single ScheduleActivity
+// command envelope (kind=2) for an activity that was dispatched
+// over the wire during this task. Phase 1 uses this for parity
+// with the frontend's canonical shape; Phase 2 will collect all
+// scheduled activities in a single envelope with interleaved
+// completeWorkflow / failWorkflow entries.
+func scheduleActivityCommandsJSON(activityTaskID string) []byte {
+	cmd := rawCommand{
+		Kind:           commandKindScheduleActivity,
+		ActivityTaskID: activityTaskID,
 	}
 	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: []rawCommand{cmd}})
 	return out
@@ -319,19 +369,34 @@ func (w *workerImpl) autoHeartbeat(ctx context.Context, token []byte, interval t
 }
 
 // commandsEnvelope is the v1 JSON wire shape for the
-// RespondWorkflowTaskCompletedRequest.Commands field. Kept here and
-// not in a shared pkg/sdk/workflow helper because the worker is the
-// only producer; Phase 2 can promote it if another component needs
-// to read it.
+// RespondWorkflowTaskCompletedRequest.Commands field. It mirrors
+// the `CommandsEnvelope` / `Command` ZAP structs in schema/tasks.zap
+// and is the canonical producer-side encoder for workflow commands.
+//
+// The frontend (service/frontend/workflow_handler.go,
+// handleRespondWorkflowTaskCompleted) decodes this into history
+// mutations (complete / fail / schedule activity). ZAP native serde
+// replaces JSON in a follow-up without changing the shape.
 type commandsEnvelope struct {
-	Version  int          `json:"v"`
+	Version  int8         `json:"v"`
 	Commands []rawCommand `json:"cmds"`
 }
 
 type rawCommand struct {
-	Kind    string `json:"kind"`
-	Payload []byte `json:"payload,omitempty"`
+	Kind           int8   `json:"kind"`
+	Result         []byte `json:"result,omitempty"`          // kind=0 completeWorkflow
+	Failure        []byte `json:"failure,omitempty"`         // kind=1 failWorkflow (temporal.Encode)
+	ActivityTaskID string `json:"activityTaskId,omitempty"` // kind=2 scheduleActivity
 }
+
+// Command kind constants mirror the Int8 values in
+// schema/tasks.zap `Command.kind`. Anchored here so producer and
+// (future) decoder agree; drift is caught at test time.
+const (
+	commandKindCompleteWorkflow int8 = 0
+	commandKindFailWorkflow     int8 = 1
+	commandKindScheduleActivity int8 = 2
+)
 
 // emptyCommandsJSON is the pre-serialised empty commands response
 // used in the "no workflow registered" / decode-failure paths.
@@ -449,23 +514,27 @@ func appendDecodedArgs(args []reflect.Value, ft reflect.Type, input []byte, skip
 	return args, nil
 }
 
-// invokeFunc calls the workflow function. Errors are not returned
-// here because Phase 1 does not treat a workflow's return error as
-// the task outcome (the engine writes it into the workflow history
-// as a failure command in Phase 2).
-func invokeFunc(fn any, args []reflect.Value) error {
+// invokeFunc calls the workflow function and splits its returns
+// into (result, err). The error tail (a trailing `error` return)
+// is propagated as the err; any other non-error return becomes
+// the result. Workflows with no returns yield (nil, nil).
+func invokeFunc(fn any, args []reflect.Value) (any, error) {
 	fv := reflect.ValueOf(fn)
 	out := fv.Call(args)
-	// If the function returns (result, error) we surface the error;
-	// otherwise the call is treated as success.
+	var result any
+	var err error
 	for _, o := range out {
-		if o.Kind() == reflect.Interface && !o.IsNil() {
-			if err, ok := o.Interface().(error); ok {
-				return err
+		if o.Kind() == reflect.Interface && o.Type().Implements(errType) {
+			if !o.IsNil() {
+				err = o.Interface().(error)
 			}
+			continue
+		}
+		if result == nil && o.IsValid() && o.CanInterface() {
+			result = o.Interface()
 		}
 	}
-	return nil
+	return result, err
 }
 
 // invokeActivityFunc calls the activity function. Returns (result, err)
