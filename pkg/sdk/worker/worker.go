@@ -43,13 +43,19 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/hanzoai/tasks/pkg/sdk/client"
 	luxlog "github.com/luxfi/log"
+	"golang.org/x/time/rate"
 )
 
-// Options configures a Worker.
+// Options configures a Worker. Field shape matches
+// go.temporal.io/sdk/worker.Options so caller code migrating from
+// upstream compiles unchanged. Any zero value means "unlimited /
+// default"; the Options struct is never validated for positivity.
 type Options struct {
 	// MaxConcurrentActivityExecutionSize is both the activity poller
 	// count and the soft cap on concurrent activity executions. Each
@@ -60,6 +66,38 @@ type Options struct {
 	// MaxConcurrentWorkflowTaskPollers is the workflow-task poller
 	// count. 0 → defaultWorkflowPollers.
 	MaxConcurrentWorkflowTaskPollers int
+
+	// MaxConcurrentWorkflowTaskExecutionSize is the concurrency cap
+	// on workflow-task execution. Distinct from the poller count; a
+	// worker can poll more aggressively than it executes. 0 =
+	// unlimited (bounded only by MaxConcurrentWorkflowTaskPollers).
+	MaxConcurrentWorkflowTaskExecutionSize int
+
+	// MaxConcurrentLocalActivityExecutionSize caps concurrent local
+	// activity executions. Phase-1 local activities are dispatched
+	// via the remote path; this knob is honoured in the common
+	// semaphore around ExecuteActivity. 0 = unlimited.
+	MaxConcurrentLocalActivityExecutionSize int
+
+	// WorkerActivitiesPerSecond caps this worker's activity dispatch
+	// rate. Per-worker; does not coordinate across replicas. 0 =
+	// unlimited.
+	WorkerActivitiesPerSecond float64
+
+	// WorkerLocalActivitiesPerSecond caps this worker's local
+	// activity dispatch rate. 0 = unlimited.
+	WorkerLocalActivitiesPerSecond float64
+
+	// TaskQueueActivitiesPerSecond is the shared-across-workers rate
+	// intended as a task-queue global. Phase-1 enforces it per-worker
+	// — true global coordination requires a server-side limiter and
+	// arrives with the native serde milestone. 0 = unlimited.
+	TaskQueueActivitiesPerSecond float64
+
+	// EnableSessionWorker registers a default session tracker that
+	// no-ops but satisfies the upstream API. Required by callers
+	// that enable activity sessions; harmless otherwise.
+	EnableSessionWorker bool
 
 	// Identity is sent to the server on every poll so the frontend
 	// attributes tasks to this worker. Empty → "<hostname>@<pid>".
@@ -147,7 +185,7 @@ func New(c client.Client, taskQueue string, options Options) Worker {
 		logger = luxlog.Noop()
 	}
 
-	return &workerImpl{
+	w := &workerImpl{
 		client:    c,
 		transport: wt,
 		taskQueue: taskQueue,
@@ -158,6 +196,32 @@ func New(c client.Client, taskQueue string, options Options) Worker {
 		registry:  newRegistry(),
 		stopCh:    make(chan struct{}),
 	}
+
+	// Rate limiters: a zero rate means "unlimited" (no limiter). Burst
+	// is 1 so bursty dispatch is throttled to the steady-state rate.
+	if opts.WorkerActivitiesPerSecond > 0 {
+		w.activityLimiter = rate.NewLimiter(rate.Limit(opts.WorkerActivitiesPerSecond), 1)
+	}
+	if opts.WorkerLocalActivitiesPerSecond > 0 {
+		w.localActivityLimiter = rate.NewLimiter(rate.Limit(opts.WorkerLocalActivitiesPerSecond), 1)
+	}
+	if opts.TaskQueueActivitiesPerSecond > 0 {
+		w.taskQueueLimiter = rate.NewLimiter(rate.Limit(opts.TaskQueueActivitiesPerSecond), 1)
+	}
+
+	// Execution semaphores: zero cap means "no cap".
+	if opts.MaxConcurrentWorkflowTaskExecutionSize > 0 {
+		w.workflowExecSem = make(chan struct{}, opts.MaxConcurrentWorkflowTaskExecutionSize)
+	}
+	if opts.MaxConcurrentLocalActivityExecutionSize > 0 {
+		w.localActExecSem = make(chan struct{}, opts.MaxConcurrentLocalActivityExecutionSize)
+	}
+
+	if opts.EnableSessionWorker {
+		w.sessionTracker = &sessionTracker{}
+	}
+
+	return w
 }
 
 // workerImpl is the concrete Worker.
@@ -171,6 +235,25 @@ type workerImpl struct {
 	logger    luxlog.Logger
 	registry  *registry
 
+	// Rate limiters. Nil limiters mean "unlimited".
+	//
+	// activityLimiter covers all remote activity dispatches observed
+	// by this worker (per-worker scope). The task-queue limit shares
+	// the same limiter chain: v1 enforces it per-worker since true
+	// cross-worker coordination requires a server-side gatekeeper.
+	activityLimiter      *rate.Limiter
+	localActivityLimiter *rate.Limiter
+	taskQueueLimiter     *rate.Limiter
+
+	// Execution-size semaphores. Nil = unlimited.
+	workflowExecSem chan struct{}
+	localActExecSem chan struct{}
+
+	// Optional session tracker. Non-nil when EnableSessionWorker was
+	// set; Phase-1 implementation is a no-op tracker that satisfies
+	// the upstream API without running real sessions.
+	sessionTracker *sessionTracker
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 	startErr  error
@@ -178,6 +261,11 @@ type workerImpl struct {
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 }
+
+// sessionTracker is the Phase-1 no-op session worker. Retained as a
+// distinct type so future wiring (real session activities, heartbeat
+// coordination) can replace it without changing the Options shape.
+type sessionTracker struct{}
 
 // Start implements Worker.
 func (w *workerImpl) Start() error {
@@ -279,4 +367,42 @@ func (w *workerImpl) RegisterActivity(fn any) {
 
 func (w *workerImpl) RegisterActivityWithOptions(fn any, opts RegisterActivityOptions) {
 	w.registry.registerActivity(fn, opts)
+}
+
+// interruptChOnce guards the package-level interrupt channel so it is
+// installed exactly once per process — subsequent InterruptCh calls
+// return the same channel. This matches upstream semantics: a worker
+// that calls `w.Run(worker.InterruptCh())` hands the same listener
+// across every worker it wires.
+var (
+	interruptChOnce sync.Once
+	interruptCh     chan any
+)
+
+// InterruptCh returns a process-wide channel that closes on the first
+// SIGINT or SIGTERM. Pass it to Worker.Run to trigger a graceful
+// shutdown on Ctrl-C or `kill`. Repeated calls return the same channel.
+//
+// The channel is `chan any` (not `chan os.Signal`) so it satisfies the
+// Worker.Run signature (`<-chan any`) without leaking os.Signal into
+// the caller's type surface. The value sent on interrupt is the
+// os.Signal that caused it; callers typically ignore it.
+func InterruptCh() <-chan any {
+	interruptChOnce.Do(func() {
+		interruptCh = make(chan any, 1)
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			sig := <-sigCh
+			// Single-shot: the channel is CLOSED after the first
+			// signal so all receivers observe it, and so a second
+			// signal does not block trying to send.
+			select {
+			case interruptCh <- sig:
+			default:
+			}
+			close(interruptCh)
+		}()
+	})
+	return interruptCh
 }
