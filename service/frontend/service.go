@@ -447,8 +447,9 @@ func NewService(
 		membershipMonitor: membershipMonitor,
 	}
 
-	// Enable ZAP SDK handler when ZAP_SDK_ENABLED is set or ZAP_SDK_PORT is set.
-	if os.Getenv("ZAP_SDK_ENABLED") == "true" || os.Getenv("ZAP_SDK_PORT") != "" {
+	// ZAP is the canonical non-browser transport for hanzoai/tasks —
+	// on by default. Only explicit opt-out disables it.
+	if os.Getenv("ZAP_SDK_DISABLED") != "true" {
 		svc.zapHandler = NewZAPHandler(handler, slog.Default())
 	}
 
