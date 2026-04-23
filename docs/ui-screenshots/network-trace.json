@@ -1,0 +1,80 @@
+[
+  {
+    "page": "namespaces",
+    "url": "http://localhost:7234/_/tasks/namespaces",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "namespaces",
+    "url": "http://localhost:7234/_/tasks/assets/index-0V2j_UH0.css",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "namespaces",
+    "url": "http://localhost:7234/_/tasks/assets/index-DXEVcJik.js",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "namespaces",
+    "url": "http://localhost:7234/v1/tasks/namespaces?pageSize=200",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "workflows",
+    "url": "http://localhost:7234/_/tasks/namespaces/default/workflows",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "workflows",
+    "url": "http://localhost:7234/_/tasks/assets/index-0V2j_UH0.css",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "workflows",
+    "url": "http://localhost:7234/_/tasks/assets/index-DXEVcJik.js",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "workflows",
+    "url": "http://localhost:7234/v1/tasks/namespaces/default/workflows?query=&pageSize=50",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "schedules",
+    "url": "http://localhost:7234/_/tasks/namespaces/default/schedules",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "schedules",
+    "url": "http://localhost:7234/_/tasks/assets/index-0V2j_UH0.css",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "schedules",
+    "url": "http://localhost:7234/_/tasks/assets/index-DXEVcJik.js",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "schedules",
+    "url": "http://localhost:7234/v1/tasks/namespaces/default/schedules",
+    "status": 200,
+    "method": "GET"
+  },
+  {
+    "page": "health",
+    "url": "http://localhost:7234/v1/tasks/health",
+    "status": 200,
+    "method": "GET"
+  }
+]
