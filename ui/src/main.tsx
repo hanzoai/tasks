@@ -16,7 +16,7 @@ if (!root) throw new Error('root element missing')
 createRoot(root).render(
   <StrictMode>
     <SWRConfig value={{ fetcher, revalidateOnFocus: false, dedupingInterval: 2000 }}>
-      <BrowserRouter>
+      <BrowserRouter basename="/_/tasks">
         <Routes>
           <Route path="/" element={<App />}>
             <Route index element={<Navigate to="/namespaces" replace />} />
