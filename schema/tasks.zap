@@ -250,6 +250,37 @@ struct WaitActivityResultResponse
   result Bytes             # encoded value (JSON v1); empty on pending/error
   failure Bytes            # encoded *temporal.Error; empty on pending/success
 
+# ── Workflow command envelope (worker → frontend) ──────────────
+#
+# The `commands` Bytes field on RespondWorkflowTaskCompletedRequest
+# carries a CommandsEnvelope serialised as JSON (v1). This is the
+# canonical wire shape emitted by pkg/sdk/worker/dispatch.go; the
+# frontend's handleRespondWorkflowTaskCompleted decodes it to
+# mutate workflow history (complete / fail / schedule activity).
+#
+# Native ZAP serde will replace JSON in a follow-up PR. Version is
+# pinned at 1; backwards-compatible additions bump the minor at
+# the Command level, incompatible changes bump the envelope
+# version and keep the old decoder for a release cycle.
+#
+# Kind values (Int8):
+#   0 = completeWorkflow   — workflow fn returned (non-error)
+#                            `result` carries JSON-encoded fn return
+#   1 = failWorkflow       — workflow fn returned an error
+#                            `failure` carries temporal.Encode bytes
+#   2 = scheduleActivity   — in-workflow ExecuteActivity call
+#                            `activityTaskId` is the frontend-minted id
+
+struct CommandsEnvelope
+  version Int8             # 1 = v1
+  commands List(Command)
+
+struct Command
+  kind Int8                # 0=completeWorkflow, 1=failWorkflow, 2=scheduleActivity
+  result Bytes             # only for kind=0 completeWorkflow (JSON)
+  failure Bytes            # only for kind=1 failWorkflow (temporal.Encode shape)
+  activityTaskId Text      # only for kind=2 scheduleActivity (idempotency)
+
 # ── Canonical RPC service ──────────────────────────────────────
 
 interface Tasks
