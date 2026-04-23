@@ -56,12 +56,8 @@ jobs:
           docker push ${REGISTRY}:${{ steps.tags.outputs.sha }}-amd64
 
   build-arm64:
-    # ARM64 runner is currently on AWS EKS hanzo-arm64 (DOKS has no
-    # arm64 nodes). When that's ready, flip `if: false` → `if: true`
-    # or delete the guard. Until then, arm64 is pushed from the
-    # developer's Mac via `docker buildx build --platform linux/arm64
-    # --push -t ghcr.io/hanzoai/tasks:vX.Y.Z-arm64 .`
-    if: false
+    # Native arm64 on AWS EKS hanzo-arm64 (t4g.xlarge Graviton2).
+    # DOKS has no arm64 nodes; that's why the scaleset lives on AWS.
     runs-on: hanzo-build-linux-arm64
     steps:
       - uses: actions/checkout@v5
@@ -89,10 +85,7 @@ jobs:
           docker push ${REGISTRY}:${{ steps.tags.outputs.sha }}-arm64
 
   manifest:
-    # Doesn't need build-arm64 — arm64 is pushed separately from the
-    # developer's Mac. The manifest step picks up whichever per-arch
-    # tags exist at the moment it runs.
-    needs: [build-amd64]
+    needs: [build-amd64, build-arm64]
     runs-on: hanzo-build-linux-amd64
     steps:
       - name: Login to GHCR
