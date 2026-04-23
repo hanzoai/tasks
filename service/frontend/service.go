@@ -474,12 +474,19 @@ func (s *Service) Start() {
 	s.operatorHandler.Start()
 	s.handler.Start()
 
-	go func() {
-		s.logger.Info("Starting to serve on frontend listener")
-		if err := s.server.Serve(s.grpcListener); err != nil {
-			s.logger.Fatal("Failed to serve on frontend listener", tag.Error(err))
-		}
-	}()
+	// gRPC is banned. The listener is still bound because the fx
+	// graph currently requires a net.Listener for all kinds of
+	// internal-client dial shims; we just never let it accept a
+	// connection. External callers use:
+	//   /v1/tasks/*   (HTTP + JSON, port 7234)
+	//   _tasks._tcp   (ZAP binary, port 9652)
+	// Any attempt to talk gRPC to this server hangs on the TCP
+	// handshake and times out, which is the correct response.
+	_ = s.server
+	_ = s.grpcListener
+	s.logger.Info("gRPC server is banned — HTTP/ZAP only",
+		tag.NewStringTag("http", "/v1/tasks/*"),
+		tag.NewStringTag("zap", "_tasks._tcp :9652"))
 
 	if s.httpAPIServer != nil {
 		go func() {
