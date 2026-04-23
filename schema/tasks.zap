@@ -110,6 +110,39 @@ struct DescribeWorkflowRequest
 struct DescribeWorkflowResponse
   info WorkflowExecutionInfo
 
+# SignalWithStartWorkflow is the union of Start + Signal: start the
+# workflow if no live execution matches workflowId, otherwise deliver
+# the signal to the running execution. Opcode 0x0066.
+#
+# Wire shape: all fields of StartWorkflowRequest plus signalName and
+# signalArg. Response is the same as StartWorkflowResponse.
+struct SignalWithStartWorkflowRequest
+  namespace Text
+  workflowId Text
+  workflowType WorkflowType
+  taskQueue TaskQueue
+  input Payloads
+  retryPolicy RetryPolicy
+  timeouts Timeouts
+  memo Payloads
+  signalName Text
+  signalInput Payloads
+
+struct SignalWithStartWorkflowResponse
+  runId Text
+
+# QueryWorkflow runs a registered query against a (possibly running)
+# workflow execution and returns the query's encoded result. Opcode
+# 0x0067. Queries are read-only — they do not alter history.
+struct QueryWorkflowRequest
+  namespace Text
+  execution WorkflowExecution
+  queryType Text
+  args Payloads
+
+struct QueryWorkflowResponse
+  result Payload
+
 struct ListWorkflowsRequest
   namespace Text
   query Text        # SQL-subset filter ("WorkflowType='X' AND Status='Running'")
@@ -264,22 +297,27 @@ struct WaitActivityResultResponse
 # version and keep the old decoder for a release cycle.
 #
 # Kind values (Int8):
-#   0 = completeWorkflow   — workflow fn returned (non-error)
-#                            `result` carries JSON-encoded fn return
-#   1 = failWorkflow       — workflow fn returned an error
-#                            `failure` carries temporal.Encode bytes
-#   2 = scheduleActivity   — in-workflow ExecuteActivity call
-#                            `activityTaskId` is the frontend-minted id
+#   0 = completeWorkflow        — workflow fn returned (non-error)
+#                                  `result` carries JSON-encoded fn return
+#   1 = failWorkflow            — workflow fn returned an error
+#                                  `failure` carries temporal.Encode bytes
+#   2 = scheduleActivity        — in-workflow ExecuteActivity call
+#                                  `activityTaskId` is the frontend-minted id
+#   3 = scheduleChildWorkflow   — in-workflow ExecuteChildWorkflow call
+#                                  `childWorkflowId` + `childRunId` identify
+#                                  the child; used by Phase-2 replay + linkage
 
 struct CommandsEnvelope
   version Int8             # 1 = v1
   commands List(Command)
 
 struct Command
-  kind Int8                # 0=completeWorkflow, 1=failWorkflow, 2=scheduleActivity
+  kind Int8                # 0..3; see doc block above
   result Bytes             # only for kind=0 completeWorkflow (JSON)
   failure Bytes            # only for kind=1 failWorkflow (temporal.Encode shape)
   activityTaskId Text      # only for kind=2 scheduleActivity (idempotency)
+  childWorkflowId Text     # only for kind=3 scheduleChildWorkflow
+  childRunId Text          # only for kind=3 scheduleChildWorkflow
 
 # ── Canonical RPC service ──────────────────────────────────────
 
@@ -297,6 +335,8 @@ interface Tasks
     -> (resp StartWorkflowResponse)
   signalWorkflow (req SignalWorkflowRequest)
     -> (ok Bool)
+  signalWithStartWorkflow (req SignalWithStartWorkflowRequest)
+    -> (resp SignalWithStartWorkflowResponse)
   cancelWorkflow (req CancelWorkflowRequest)
     -> (ok Bool)
   terminateWorkflow (req TerminateWorkflowRequest)
@@ -305,6 +345,8 @@ interface Tasks
     -> (resp DescribeWorkflowResponse)
   listWorkflows (req ListWorkflowsRequest)
     -> (resp ListWorkflowsResponse)
+  queryWorkflow (req QueryWorkflowRequest)
+    -> (resp QueryWorkflowResponse)
 
   # Schedules
   createSchedule (req CreateScheduleRequest)
