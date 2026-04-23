@@ -210,15 +210,26 @@ func (c *clientImpl) PauseSchedule(ctx context.Context, scheduleID string, pause
 
 // Health implements Client.
 func (c *clientImpl) Health(ctx context.Context) (service, status string, err error) {
-	type healthResponse struct {
-		Service string `json:"service"`
-		Status  string `json:"status"`
-	}
-	var resp healthResponse
-	if err := c.roundTrip(ctx, opHealth, struct{}{}, &resp); err != nil {
-		return "", "", err
+	resp, herr := c.CheckHealth(ctx, nil)
+	if herr != nil {
+		return "", "", herr
 	}
 	return resp.Service, resp.Status, nil
+}
+
+// CheckHealth implements Client. Backed by opcode 0x0090. A nil req is
+// treated as an empty request (the v1 wire reserves the request body
+// for future filters).
+func (c *clientImpl) CheckHealth(ctx context.Context, req *CheckHealthRequest) (*CheckHealthResponse, error) {
+	if req == nil {
+		req = &CheckHealthRequest{}
+	}
+	_ = req // empty in v1 — present so round-trip uses the canonical shape
+	var resp CheckHealthResponse
+	if err := c.roundTrip(ctx, opHealth, struct{}{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // Internal helpers to keep json usage consistent and testable. These
