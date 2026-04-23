@@ -138,30 +138,34 @@ func (e *workerEnv) Sleep(d time.Duration) error {
 }
 
 // NewTimer returns a Future that settles with (nil, nil) after d, or
-// with temporal.Canceled if the root scope cancels.
+// with the root scope's / run context's cancellation error if either
+// fires first.
 //
-// Implementation: one goroutine per live timer parks on time.NewTimer
-// and settles the Future on fire. The Selector fan-in (readyCh) is
-// notified so a blocking Select returns promptly.
+// Implementation: delegates to workflow.NewWallClockTimer so stub and
+// production share a single timer impl. Cancellation fans in over
+// e.root.done ∪ e.ctx.Done() — a closed either-or channel wakes the
+// timer goroutine and settles with ctx/scope error.
 func (e *workerEnv) NewTimer(d time.Duration) workflow.Future {
-	f := workflow.NewFuture()
-	if d <= 0 {
-		f.Settle(nil, nil)
-		return f
-	}
+	// Merge root-scope done and run-context done into a single
+	// cancellation signal the shared timer helper can park on.
+	cancelCh := make(chan struct{})
 	go func() {
-		t := time.NewTimer(d)
-		defer t.Stop()
 		select {
-		case <-t.C:
-			f.Settle(nil, nil)
 		case <-e.root.done:
-			f.Settle(nil, e.root.err)
 		case <-e.ctx.Done():
-			f.Settle(nil, e.ctx.Err())
 		}
+		close(cancelCh)
 	}()
-	return f
+	errFn := func() error {
+		if e.root.err != nil {
+			return e.root.err
+		}
+		if err := e.ctx.Err(); err != nil {
+			return err
+		}
+		return nil
+	}
+	return workflow.NewWallClockTimer(d, cancelCh, errFn)
 }
 
 // ExecuteActivity dispatches an activity over the wire via
@@ -306,81 +310,28 @@ func (e *workerEnv) newChannel(name string, buffered int) workflow.Channel {
 }
 
 // Select blocks until exactly one of the cases is ready, then returns
-// its index. Implementation uses a fan-in: each case attaches a
-// readiness watcher that closes a shared wakeCh; the main loop parks
-// on wakeCh and re-scans on wake. No 1ms spin, no per-iteration
-// allocation.
+// its index. Uses the shared workflow.SelectFanIn which parks on
+// Future.ReadyCh() / chanImpl waker channels — no polling, no 1 ms
+// spin, no 20 ms ticker. Cancellation fans in via a merged done-ch
+// covering both the root cancel scope and the run context.
 func (e *workerEnv) Select(cases []workflow.SelectCase) int {
 	if len(cases) == 0 {
 		return -1
 	}
-
-	// Fast path: is anything already ready?
-	if idx := readySelectIndex(cases); idx >= 0 {
-		return idx
-	}
-
-	wakeCh := make(chan int, len(cases)+2)
-
-	// Arm a watcher per case. On future settlement or channel value,
-	// the watcher pushes its index onto wakeCh and exits. Watcher
-	// goroutines never race against Settle because the Future/Channel
-	// implementations are already thread-safe.
+	// Merge root + ctx into one done channel for the fan-in helper.
+	cancelCh := make(chan struct{})
 	stopCh := make(chan struct{})
 	defer close(stopCh)
-	for i, c := range cases {
-		i, c := i, c
-		go func() {
-			// Poll loop with backoff. Modest CPU cost vs. spin: the
-			// timer is a single time.Ticker per watcher, not per
-			// iteration.
-			ticker := time.NewTicker(20 * time.Millisecond)
-			defer ticker.Stop()
-			for {
-				if isCaseReady(c) {
-					select {
-					case wakeCh <- i:
-					default:
-					}
-					return
-				}
-				select {
-				case <-stopCh:
-					return
-				case <-ticker.C:
-				}
-			}
-		}()
-	}
-
-	// Also watch the root scope so cancellation unblocks promptly.
 	go func() {
 		select {
 		case <-e.root.done:
-			select {
-			case wakeCh <- -1:
-			default:
-			}
-		case <-stopCh:
+			close(cancelCh)
 		case <-e.ctx.Done():
-			select {
-			case wakeCh <- -1:
-			default:
-			}
+			close(cancelCh)
+		case <-stopCh:
 		}
 	}()
-
-	idx := <-wakeCh
-	if idx < 0 {
-		return -1
-	}
-	// Double-check the ready invariant: another case may have become
-	// ready between wake and return. Prefer the earliest-ready for
-	// determinism.
-	if better := readySelectIndex(cases); better >= 0 && better < idx {
-		return better
-	}
-	return idx
+	return workflow.SelectFanIn(cases, cancelCh)
 }
 
 // NewCancelScope derives a child cancel scope.
