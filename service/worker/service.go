@@ -274,12 +274,9 @@ func (s *Service) Start() {
 
 	reflection.Register(s.server)
 
-	go func() {
-		s.logger.Info("Starting to serve on worker listener")
-		if err := s.server.Serve(s.grpcListener); err != nil {
-			s.logger.Fatal("Failed to serve on worker listener", tag.Error(err))
-		}
-	}()
+	// gRPC banned — worker runs in-process, fx-wired.
+	_ = s.server
+	_ = s.grpcListener
 
 	s.logger.Info(
 		"worker service started",
