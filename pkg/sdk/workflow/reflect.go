@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// ActivityName returns the registered wire name for an activity
+// value. String activities are returned as-is; function values are
+// reflected to the short Go identifier (pkg.Fn → Fn). Nil yields
+// "nil". Mirrors the upstream Temporal default.
+func ActivityName(v any) string {
+	if v == nil {
+		return "nil"
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return funcName(v)
+}
+
 // funcName returns the best-effort name for an activity function
 // value. Used by the stub env to key its registered responses and
 // by the worker at Phase 2 to dispatch by registered name.
