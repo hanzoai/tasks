@@ -4,8 +4,10 @@ package frontend
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -333,6 +335,119 @@ func TestActivityBroker_LoadTokenKey_EnvUnset(t *testing.T) {
 	k := loadOrGenerateTokenKey(nil)
 	if len(k) != 32 {
 		t.Fatalf("expected 32-byte random key, got %d", len(k))
+	}
+}
+
+// --- R2.2 ctx-deadline tests -------------------------------------------
+
+// TestActivityBroker_WaitCtxCancelled verifies that a canceled context
+// unblocks WaitCtx before WaitMs elapses and returns ctx.Err wrapped.
+func TestActivityBroker_WaitCtxCancelled(t *testing.T) {
+	b := testBroker()
+	b.Register("ctx-act", defaultScope(), 10*time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	var (
+		ready bool
+		err   error
+	)
+	go func() {
+		defer close(done)
+		ready, _, _, err = b.WaitCtx(ctx, "ctx-act", 5*time.Second)
+	}()
+
+	// Let the waiter park, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("WaitCtx did not honor ctx cancellation within 500ms")
+	}
+
+	if ready {
+		t.Fatalf("expected ready=false on ctx cancel")
+	}
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected wrapped context.Canceled, got %v", err)
+	}
+}
+
+// TestActivityBroker_WaitCtxDeadline verifies ctx deadline short-circuits
+// WaitMs.
+func TestActivityBroker_WaitCtxDeadline(t *testing.T) {
+	b := testBroker()
+	b.Register("dl-act", defaultScope(), 10*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	ready, _, _, err := b.WaitCtx(ctx, "dl-act", 5*time.Second)
+	elapsed := time.Since(start)
+
+	if ready {
+		t.Fatalf("expected ready=false on ctx deadline")
+	}
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected wrapped DeadlineExceeded, got %v", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("WaitCtx blocked past ctx deadline: %v", elapsed)
+	}
+}
+
+// TestActivityBroker_WaitCtxAlreadyCancelled short-circuits without
+// parking when ctx is already done.
+func TestActivityBroker_WaitCtxAlreadyCancelled(t *testing.T) {
+	b := testBroker()
+	b.Register("prc-act", defaultScope(), 10*time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ready, _, _, err := b.WaitCtx(ctx, "prc-act", 5*time.Second)
+	if ready {
+		t.Fatal("expected ready=false")
+	}
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected wrapped Canceled, got %v", err)
+	}
+}
+
+// TestActivityBroker_WaitCtxSettles still delivers when ctx stays live.
+func TestActivityBroker_WaitCtxSettles(t *testing.T) {
+	b := testBroker()
+	token := b.Register("ok-act", defaultScope(), 10*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	var (
+		ready bool
+		res   []byte
+		err   error
+	)
+	go func() {
+		defer close(done)
+		ready, res, _, err = b.WaitCtx(ctx, "ok-act", time.Second)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	if !b.Complete(token, []byte("ctx-ok")) {
+		t.Fatal("Complete failed")
+	}
+	<-done
+
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !ready || string(res) != "ctx-ok" {
+		t.Fatalf("unexpected outcome ready=%v res=%q", ready, res)
 	}
 }
 

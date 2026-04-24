@@ -890,15 +890,25 @@ func (z *ZAPHandler) handleScheduleActivity(_ context.Context, _ string, msg *za
 	return z.okEnvelope(out)
 }
 
-func (z *ZAPHandler) handleWaitActivityResult(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+func (z *ZAPHandler) handleWaitActivityResult(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
 	// Long-poll the broker for the activityTaskId's outcome. WaitMs=0
-	// means single-poll (non-blocking).
+	// means single-poll (non-blocking). WaitCtx honors the incoming
+	// ZAP ctx deadline / cancellation so a caller that times out or
+	// disconnects unblocks the goroutine promptly instead of waiting
+	// out WaitMs.
 	var req waitActivityResultReq
 	if err := json.Unmarshal(envelopeBodyBytes(msg), &req); err != nil {
 		return z.errEnvelope(400, err)
 	}
 	wait := time.Duration(req.WaitMs) * time.Millisecond
-	ready, result, failure := z.broker.Wait(req.ActivityTaskID, wait)
+	ready, result, failure, werr := z.broker.WaitCtx(ctx, req.ActivityTaskID, wait)
+	if werr != nil {
+		// Context cancellation: surface as a 499-style client error so
+		// the caller sees why the wait aborted. Unlike a 5xx, the
+		// entry is not dropped — a subsequent Wait with a live ctx
+		// can still settle it.
+		return z.errEnvelope(499, werr)
+	}
 	out, _ := json.Marshal(waitActivityResultResp{
 		Ready:   ready,
 		Result:  result,

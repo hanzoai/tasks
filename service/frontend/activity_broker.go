@@ -34,6 +34,7 @@
 package frontend
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -339,24 +340,49 @@ func (b *frontendActivityBroker) deliver(token []byte, out activityOutcome) bool
 // If the entry does not exist, Wait returns ready=false with empty
 // bytes — the caller interprets this as "not scheduled here" and falls
 // back to the task-queue path.
+//
+// Deprecated: use WaitCtx so the caller's context deadline /
+// cancellation is honored.
 func (b *frontendActivityBroker) Wait(activityTaskID string, waitFor time.Duration) (ready bool, result, failure []byte) {
+	ready, result, failure, _ = b.WaitCtx(context.Background(), activityTaskID, waitFor)
+	return
+}
+
+// WaitCtx is the context-aware form of Wait. It returns as soon as
+// any of these occur:
+//   - the entry settles (ready=true)
+//   - waitFor elapses (ready=false, err=nil)
+//   - ctx is canceled or its deadline is exceeded (ready=false, err=ctx.Err())
+//
+// A waitFor of 0 means single-poll: if a result is not already
+// present the call returns immediately without consulting ctx.
+func (b *frontendActivityBroker) WaitCtx(ctx context.Context, activityTaskID string, waitFor time.Duration) (ready bool, result, failure []byte, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	b.mu.Lock()
 	e, ok := b.entries[activityTaskID]
 	if !ok {
 		b.mu.Unlock()
-		return false, nil, nil
+		return false, nil, nil, nil
 	}
 	if e.settled {
 		out := e.outcome
 		delete(b.entries, activityTaskID)
 		b.mu.Unlock()
-		return true, out.result, out.failure
+		return true, out.result, out.failure, nil
 	}
 	done := e.done
 	b.mu.Unlock()
 
 	if waitFor <= 0 {
-		return false, nil, nil
+		return false, nil, nil, nil
+	}
+
+	// Fast-path: ctx already canceled before we park.
+	if cerr := ctx.Err(); cerr != nil {
+		return false, nil, nil, fmt.Errorf("broker.Wait: %w", cerr)
 	}
 
 	t := time.NewTimer(waitFor)
@@ -366,9 +392,11 @@ func (b *frontendActivityBroker) Wait(activityTaskID string, waitFor time.Durati
 		b.mu.Lock()
 		delete(b.entries, activityTaskID)
 		b.mu.Unlock()
-		return true, out.result, out.failure
+		return true, out.result, out.failure, nil
 	case <-t.C:
-		return false, nil, nil
+		return false, nil, nil, nil
+	case <-ctx.Done():
+		return false, nil, nil, fmt.Errorf("broker.Wait: %w", ctx.Err())
 	}
 }
 
