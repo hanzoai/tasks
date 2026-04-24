@@ -166,6 +166,10 @@ type RetryPolicyJSON struct {
 // ScheduleActivityResponse mirrors schema/tasks.zap:ScheduleActivityResponse.
 type ScheduleActivityResponse struct {
 	ActivityTaskID string
+	// TaskToken is the server-minted, HMAC-signed opaque token the
+	// worker must present on RespondActivityTaskCompleted/Failed. Empty
+	// on error, populated on success.
+	TaskToken []byte
 }
 
 // WaitActivityResultRequest mirrors schema/tasks.zap:WaitActivityResultRequest.
