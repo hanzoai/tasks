@@ -12,6 +12,14 @@ import (
 // NewBufferedChannel) satisfy it.
 //
 // Mirrors go.temporal.io/sdk/workflow.ReceiveChannel exactly.
+//
+// Sealed: the interface cannot be implemented outside this package.
+// All ReceiveChannel values must originate from one of the package's
+// constructors (NewChannel, NewBufferedChannel, NewNamedChannel,
+// GetSignalChannel). Forks cannot ship divergent behind-the-scenes
+// channel semantics that the selector / coroutine scheduler would
+// quietly accept; any such type would fail to satisfy the sealed
+// method.
 type ReceiveChannel interface {
 	// Receive blocks the workflow coroutine until a value is
 	// available, decodes it into valPtr, and reports whether the
@@ -27,11 +35,19 @@ type ReceiveChannel interface {
 	// Name returns the channel's debug identifier. Empty for
 	// unnamed user channels. Signal channels carry the signal name.
 	Name() string
+
+	// sealed is an unexported sentinel. Outside packages cannot
+	// satisfy this method, so outside packages cannot implement
+	// ReceiveChannel (or Channel) — the interface is closed.
+	sealed()
 }
 
 // Channel is the read/write view of a workflow channel. All
 // user-created channels satisfy Channel; only workflow code can
 // Send on them.
+//
+// Sealed: see ReceiveChannel. Channel cannot be implemented outside
+// this package.
 type Channel interface {
 	ReceiveChannel
 
@@ -186,6 +202,27 @@ func (c *chanImpl) signalWakersLocked() {
 
 // Name implements ReceiveChannel.
 func (c *chanImpl) Name() string { return c.name }
+
+// sealed is the ReceiveChannel / Channel seal. It is intentionally
+// unexported so only types declared in this package can satisfy the
+// interface. Sibling packages that want a signal channel call
+// NewSignalChannel rather than wrapping in a local type — the
+// returned value is already sealed.
+func (c *chanImpl) sealed() {}
+
+// NewSignalChannel mints a named, buffered channel suitable for
+// worker-side signal fan-in. The worker package uses this so it can
+// return a sealed ReceiveChannel to user code without re-implementing
+// the interface (which would require re-exposing the sealed method).
+//
+// buffer sizes less than 1 are clamped to 1 so the dispatch-time
+// pre-population never drops a signal.
+func NewSignalChannel(name string, buffer int) Channel {
+	if buffer < 1 {
+		buffer = 1
+	}
+	return newChan(name, buffer)
+}
 
 // Send implements Channel.
 func (c *chanImpl) Send(ctx Context, val any) error {

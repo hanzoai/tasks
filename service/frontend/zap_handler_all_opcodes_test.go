@@ -532,10 +532,12 @@ func TestZAPHandler_BrokerScheduleWaitComplete(t *testing.T) {
 	// Let the waiter block.
 	time.Sleep(20 * time.Millisecond)
 
-	// Respond via the broker-prefixed token.
-	token := []byte(brokerTokenPrefix + sched.ActivityTaskID)
+	// Respond via the broker-signed token returned from schedule.
+	if len(sched.TaskToken) == 0 {
+		t.Fatalf("schedule response missing task_token")
+	}
 	respMsg := buildWorkerEnvelope(t, 32, func(o *zap.ObjectBuilder) {
-		o.SetBytes(fTaskToken, token)
+		o.SetBytes(fTaskToken, sched.TaskToken)
 		o.SetBytes(fResultBytes, []byte("ok"))
 	})
 	if _, err := h.handleRespondActivityTaskCompleted(ctx, "", respMsg); err != nil {
@@ -607,9 +609,11 @@ func TestZAPHandler_BrokerScheduleWaitFail(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	token := []byte(brokerTokenPrefix + sched.ActivityTaskID)
+	if len(sched.TaskToken) == 0 {
+		t.Fatalf("schedule response missing task_token")
+	}
 	failMsg := buildWorkerEnvelope(t, 32, func(o *zap.ObjectBuilder) {
-		o.SetBytes(fTaskToken, token)
+		o.SetBytes(fTaskToken, sched.TaskToken)
 		o.SetBytes(fFailureBytes, []byte("nope"))
 	})
 	if _, err := h.handleRespondActivityTaskFailed(ctx, "", failMsg); err != nil {
