@@ -48,7 +48,12 @@ type workerEnv struct {
 	// opcode; today the map is empty and the channels block forever,
 	// which is the correct behaviour for workflows that only read
 	// signals after a poll that carried them.
-	signals map[string]*signalChan
+	//
+	// workflow.Channel is the sealed interface from the workflow
+	// package; we store it directly instead of wrapping in a local
+	// type (the seal prevents external implementations, so a local
+	// wrapper cannot satisfy ReceiveChannel).
+	signals map[string]workflow.Channel
 
 	// scopes tracks cancel scopes. Root scope is scopes[root].
 	scopes map[*cancelScope]struct{}
@@ -75,22 +80,6 @@ func (s *cancelScope) cancel() {
 	})
 }
 
-// signalChan is a thin wrapper matching workflow.ReceiveChannel for
-// server-delivered signals. Phase-1: the buffer is empty so Receive
-// blocks until either the workflow completes (task returns) or ctx
-// cancels.
-type signalChan struct {
-	name string
-	ch   workflow.Channel
-}
-
-func (s *signalChan) Receive(ctx workflow.Context, valPtr any) bool {
-	return s.ch.Receive(ctx, valPtr)
-}
-
-func (s *signalChan) ReceiveAsync(valPtr any) bool { return s.ch.ReceiveAsync(valPtr) }
-func (s *signalChan) Name() string                 { return s.name }
-
 // newWorkerEnv constructs a workerEnv for a workflow task.
 func newWorkerEnv(ctx context.Context, transport client.WorkerTransport, info workflow.Info, taskQueue string, logger luxlog.Logger) *workerEnv {
 	if logger == nil {
@@ -102,7 +91,7 @@ func newWorkerEnv(ctx context.Context, transport client.WorkerTransport, info wo
 		transport: transport,
 		logger:    logger,
 		ctx:       ctx,
-		signals:   make(map[string]*signalChan),
+		signals:   make(map[string]workflow.Channel),
 		scopes:    make(map[*cancelScope]struct{}),
 		root:      root,
 		taskQueue: taskQueue,
@@ -289,7 +278,7 @@ func (e *workerEnv) GetSignalChannel(name string) workflow.ReceiveChannel {
 		return s
 	}
 	// Large buffer so dispatch-time pre-population doesn't drop signals.
-	s := &signalChan{name: name, ch: e.newChannel(name, 1024)}
+	s := workflow.NewSignalChannel(name, 1024)
 	e.signals[name] = s
 	return s
 }
