@@ -615,6 +615,11 @@ type scheduleActivityReq struct {
 
 type scheduleActivityResp struct {
 	ActivityTaskID string `json:"activity_task_id"`
+	// TaskToken is the opaque HMAC-signed token the worker must present
+	// on RespondActivityTaskCompleted/Failed. It binds the respond call
+	// to this specific workflow's scope; any other caller that learns
+	// only ActivityTaskID cannot settle the activity.
+	TaskToken []byte `json:"task_token,omitempty"`
 }
 
 type waitActivityResultReq struct {
@@ -874,21 +879,36 @@ func (z *ZAPHandler) handleScheduleActivity(_ context.Context, _ string, msg *za
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
-	z.broker.Register(id, ttl)
-	resp := scheduleActivityResp{ActivityTaskID: id}
+	token := z.broker.Register(id, activityScope{
+		Namespace:  req.Namespace,
+		TaskQueue:  req.TaskQueue,
+		WorkflowID: req.WorkflowID,
+		RunID:      req.RunID,
+	}, ttl)
+	resp := scheduleActivityResp{ActivityTaskID: id, TaskToken: token}
 	out, _ := json.Marshal(resp)
 	return z.okEnvelope(out)
 }
 
-func (z *ZAPHandler) handleWaitActivityResult(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+func (z *ZAPHandler) handleWaitActivityResult(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
 	// Long-poll the broker for the activityTaskId's outcome. WaitMs=0
-	// means single-poll (non-blocking).
+	// means single-poll (non-blocking). WaitCtx honors the incoming
+	// ZAP ctx deadline / cancellation so a caller that times out or
+	// disconnects unblocks the goroutine promptly instead of waiting
+	// out WaitMs.
 	var req waitActivityResultReq
 	if err := json.Unmarshal(envelopeBodyBytes(msg), &req); err != nil {
 		return z.errEnvelope(400, err)
 	}
 	wait := time.Duration(req.WaitMs) * time.Millisecond
-	ready, result, failure := z.broker.Wait(req.ActivityTaskID, wait)
+	ready, result, failure, werr := z.broker.WaitCtx(ctx, req.ActivityTaskID, wait)
+	if werr != nil {
+		// Context cancellation: surface as a 499-style client error so
+		// the caller sees why the wait aborted. Unlike a 5xx, the
+		// entry is not dropped — a subsequent Wait with a live ctx
+		// can still settle it.
+		return z.errEnvelope(499, werr)
+	}
 	out, _ := json.Marshal(waitActivityResultResp{
 		Ready:   ready,
 		Result:  result,
