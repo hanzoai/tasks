@@ -150,13 +150,17 @@ func (w *workerTransport) ScheduleActivity(ctx context.Context, req ScheduleActi
 	}
 	var resp struct {
 		ActivityTaskID string `json:"activity_task_id"`
+		TaskToken      []byte `json:"task_token,omitempty"`
 	}
 	if len(payload) > 0 {
 		if err := json.Unmarshal(payload, &resp); err != nil {
 			return nil, fmt.Errorf("schedule activity body: %w", err)
 		}
 	}
-	return &ScheduleActivityResponse{ActivityTaskID: resp.ActivityTaskID}, nil
+	return &ScheduleActivityResponse{
+		ActivityTaskID: resp.ActivityTaskID,
+		TaskToken:      resp.TaskToken,
+	}, nil
 }
 
 // WaitActivityResult issues opcode 0x006C.

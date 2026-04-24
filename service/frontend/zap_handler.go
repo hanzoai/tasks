@@ -615,6 +615,11 @@ type scheduleActivityReq struct {
 
 type scheduleActivityResp struct {
 	ActivityTaskID string `json:"activity_task_id"`
+	// TaskToken is the opaque HMAC-signed token the worker must present
+	// on RespondActivityTaskCompleted/Failed. It binds the respond call
+	// to this specific workflow's scope; any other caller that learns
+	// only ActivityTaskID cannot settle the activity.
+	TaskToken []byte `json:"task_token,omitempty"`
 }
 
 type waitActivityResultReq struct {
@@ -874,8 +879,13 @@ func (z *ZAPHandler) handleScheduleActivity(_ context.Context, _ string, msg *za
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
-	z.broker.Register(id, ttl)
-	resp := scheduleActivityResp{ActivityTaskID: id}
+	token := z.broker.Register(id, activityScope{
+		Namespace:  req.Namespace,
+		TaskQueue:  req.TaskQueue,
+		WorkflowID: req.WorkflowID,
+		RunID:      req.RunID,
+	}, ttl)
+	resp := scheduleActivityResp{ActivityTaskID: id, TaskToken: token}
 	out, _ := json.Marshal(resp)
 	return z.okEnvelope(out)
 }
