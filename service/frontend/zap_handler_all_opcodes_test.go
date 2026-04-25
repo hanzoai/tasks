@@ -182,11 +182,13 @@ func (f *fakeHandler) RecordActivityTaskHeartbeat(ctx context.Context, req *work
 func newTestHandler() (*ZAPHandler, *fakeHandler) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	fh := &fakeHandler{}
-	return &ZAPHandler{
+	z := &ZAPHandler{
 		handler: fh,
 		logger:  logger,
 		broker:  newActivityBroker(),
-	}, fh
+	}
+	z.buildHandlerTable()
+	return z, fh
 }
 
 // buildJSONEnvelope returns a ZAP message with body as field 0.
