@@ -6,7 +6,7 @@
 // /v1/tasks/*. There is no /api/ mount; the legacy gRPC-Gateway
 // (runtime.ServeMux + JSON transcoding) is gone. Browsers get JSON
 // here because they have to. Everything else uses the ZAP binary
-// transport on :9652 — faster, zero-copy, one canonical framing.
+// transport on :9999 — faster, zero-copy, one canonical framing.
 //
 // Handlers call the frontend WorkflowHandler directly as Go
 // methods. No gRPC codec, no protojson middleware, no
@@ -144,7 +144,7 @@ func NewHTTPAPIServer(
 
 	// One and one way only:
 	//   /_/tasks/*   — embedded admin SPA (dark UI)
-	//   /v1/tasks/*  — JSON API (browser path; ZAP on :9652 is the
+	//   /v1/tasks/*  — JSON API (browser path; ZAP on :9999 is the
 	//                  canonical non-browser path)
 	// No /api/, no /, no split. Anything outside these two prefixes
 	// 404s — there is no implicit route.
@@ -255,7 +255,7 @@ func jsonErrorHandler(logger log.Logger) fiber.ErrorHandler {
 //  3. Marshals the proto response with protojson
 //
 // All 4 routes are read-only; mutating endpoints (start/signal/
-// cancel workflow) use the ZAP surface on :9652 exclusively.
+// cancel workflow) use the ZAP surface on :9999 exclusively.
 
 func registerV1TasksRoutes(g fiber.Router, h Handler, _ log.Logger) {
 	wh, ok := h.(*WorkflowHandler)
