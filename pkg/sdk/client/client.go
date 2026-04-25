@@ -371,7 +371,7 @@ func newZAPTransport(addr string, dialTimeout time.Duration) (*zapTransport, err
 var zapMagic = []byte{'Z', 'A', 'P', 0}
 
 func (t *zapTransport) Call(ctx context.Context, opcode uint16, body []byte) ([]byte, error) {
-	frame, err := frameBody(opcode, body)
+	frame, err := FrameBody(opcode, body)
 	if err != nil {
 		return nil, err
 	}
@@ -391,13 +391,17 @@ func (t *zapTransport) Call(ctx context.Context, opcode uint16, body []byte) ([]
 	return out, nil
 }
 
-// frameBody returns a complete ZAP frame with opcode in the high byte
+// FrameBody returns a complete ZAP frame with opcode in the high byte
 // of the flags. If body is already a framed ZAP object (worker path),
-// frameBody re-stamps the flags to the given opcode. If body is raw
-// payload bytes (user-facing RPC path), frameBody wraps body in the
+// FrameBody re-stamps the flags to the given opcode. If body is raw
+// payload bytes (user-facing RPC path), FrameBody wraps body in the
 // client envelope declared by envelopeBody / envelopeStatus /
 // envelopeError.
-func frameBody(opcode uint16, body []byte) ([]byte, error) {
+//
+// Exported so that pkg/sdk/inproc can produce the same on-the-wire
+// shape as the network transport before handing the parsed message to
+// the frontend's dispatch table.
+func FrameBody(opcode uint16, body []byte) ([]byte, error) {
 	if len(body) >= 8 && string(body[:len(zapMagic)]) == string(zapMagic) {
 		// Already a ZAP frame. Copy and re-stamp the flags so the
 		// opcode the caller passed is authoritative.

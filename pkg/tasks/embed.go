@@ -6,7 +6,7 @@
 //
 //	srv, err := tasks.Embed(ctx, tasks.EmbedConfig{
 //	    DataDir: "/data/app",  // shared with base, or separate
-//	    ZAPPort: 9652,
+//	    ZAPPort: 9999,
 //	})
 //	defer srv.Stop(ctx)
 //
@@ -33,7 +33,7 @@ type EmbedConfig struct {
 	// "./tasks-data". Share with Base by passing Base's data dir.
 	DataDir string
 
-	// ZAPPort is the _tasks._tcp listener. Default 9652. Set to 0
+	// ZAPPort is the _tasks._tcp listener. Default 9999. Set to 0
 	// to pick an ephemeral port; the chosen port is available via
 	// Embedded.ZAPPort() after Start.
 	ZAPPort int
@@ -54,7 +54,7 @@ type Embedded struct {
 // Returns an Embedded handle; caller must call Stop before
 // process exit to flush the data dir cleanly.
 //
-// The server speaks ZAP on EmbedConfig.ZAPPort (default :9652,
+// The server speaks ZAP on EmbedConfig.ZAPPort (default :9999,
 // service type `_tasks._tcp`). No HTTP gateway is started —
 // browsers don't talk to embedded servers. If you need the UI
 // embedded too, mount Handler() at /_/tasks in your app's own
@@ -70,7 +70,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		cfg.DataDir = "./tasks-data"
 	}
 	if cfg.ZAPPort == 0 {
-		cfg.ZAPPort = 9652
+		cfg.ZAPPort = 9999
 	}
 	if cfg.Namespace == "" {
 		cfg.Namespace = "default"

@@ -8,7 +8,7 @@
 //
 // The contract is one-sided: the worker imports this package, not the other
 // way round. Workers are free to plug [Scope.HeartbeatSink] into whatever
-// transport they use (the reference worker uses luxfi/zap on port 9652).
+// transport they use (the reference worker uses luxfi/zap on port 9999).
 package activity
 
 import (

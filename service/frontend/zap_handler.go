@@ -137,13 +137,24 @@ const (
 //     object layout declared in pkg/sdk/client/transport.go. Fields
 //     are typed (Text / Bytes / Int64) so the worker can decode
 //     without a JSON round-trip.
+//
+// In-process callers reach the same handlers via Dispatch — bypassing
+// the ZAP node, the network listener, the encoder, and the loopback
+// dial. The dispatch table is the single source of truth: both the
+// network handler registration in Start() and the in-process Dispatch
+// path read from `handlers`.
 type ZAPHandler struct {
-	handler Handler
-	node    *zap.Node
-	port    int
-	logger  *slog.Logger
-	broker  *frontendActivityBroker
+	handler  Handler
+	node     *zap.Node
+	port     int
+	logger   *slog.Logger
+	broker   *frontendActivityBroker
+	handlers map[uint16]zapOpcodeHandler
 }
+
+// zapOpcodeHandler is the function shape every opcode handler shares.
+// `from` is the originating peer ID (empty for in-process calls).
+type zapOpcodeHandler func(ctx context.Context, from string, msg *zap.Message) (*zap.Message, error)
 
 // NewZAPHandler creates a ZAP handler backed by the frontend workflow handler.
 func NewZAPHandler(handler Handler, logger *slog.Logger) *ZAPHandler {
@@ -152,7 +163,7 @@ func NewZAPHandler(handler Handler, logger *slog.Logger) *ZAPHandler {
 		fmt.Sscanf(p, "%d", &port)
 	}
 	if port == 0 {
-		port = 9652
+		port = 9999
 	}
 
 	nodeID, _ := os.Hostname()
@@ -160,7 +171,7 @@ func NewZAPHandler(handler Handler, logger *slog.Logger) *ZAPHandler {
 		nodeID = "tasks-zap"
 	}
 
-	return &ZAPHandler{
+	z := &ZAPHandler{
 		handler: handler,
 		port:    port,
 		logger:  logger,
@@ -173,54 +184,69 @@ func NewZAPHandler(handler Handler, logger *slog.Logger) *ZAPHandler {
 			NoDiscovery: true,
 		}),
 	}
+	z.buildHandlerTable()
+	return z
+}
+
+// buildHandlerTable populates z.handlers with the canonical opcode →
+// handler mapping. Called once at construction so both Start (network
+// listener) and Dispatch (in-process callers) read the same table.
+func (z *ZAPHandler) buildHandlerTable() {
+	z.handlers = map[uint16]zapOpcodeHandler{
+		// Legacy 0x0050/0x0051.
+		opcodeTaskSubmit:   z.handleSubmit,
+		opcodeTaskSchedule: z.handleSchedule,
+
+		// Workflow lifecycle.
+		opStartWorkflow:           z.handleStartWorkflow,
+		opSignalWorkflow:          z.handleSignalWorkflow,
+		opCancelWorkflow:          z.handleCancelWorkflow,
+		opTerminateWorkflow:       z.handleTerminateWorkflow,
+		opDescribeWorkflow:        z.handleDescribeWorkflow,
+		opListWorkflows:           z.handleListWorkflows,
+		opSignalWithStartWorkflow: z.handleSignalWithStartWorkflow,
+		opQueryWorkflow:           z.handleQueryWorkflow,
+
+		// In-workflow activity scheduling.
+		opScheduleActivity:   z.handleScheduleActivity,
+		opWaitActivityResult: z.handleWaitActivityResult,
+		opStartChildWorkflow: z.handleStartChildWorkflow,
+
+		// Schedules.
+		opCreateSchedule:   z.handleCreateSchedule,
+		opListSchedules:    z.handleListSchedules,
+		opDeleteSchedule:   z.handleDeleteSchedule,
+		opPauseSchedule:    z.handlePauseSchedule,
+		opUpdateSchedule:   z.handleUpdateSchedule,
+		opTriggerSchedule:  z.handleTriggerSchedule,
+		opDescribeSchedule: z.handleDescribeSchedule,
+
+		// Namespaces.
+		opRegisterNamespace: z.handleRegisterNamespace,
+		opDescribeNamespace: z.handleDescribeNamespace,
+		opListNamespaces:    z.handleListNamespaces,
+
+		// Health.
+		opHealth: z.handleHealth,
+
+		// Worker poll / respond.
+		opPollWorkflowTask:             z.handlePollWorkflowTask,
+		opPollActivityTask:             z.handlePollActivityTask,
+		opRespondWorkflowTaskCompleted: z.handleRespondWorkflowTaskCompleted,
+		opRespondActivityTaskCompleted: z.handleRespondActivityTaskCompleted,
+		opRespondActivityTaskFailed:    z.handleRespondActivityTaskFailed,
+		opRecordActivityTaskHeartbeat:  z.handleRecordActivityTaskHeartbeat,
+	}
 }
 
 // Start registers handlers and starts the ZAP listener.
 func (z *ZAPHandler) Start() error {
-	// Legacy 0x0050/0x0051.
-	z.node.Handle(opcodeTaskSubmit, z.handleSubmit)
-	z.node.Handle(opcodeTaskSchedule, z.handleSchedule)
-
-	// Workflow lifecycle.
-	z.node.Handle(opStartWorkflow, z.handleStartWorkflow)
-	z.node.Handle(opSignalWorkflow, z.handleSignalWorkflow)
-	z.node.Handle(opCancelWorkflow, z.handleCancelWorkflow)
-	z.node.Handle(opTerminateWorkflow, z.handleTerminateWorkflow)
-	z.node.Handle(opDescribeWorkflow, z.handleDescribeWorkflow)
-	z.node.Handle(opListWorkflows, z.handleListWorkflows)
-	z.node.Handle(opSignalWithStartWorkflow, z.handleSignalWithStartWorkflow)
-	z.node.Handle(opQueryWorkflow, z.handleQueryWorkflow)
-
-	// In-workflow activity scheduling (Phase-1 stubs — wired for shape
-	// but Phase-1 dispatch runs activities via normal task-queue flow).
-	z.node.Handle(opScheduleActivity, z.handleScheduleActivity)
-	z.node.Handle(opWaitActivityResult, z.handleWaitActivityResult)
-	z.node.Handle(opStartChildWorkflow, z.handleStartChildWorkflow)
-
-	// Schedules.
-	z.node.Handle(opCreateSchedule, z.handleCreateSchedule)
-	z.node.Handle(opListSchedules, z.handleListSchedules)
-	z.node.Handle(opDeleteSchedule, z.handleDeleteSchedule)
-	z.node.Handle(opPauseSchedule, z.handlePauseSchedule)
-	z.node.Handle(opUpdateSchedule, z.handleUpdateSchedule)
-	z.node.Handle(opTriggerSchedule, z.handleTriggerSchedule)
-	z.node.Handle(opDescribeSchedule, z.handleDescribeSchedule)
-
-	// Namespaces.
-	z.node.Handle(opRegisterNamespace, z.handleRegisterNamespace)
-	z.node.Handle(opDescribeNamespace, z.handleDescribeNamespace)
-	z.node.Handle(opListNamespaces, z.handleListNamespaces)
-
-	// Health.
-	z.node.Handle(opHealth, z.handleHealth)
-
-	// Worker poll / respond.
-	z.node.Handle(opPollWorkflowTask, z.handlePollWorkflowTask)
-	z.node.Handle(opPollActivityTask, z.handlePollActivityTask)
-	z.node.Handle(opRespondWorkflowTaskCompleted, z.handleRespondWorkflowTaskCompleted)
-	z.node.Handle(opRespondActivityTaskCompleted, z.handleRespondActivityTaskCompleted)
-	z.node.Handle(opRespondActivityTaskFailed, z.handleRespondActivityTaskFailed)
-	z.node.Handle(opRecordActivityTaskHeartbeat, z.handleRecordActivityTaskHeartbeat)
+	if z.handlers == nil {
+		z.buildHandlerTable()
+	}
+	for opcode, fn := range z.handlers {
+		z.node.Handle(opcode, zap.Handler(fn))
+	}
 
 	if err := z.node.Start(); err != nil {
 		return fmt.Errorf("zap sdk handler start: %w", err)
@@ -229,6 +255,28 @@ func (z *ZAPHandler) Start() error {
 	z.logger.Info("ZAP SDK handler listening", "port", z.port)
 	return nil
 }
+
+// Dispatch invokes the registered handler for opcode synchronously,
+// bypassing the ZAP node, encoder, and listener. The caller passes the
+// already-parsed *zap.Message; the response is the *zap.Message the
+// handler produced. Used by pkg/sdk/inproc to give in-process workers
+// and admin handlers a zero-copy path that does not depend on the
+// loopback ZAP listener being bound.
+//
+// Returns ErrUnknownOpcode if no handler is registered for opcode.
+func (z *ZAPHandler) Dispatch(ctx context.Context, opcode uint16, msg *zap.Message) (*zap.Message, error) {
+	if z.handlers == nil {
+		z.buildHandlerTable()
+	}
+	fn, ok := z.handlers[opcode]
+	if !ok {
+		return nil, fmt.Errorf("hanzo/tasks/zap: %w 0x%04x", ErrUnknownOpcode, opcode)
+	}
+	return fn(ctx, "", msg)
+}
+
+// ErrUnknownOpcode is returned by Dispatch when no handler is registered.
+var ErrUnknownOpcode = fmt.Errorf("unknown opcode")
 
 // Stop shuts down the ZAP listener.
 func (z *ZAPHandler) Stop() {
