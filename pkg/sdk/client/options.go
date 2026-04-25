@@ -20,7 +20,7 @@ import (
 // surface so callers can swap import paths without changing arguments.
 type Options struct {
 	// HostPort is the "host:port" address of the Hanzo Tasks frontend
-	// exposing the ZAP transport (default port 9652).
+	// exposing the ZAP transport (default port 9999).
 	HostPort string
 
 	// Namespace scopes every RPC issued by the returned Client. Empty
