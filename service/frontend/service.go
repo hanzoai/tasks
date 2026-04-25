@@ -480,14 +480,14 @@ func (s *Service) Start() {
 	// internal-client dial shims; we just never let it accept a
 	// connection. External callers use:
 	//   /v1/tasks/*   (HTTP + JSON, port 7234)
-	//   _tasks._tcp   (ZAP binary, port 9652)
+	//   _tasks._tcp   (ZAP binary, port 9999)
 	// Any attempt to talk gRPC to this server hangs on the TCP
 	// handshake and times out, which is the correct response.
 	_ = s.server
 	_ = s.grpcListener
 	s.logger.Info("gRPC server is banned — HTTP/ZAP only",
 		tag.NewStringTag("http", "/v1/tasks/*"),
-		tag.NewStringTag("zap", "_tasks._tcp :9652"))
+		tag.NewStringTag("zap", "_tasks._tcp :9999"))
 
 	if s.httpAPIServer != nil {
 		go func() {
