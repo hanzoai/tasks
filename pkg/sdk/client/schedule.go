@@ -131,6 +131,53 @@ type pauseScheduleRequest struct {
 	Paused     bool   `json:"paused"`
 }
 
+// UpdateScheduleOptions carries the new schedule definition. Replaces
+// every field of the existing schedule — partial updates are not
+// supported by the v1 wire (mirroring upstream UpdateSchedule).
+type UpdateScheduleOptions struct {
+	ID       string
+	Schedule Schedule
+}
+
+type updateScheduleRequest struct {
+	Namespace  string   `json:"namespace"`
+	ScheduleID string   `json:"schedule_id"`
+	Schedule   Schedule `json:"schedule"`
+}
+
+type triggerScheduleRequest struct {
+	Namespace      string `json:"namespace"`
+	ScheduleID     string `json:"schedule_id"`
+	OverlapPolicy  string `json:"overlap_policy,omitempty"`
+}
+
+type describeScheduleRequest struct {
+	Namespace  string `json:"namespace"`
+	ScheduleID string `json:"schedule_id"`
+}
+
+// DescribeScheduleResponse is the v1 wire response for DescribeSchedule.
+type DescribeScheduleResponse struct {
+	Schedule Schedule       `json:"schedule"`
+	Info     ScheduleInfo   `json:"info"`
+}
+
+// ScheduleInfo carries runtime state for a schedule.
+type ScheduleInfo struct {
+	ActionCount        int64 `json:"action_count"`
+	MissedCatchupCount int64 `json:"missed_catchup_count"`
+	OverlapSkipped     int64 `json:"overlap_skipped"`
+	BufferDropped      int64 `json:"buffer_dropped"`
+	BufferSize         int64 `json:"buffer_size"`
+	RunningWorkflows   []ScheduleListEntry `json:"running_workflows,omitempty"`
+}
+
+// ScheduleListEntry identifies one running workflow started by a schedule.
+type ScheduleListEntry struct {
+	WorkflowID string `json:"workflow_id"`
+	RunID      string `json:"run_id"`
+}
+
 // CreateSchedule implements Client.
 func (c *clientImpl) CreateSchedule(ctx context.Context, opts CreateScheduleOptions) error {
 	if opts.ID == "" {
@@ -206,6 +253,56 @@ func (c *clientImpl) PauseSchedule(ctx context.Context, scheduleID string, pause
 		ScheduleID: scheduleID,
 		Paused:     paused,
 	}, nil)
+}
+
+// UnpauseSchedule resumes a paused schedule. Sugar over PauseSchedule.
+func (c *clientImpl) UnpauseSchedule(ctx context.Context, scheduleID string) error {
+	return c.PauseSchedule(ctx, scheduleID, false)
+}
+
+// UpdateSchedule replaces the schedule definition for scheduleID. The
+// schedule's spec / action / paused flag are taken from opts.Schedule;
+// every field is replaced (partial updates are not supported on the v1
+// wire — same shape as upstream UpdateSchedule).
+func (c *clientImpl) UpdateSchedule(ctx context.Context, opts UpdateScheduleOptions) error {
+	if opts.ID == "" {
+		return errors.New("hanzo/tasks/client: schedule ID is required")
+	}
+	return c.roundTrip(ctx, opUpdateSchedule, updateScheduleRequest{
+		Namespace:  c.namespace,
+		ScheduleID: opts.ID,
+		Schedule:   opts.Schedule,
+	}, nil)
+}
+
+// TriggerSchedule fires the schedule once immediately, ignoring its
+// spec. overlapPolicy is one of "skip" / "allow" / "buffer-one"; an
+// empty string defers to the schedule's configured policy.
+func (c *clientImpl) TriggerSchedule(ctx context.Context, scheduleID, overlapPolicy string) error {
+	if scheduleID == "" {
+		return errors.New("hanzo/tasks/client: schedule ID is required")
+	}
+	return c.roundTrip(ctx, opTriggerSchedule, triggerScheduleRequest{
+		Namespace:     c.namespace,
+		ScheduleID:    scheduleID,
+		OverlapPolicy: overlapPolicy,
+	}, nil)
+}
+
+// DescribeSchedule returns the current definition + runtime info for a
+// schedule.
+func (c *clientImpl) DescribeSchedule(ctx context.Context, scheduleID string) (*DescribeScheduleResponse, error) {
+	if scheduleID == "" {
+		return nil, errors.New("hanzo/tasks/client: schedule ID is required")
+	}
+	var resp DescribeScheduleResponse
+	if err := c.roundTrip(ctx, opDescribeSchedule, describeScheduleRequest{
+		Namespace:  c.namespace,
+		ScheduleID: scheduleID,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // Health implements Client.
