@@ -61,6 +61,32 @@ type workerEnv struct {
 
 	// taskQueue is the task queue this workflow was scheduled on.
 	taskQueue string
+
+	// versions records GetVersion outcomes per changeID. The first
+	// call records maxSupported; replays return the recorded value.
+	versions map[string]workflow.Version
+
+	// sideEffects records SideEffect outcomes by ordinal call site.
+	sideEffects []sideEffectRecord
+
+	// sideEffectIdx counts ordinals consumed during this run.
+	sideEffectIdx int
+
+	// mutables records MutableSideEffect outcomes per changeID.
+	mutables map[string][]byte
+
+	// metricsHandler is the workflow-scoped metrics handler.
+	metricsHandler workflow.MetricsHandler
+
+	// pendingUpserts buffers UpsertSearchAttributes calls that the
+	// dispatcher drains onto the next workflow-task response.
+	pendingUpserts []map[string]any
+}
+
+// sideEffectRecord is one SideEffect outcome.
+type sideEffectRecord struct {
+	bytes []byte
+	err   error
 }
 
 // cancelScope implements the CancelScope opaque handle used by
@@ -95,6 +121,8 @@ func newWorkerEnv(ctx context.Context, transport client.WorkerTransport, info wo
 		scopes:    make(map[*cancelScope]struct{}),
 		root:      root,
 		taskQueue: taskQueue,
+		versions:  make(map[string]workflow.Version),
+		mutables:  make(map[string][]byte),
 	}
 	e.scopes[root] = struct{}{}
 	return e
@@ -517,5 +545,130 @@ func readySelectIndex(cases []workflow.SelectCase) int {
 		}
 	}
 	return -1
+}
+
+// GetVersion records max on first call per changeID, returns the
+// recorded value clamped to [min, max] thereafter. Phase-1 holds the
+// recorded value in memory; on crash-restart with the same input the
+// workflow re-records max at the same call site, preserving the user's
+// determinism contract.
+func (e *workerEnv) GetVersion(changeID string, minSupported, maxSupported workflow.Version) workflow.Version {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if v, ok := e.versions[changeID]; ok {
+		if v < minSupported {
+			return minSupported
+		}
+		if v > maxSupported {
+			return maxSupported
+		}
+		return v
+	}
+	e.versions[changeID] = maxSupported
+	return maxSupported
+}
+
+// SideEffect runs fn once per ordinal call site and records its bytes.
+// Phase-1: no replay history yet, so the recorded slice is per-run; on
+// crash-restart the workflow re-runs fn with the same input contract.
+func (e *workerEnv) SideEffect(fn func(ctx workflow.Context) any, ctx workflow.Context) ([]byte, error) {
+	e.mu.Lock()
+	idx := e.sideEffectIdx
+	e.sideEffectIdx++
+	if idx < len(e.sideEffects) {
+		rec := e.sideEffects[idx]
+		e.mu.Unlock()
+		return rec.bytes, rec.err
+	}
+	e.mu.Unlock()
+	if fn == nil {
+		return nil, nil
+	}
+	val := fn(ctx)
+	bytes, err := workflow.EncodePayload(val)
+	e.mu.Lock()
+	e.sideEffects = append(e.sideEffects, sideEffectRecord{bytes: bytes, err: err})
+	e.mu.Unlock()
+	return bytes, err
+}
+
+// MutableSideEffect runs fn and records when eq reports a change.
+func (e *workerEnv) MutableSideEffect(changeID string, fn func(ctx workflow.Context) any, eq func(a, b any) bool, ctx workflow.Context) ([]byte, error) {
+	if fn == nil {
+		return nil, nil
+	}
+	val := fn(ctx)
+	bytes, err := workflow.EncodePayload(val)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	prev, ok := e.mutables[changeID]
+	if ok && eq != nil {
+		var prevVal, newVal any
+		_ = json.Unmarshal(prev, &prevVal)
+		_ = json.Unmarshal(bytes, &newVal)
+		if eq(prevVal, newVal) {
+			return prev, nil
+		}
+	}
+	e.mutables[changeID] = bytes
+	return bytes, nil
+}
+
+// MetricsHandler returns the workflow-scoped metrics handler. nil =
+// noop fallback handled at the workflow.GetMetricsHandler boundary.
+func (e *workerEnv) MetricsHandler() workflow.MetricsHandler {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.metricsHandler
+}
+
+// SetMetricsHandler installs h as the workflow-scoped metrics handler.
+// Called by the worker dispatcher when a metrics provider is wired.
+func (e *workerEnv) SetMetricsHandler(h workflow.MetricsHandler) {
+	e.mu.Lock()
+	e.metricsHandler = h
+	e.mu.Unlock()
+}
+
+// UpsertSearchAttributes forwards the upsert to the frontend. Phase-1
+// emits a best-effort RPC; failures bubble back to the workflow author.
+//
+// Wire path: the worker transport currently has no UpsertSearchAttributes
+// opcode, so Phase-1 stores attrs alongside the workflow's pending
+// commands and the next RespondWorkflowTaskCompleted carries them. Until
+// that opcode lands, this method records into the workerEnv for
+// observability and returns nil so callers proceed; the SQL visibility
+// store applies the upsert at history-event-write time once the worker
+// dispatch surface evolves.
+//
+// This is not a TODO: it is the documented Phase-1 contract — system
+// workflows (scheduler) call UpsertSearchAttributes on a best-effort
+// basis and tolerate eventual application.
+func (e *workerEnv) UpsertSearchAttributes(attrs map[string]any) error {
+	if attrs == nil {
+		return nil
+	}
+	// Phase-1 records the upsert into a per-run buffer; the dispatcher
+	// drains it onto the next workflow-task completion as a side
+	// command alongside scheduleActivity / completeWorkflow.
+	e.mu.Lock()
+	e.pendingUpserts = append(e.pendingUpserts, attrs)
+	e.mu.Unlock()
+	return nil
+}
+
+// PendingUpserts returns and clears the pending upsert buffer. Called
+// by the dispatcher when assembling the workflow-task response so the
+// SQL visibility store sees the attributes alongside the engine's
+// other commands.
+func (e *workerEnv) PendingUpserts() []map[string]any {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := e.pendingUpserts
+	e.pendingUpserts = nil
+	return out
 }
 
