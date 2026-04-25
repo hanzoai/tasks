@@ -50,10 +50,13 @@ const (
 	opStartChildWorkflow       uint16 = 0x006D
 
 	// 0x0070-0x007F: schedule ops.
-	opCreateSchedule uint16 = 0x0070
-	opListSchedules  uint16 = 0x0071
-	opDeleteSchedule uint16 = 0x0072
-	opPauseSchedule  uint16 = 0x0073
+	opCreateSchedule   uint16 = 0x0070
+	opListSchedules    uint16 = 0x0071
+	opDeleteSchedule   uint16 = 0x0072
+	opPauseSchedule    uint16 = 0x0073
+	opUpdateSchedule   uint16 = 0x0074
+	opTriggerSchedule  uint16 = 0x0075
+	opDescribeSchedule uint16 = 0x0076
 
 	// 0x0080-0x008F: namespace ops.
 	opRegisterNamespace uint16 = 0x0080
@@ -199,6 +202,9 @@ func (z *ZAPHandler) Start() error {
 	z.node.Handle(opListSchedules, z.handleListSchedules)
 	z.node.Handle(opDeleteSchedule, z.handleDeleteSchedule)
 	z.node.Handle(opPauseSchedule, z.handlePauseSchedule)
+	z.node.Handle(opUpdateSchedule, z.handleUpdateSchedule)
+	z.node.Handle(opTriggerSchedule, z.handleTriggerSchedule)
+	z.node.Handle(opDescribeSchedule, z.handleDescribeSchedule)
 
 	// Namespaces.
 	z.node.Handle(opRegisterNamespace, z.handleRegisterNamespace)
@@ -599,6 +605,42 @@ type pauseScheduleReq struct {
 	Namespace  string `json:"namespace"`
 	ScheduleID string `json:"schedule_id"`
 	Paused     bool   `json:"paused"`
+}
+
+type updateScheduleReq struct {
+	Namespace  string       `json:"namespace"`
+	ScheduleID string       `json:"schedule_id"`
+	Schedule   scheduleBody `json:"schedule"`
+}
+
+type triggerScheduleReq struct {
+	Namespace     string `json:"namespace"`
+	ScheduleID    string `json:"schedule_id"`
+	OverlapPolicy string `json:"overlap_policy,omitempty"`
+}
+
+type describeScheduleReq struct {
+	Namespace  string `json:"namespace"`
+	ScheduleID string `json:"schedule_id"`
+}
+
+type describeScheduleResp struct {
+	Schedule scheduleBody     `json:"schedule"`
+	Info     scheduleInfoResp `json:"info"`
+}
+
+type scheduleInfoResp struct {
+	ActionCount        int64                  `json:"action_count"`
+	MissedCatchupCount int64                  `json:"missed_catchup_count"`
+	OverlapSkipped     int64                  `json:"overlap_skipped"`
+	BufferDropped      int64                  `json:"buffer_dropped"`
+	BufferSize         int64                  `json:"buffer_size"`
+	RunningWorkflows   []scheduleRunningEntry `json:"running_workflows,omitempty"`
+}
+
+type scheduleRunningEntry struct {
+	WorkflowID string `json:"workflow_id"`
+	RunID      string `json:"run_id"`
 }
 
 type scheduleActivityReq struct {
@@ -1072,6 +1114,182 @@ func (z *ZAPHandler) handlePauseSchedule(ctx context.Context, _ string, msg *zap
 		return z.errEnvelope(500, err)
 	}
 	return z.okEnvelope(nil)
+}
+
+// handleUpdateSchedule replaces a schedule's definition. Mirrors
+// CreateSchedule's body decoding so spec / action transforms are
+// shared.
+func (z *ZAPHandler) handleUpdateSchedule(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+	var req updateScheduleReq
+	if err := json.Unmarshal(envelopeBodyBytes(msg), &req); err != nil {
+		return z.errEnvelope(400, err)
+	}
+	if req.ScheduleID == "" {
+		return z.errEnvelope(400, fmt.Errorf("schedule_id required"))
+	}
+	spec := &schedulepb.ScheduleSpec{}
+	for _, c := range req.Schedule.Spec.Cron {
+		spec.CronString = append(spec.CronString, c)
+	}
+	if req.Schedule.Spec.IntervalMs > 0 {
+		spec.Interval = []*schedulepb.IntervalSpec{{
+			Interval: durationpb.New(msToDuration(req.Schedule.Spec.IntervalMs)),
+		}}
+	}
+	if req.Schedule.Spec.StartTimeMs > 0 {
+		spec.StartTime = timestamppb.New(time.UnixMilli(req.Schedule.Spec.StartTimeMs))
+	}
+	if req.Schedule.Spec.EndTimeMs > 0 {
+		spec.EndTime = timestamppb.New(time.UnixMilli(req.Schedule.Spec.EndTimeMs))
+	}
+	if req.Schedule.Spec.JitterMs > 0 {
+		spec.Jitter = durationpb.New(msToDuration(req.Schedule.Spec.JitterMs))
+	}
+	spec.TimezoneName = req.Schedule.Spec.Timezone
+
+	actInput, err := encodeArgsPayloads(req.Schedule.Action.Input)
+	if err != nil {
+		return z.errEnvelope(400, err)
+	}
+
+	preq := &workflowservice.UpdateScheduleRequest{
+		Namespace:  defaultIfEmpty(req.Namespace),
+		ScheduleId: req.ScheduleID,
+		Schedule: &schedulepb.Schedule{
+			Spec: spec,
+			Action: &schedulepb.ScheduleAction{
+				Action: &schedulepb.ScheduleAction_StartWorkflow{
+					StartWorkflow: &workflowpb.NewWorkflowExecutionInfo{
+						WorkflowId:   req.Schedule.Action.WorkflowID,
+						WorkflowType: &commonpb.WorkflowType{Name: req.Schedule.Action.WorkflowType},
+						TaskQueue:    &taskqueuepb.TaskQueue{Name: req.Schedule.Action.TaskQueue, Kind: enumspb.TASK_QUEUE_KIND_NORMAL},
+						Input:        actInput,
+					},
+				},
+			},
+			State: &schedulepb.ScheduleState{Paused: req.Schedule.Paused},
+		},
+		RequestId: fmt.Sprintf("zap-us-%d", time.Now().UnixNano()),
+	}
+	if _, err := z.handler.UpdateSchedule(ctx, preq); err != nil {
+		return z.errEnvelope(500, err)
+	}
+	return z.okEnvelope(nil)
+}
+
+// handleTriggerSchedule fires a schedule once immediately, ignoring
+// its spec. The optional overlap_policy maps to schedulepb's enum.
+func (z *ZAPHandler) handleTriggerSchedule(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+	var req triggerScheduleReq
+	if err := json.Unmarshal(envelopeBodyBytes(msg), &req); err != nil {
+		return z.errEnvelope(400, err)
+	}
+	if req.ScheduleID == "" {
+		return z.errEnvelope(400, fmt.Errorf("schedule_id required"))
+	}
+	patch := &schedulepb.SchedulePatch{
+		TriggerImmediately: &schedulepb.TriggerImmediatelyRequest{
+			OverlapPolicy: triggerOverlapEnum(req.OverlapPolicy),
+		},
+	}
+	preq := &workflowservice.PatchScheduleRequest{
+		Namespace:  defaultIfEmpty(req.Namespace),
+		ScheduleId: req.ScheduleID,
+		Patch:      patch,
+		RequestId:  fmt.Sprintf("zap-ts-%d", time.Now().UnixNano()),
+	}
+	if _, err := z.handler.PatchSchedule(ctx, preq); err != nil {
+		return z.errEnvelope(500, err)
+	}
+	return z.okEnvelope(nil)
+}
+
+// handleDescribeSchedule returns the current schedule + runtime info.
+func (z *ZAPHandler) handleDescribeSchedule(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+	var req describeScheduleReq
+	if err := json.Unmarshal(envelopeBodyBytes(msg), &req); err != nil {
+		return z.errEnvelope(400, err)
+	}
+	if req.ScheduleID == "" {
+		return z.errEnvelope(400, fmt.Errorf("schedule_id required"))
+	}
+	preq := &workflowservice.DescribeScheduleRequest{
+		Namespace:  defaultIfEmpty(req.Namespace),
+		ScheduleId: req.ScheduleID,
+	}
+	resp, err := z.handler.DescribeSchedule(ctx, preq)
+	if err != nil {
+		return z.errEnvelope(500, err)
+	}
+	out := describeScheduleResp{
+		Schedule: scheduleBody{ID: req.ScheduleID},
+	}
+	if s := resp.GetSchedule(); s != nil {
+		// Reflect schedule state into the wire body.
+		if state := s.GetState(); state != nil {
+			out.Schedule.Paused = state.GetPaused()
+		}
+		if act := s.GetAction(); act != nil {
+			if sw := act.GetStartWorkflow(); sw != nil {
+				out.Schedule.Action.WorkflowID = sw.GetWorkflowId()
+				out.Schedule.Action.WorkflowType = sw.GetWorkflowType().GetName()
+				out.Schedule.Action.TaskQueue = sw.GetTaskQueue().GetName()
+			}
+		}
+		if spec := s.GetSpec(); spec != nil {
+			out.Schedule.Spec.Cron = append([]string(nil), spec.GetCronString()...)
+			if iv := spec.GetInterval(); len(iv) > 0 {
+				out.Schedule.Spec.IntervalMs = iv[0].GetInterval().AsDuration().Milliseconds()
+			}
+			if t := spec.GetStartTime(); t != nil {
+				out.Schedule.Spec.StartTimeMs = t.AsTime().UnixMilli()
+			}
+			if t := spec.GetEndTime(); t != nil {
+				out.Schedule.Spec.EndTimeMs = t.AsTime().UnixMilli()
+			}
+			if j := spec.GetJitter(); j != nil {
+				out.Schedule.Spec.JitterMs = j.AsDuration().Milliseconds()
+			}
+			out.Schedule.Spec.Timezone = spec.GetTimezoneName()
+		}
+	}
+	if info := resp.GetInfo(); info != nil {
+		out.Info.ActionCount = info.GetActionCount()
+		out.Info.MissedCatchupCount = info.GetMissedCatchupWindow()
+		out.Info.OverlapSkipped = info.GetOverlapSkipped()
+		out.Info.BufferDropped = info.GetBufferDropped()
+		out.Info.BufferSize = info.GetBufferSize()
+		for _, rw := range info.GetRunningWorkflows() {
+			out.Info.RunningWorkflows = append(out.Info.RunningWorkflows, scheduleRunningEntry{
+				WorkflowID: rw.GetWorkflowId(),
+				RunID:      rw.GetRunId(),
+			})
+		}
+	}
+	body, _ := json.Marshal(out)
+	return z.okEnvelope(body)
+}
+
+// triggerOverlapEnum maps the wire-side string to schedulepb's enum.
+// Unknown values fall back to UNSPECIFIED so the schedule's configured
+// policy applies.
+func triggerOverlapEnum(s string) enumspb.ScheduleOverlapPolicy {
+	switch s {
+	case "skip":
+		return enumspb.SCHEDULE_OVERLAP_POLICY_SKIP
+	case "buffer-one":
+		return enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ONE
+	case "buffer-all":
+		return enumspb.SCHEDULE_OVERLAP_POLICY_BUFFER_ALL
+	case "cancel-other":
+		return enumspb.SCHEDULE_OVERLAP_POLICY_CANCEL_OTHER
+	case "terminate-other":
+		return enumspb.SCHEDULE_OVERLAP_POLICY_TERMINATE_OTHER
+	case "allow-all":
+		return enumspb.SCHEDULE_OVERLAP_POLICY_ALLOW_ALL
+	default:
+		return enumspb.SCHEDULE_OVERLAP_POLICY_UNSPECIFIED
+	}
 }
 
 // ---- Namespace handlers -------------------------------------------------
