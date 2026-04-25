@@ -31,10 +31,13 @@ const (
 	opSignalWithStartWorkflow uint16 = 0x0066
 	opQueryWorkflow           uint16 = 0x0067
 
-	opCreateSchedule uint16 = 0x0070
-	opListSchedules  uint16 = 0x0071
-	opDeleteSchedule uint16 = 0x0072
-	opPauseSchedule  uint16 = 0x0073
+	opCreateSchedule   uint16 = 0x0070
+	opListSchedules    uint16 = 0x0071
+	opDeleteSchedule   uint16 = 0x0072
+	opPauseSchedule    uint16 = 0x0073
+	opUpdateSchedule   uint16 = 0x0074
+	opTriggerSchedule  uint16 = 0x0075
+	opDescribeSchedule uint16 = 0x0076
 
 	opRegisterNamespace uint16 = 0x0080
 	opDescribeNamespace uint16 = 0x0081
@@ -162,6 +165,17 @@ type Client interface {
 	DeleteSchedule(ctx context.Context, scheduleID string) error
 	// PauseSchedule toggles a schedule's paused flag.
 	PauseSchedule(ctx context.Context, scheduleID string, paused bool) error
+	// UnpauseSchedule resumes a paused schedule.
+	UnpauseSchedule(ctx context.Context, scheduleID string) error
+	// UpdateSchedule replaces the schedule definition. Partial updates
+	// are not supported on the v1 wire.
+	UpdateSchedule(ctx context.Context, opts UpdateScheduleOptions) error
+	// TriggerSchedule fires the schedule once immediately. overlapPolicy
+	// is one of "skip"/"allow"/"buffer-one"; "" defers to the schedule's
+	// configured policy.
+	TriggerSchedule(ctx context.Context, scheduleID, overlapPolicy string) error
+	// DescribeSchedule returns the current definition + runtime info.
+	DescribeSchedule(ctx context.Context, scheduleID string) (*DescribeScheduleResponse, error)
 
 	// Health reports server reachability as two flat strings.
 	Health(ctx context.Context) (service, status string, err error)
