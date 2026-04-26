@@ -281,9 +281,21 @@ func NewLiteServer(liteConfig *LiteServerConfig, opts ...temporal.ServerOption) 
 		return nil, fmt.Errorf("unable to instantiate claim mapper: %w", err)
 	}
 
+	// Embedded boot: skip the system "worker" service.
+	// The system worker fx hook dials frontend via gRPC SDK and times out
+	// because the in-process worker→frontend transport hasn't been migrated
+	// to ZAP yet (the #51 cascade keystone). Frontend + history + matching
+	// are sufficient to expose UI + REST + ZAP duplex on the public ports.
+	embeddedServices := make([]string, 0, len(temporal.DefaultServices))
+	for _, s := range temporal.DefaultServices {
+		if s == "worker" {
+			continue
+		}
+		embeddedServices = append(embeddedServices, s)
+	}
 	serverOpts := []temporal.ServerOption{
 		temporal.WithConfig(liteConfig.BaseConfig),
-		temporal.ForServices(temporal.DefaultServices),
+		temporal.ForServices(embeddedServices),
 		temporal.WithLogger(liteConfig.Logger),
 		temporal.WithAuthorizer(authorizer),
 		temporal.WithClaimMapper(func(cfg *config.Config) authorization.ClaimMapper {
