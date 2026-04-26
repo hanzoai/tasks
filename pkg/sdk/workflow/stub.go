@@ -61,6 +61,37 @@ type StubEnv struct {
 	rootScope *stubScope
 
 	info Info
+
+	// versions records GetVersion outcomes per changeID. The first
+	// call records maxSupported and seals the value; later calls
+	// return the recorded value clamped to the new [min, max] range.
+	versions map[string]Version
+
+	// sideEffects records SideEffect outcomes per call site. The key
+	// is the call ordinal (incrementing counter); replays of the same
+	// run return the recorded JSON bytes.
+	sideEffects []sideEffectRecord
+
+	// sideEffectIdx tracks the next ordinal to consume on this run.
+	sideEffectIdx int
+
+	// mutables records MutableSideEffect outcomes per changeID. The
+	// recorded value is replaced when eq reports the new value differs.
+	mutables map[string][]byte
+
+	// metricsHandler is the workflow-scoped metrics handler. nil =
+	// noop.
+	metricsHandler MetricsHandler
+
+	// upserts records UpsertSearchAttributes calls so tests can
+	// assert against them.
+	upserts []map[string]any
+}
+
+// sideEffectRecord is one persisted SideEffect outcome.
+type sideEffectRecord struct {
+	bytes []byte
+	err   error
 }
 
 // stubActivityResponse is one queued reply for an activity.
@@ -113,7 +144,35 @@ func NewStubEnv() *StubEnv {
 			Namespace:    "default",
 			Attempt:      1,
 		},
+		versions: make(map[string]Version),
+		mutables: make(map[string][]byte),
 	}
+}
+
+// SetMetricsHandler installs a workflow-scoped metrics handler the
+// stub returns from MetricsHandler(). Pass nil to reset to the noop
+// fallback.
+func (e *StubEnv) SetMetricsHandler(h MetricsHandler) {
+	e.mu.Lock()
+	e.metricsHandler = h
+	e.mu.Unlock()
+}
+
+// UpsertedSearchAttributes returns a copy of the attributes the
+// workflow upserted via UpsertSearchAttributes. Tests assert against
+// it after running the workflow.
+func (e *StubEnv) UpsertedSearchAttributes() []map[string]any {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]map[string]any, len(e.upserts))
+	for i, m := range e.upserts {
+		c := make(map[string]any, len(m))
+		for k, v := range m {
+			c[k] = v
+		}
+		out[i] = c
+	}
+	return out
 }
 
 // OnActivity queues a response for the named activity. Pass a
@@ -460,6 +519,87 @@ func (e *StubEnv) WorkflowInfo() Info {
 	return e.info
 }
 
+// GetVersion records max on first call per changeID, returns the
+// recorded value clamped to [min, max] on later calls.
+func (e *StubEnv) GetVersion(changeID string, minSupported, maxSupported Version) Version {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if v, ok := e.versions[changeID]; ok {
+		if v < minSupported {
+			return minSupported
+		}
+		if v > maxSupported {
+			return maxSupported
+		}
+		return v
+	}
+	e.versions[changeID] = maxSupported
+	return maxSupported
+}
+
+// SideEffect runs fn once per call ordinal and records its bytes.
+func (e *StubEnv) SideEffect(fn func(ctx Context) any, ctx Context) ([]byte, error) {
+	e.mu.Lock()
+	idx := e.sideEffectIdx
+	e.sideEffectIdx++
+	if idx < len(e.sideEffects) {
+		rec := e.sideEffects[idx]
+		e.mu.Unlock()
+		return rec.bytes, rec.err
+	}
+	e.mu.Unlock()
+	val := fn(ctx)
+	bytes, err := EncodePayload(val)
+	e.mu.Lock()
+	e.sideEffects = append(e.sideEffects, sideEffectRecord{bytes: bytes, err: err})
+	e.mu.Unlock()
+	return bytes, err
+}
+
+// MutableSideEffect runs fn and records when eq reports a change.
+func (e *StubEnv) MutableSideEffect(changeID string, fn func(ctx Context) any, eq func(a, b any) bool, ctx Context) ([]byte, error) {
+	val := fn(ctx)
+	bytes, err := EncodePayload(val)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	prev, ok := e.mutables[changeID]
+	if ok && eq != nil {
+		var prevVal, newVal any
+		decode(prev, &prevVal)
+		decode(bytes, &newVal)
+		if eq(prevVal, newVal) {
+			return prev, nil
+		}
+	}
+	e.mutables[changeID] = bytes
+	return bytes, nil
+}
+
+// MetricsHandler returns the installed handler or nil.
+func (e *StubEnv) MetricsHandler() MetricsHandler {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.metricsHandler
+}
+
+// UpsertSearchAttributes records the upsert for tests to assert against.
+func (e *StubEnv) UpsertSearchAttributes(attrs map[string]any) error {
+	if attrs == nil {
+		return nil
+	}
+	c := make(map[string]any, len(attrs))
+	for k, v := range attrs {
+		c[k] = v
+	}
+	e.mu.Lock()
+	e.upserts = append(e.upserts, c)
+	e.mu.Unlock()
+	return nil
+}
+
 // stubEnv is the zero-value env returned as a defensive fallback
 // when NewContextFromEnv is given a nil. Everything it does is
 // either harmless or clearly-broken so tests notice.
@@ -497,6 +637,21 @@ func (stubEnv) CurrentScope() any                            { return nil }
 func (stubEnv) ScopeDone(any) <-chan struct{}                { c := make(chan struct{}); return c }
 func (stubEnv) ScopeErr(any) error                           { return nil }
 func (stubEnv) WorkflowInfo() Info                           { return Info{} }
+func (stubEnv) GetVersion(string, Version, Version) Version  { return DefaultVersion }
+func (stubEnv) SideEffect(fn func(ctx Context) any, ctx Context) ([]byte, error) {
+	if fn == nil {
+		return nil, nil
+	}
+	return EncodePayload(fn(ctx))
+}
+func (stubEnv) MutableSideEffect(_ string, fn func(ctx Context) any, _ func(a, b any) bool, ctx Context) ([]byte, error) {
+	if fn == nil {
+		return nil, nil
+	}
+	return EncodePayload(fn(ctx))
+}
+func (stubEnv) MetricsHandler() MetricsHandler          { return nil }
+func (stubEnv) UpsertSearchAttributes(map[string]any) error { return nil }
 
 // activityName derives the activity's registered name. For function
 // values we use reflect to read the function name; for strings we

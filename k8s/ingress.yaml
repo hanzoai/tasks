@@ -1,18 +1,16 @@
-# Hanzo Tasks Ingress
-#   tasks.hanzo.ai     -> tasks-ui:80  (Web UI with IAM SSO)
-#   tasks-api.hanzo.ai -> tasks:7233   (gRPC for workers)
-#
-# DNS (Cloudflare proxied -> 24.199.76.156):
-#   tasks.hanzo.ai     A -> 24.199.76.156
-#   tasks-api.hanzo.ai A -> 24.199.76.156
+# Hanzo Tasks ingress — single host for UI + REST.
+#   tasks.hanzo.ai → tasks:80   (HTTP: UI + /healthz + /v1/tasks/*)
+# ZAP wire (port 9999) is reached over the cluster service directly by
+# in-cluster workers; no external ingress needed for binary RPC.
+
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: tasks-ui-ingress
+  name: tasks
   namespace: hanzo
   labels:
-    app: tasks-ui
+    app: tasks
     app.kubernetes.io/name: tasks
     app.kubernetes.io/part-of: hanzo-platform
   annotations:
@@ -20,8 +18,7 @@ metadata:
 spec:
   ingressClassName: ingress
   tls:
-    - hosts:
-        - tasks.hanzo.ai
+    - hosts: [tasks.hanzo.ai]
       secretName: tasks-hanzo-ai-tls
   rules:
     - host: tasks.hanzo.ai
@@ -31,38 +28,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: tasks-ui
-                port:
-                  number: 80
----
-# gRPC ingress for Tasks workers
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: tasks-api-ingress
-  namespace: hanzo
-  labels:
-    app: tasks
-    app.kubernetes.io/name: tasks
-    app.kubernetes.io/part-of: hanzo-platform
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-    traefik.ingress.kubernetes.io/router.middlewares: hanzo-grpc-timeout@kubernetescrd
-    ingress.kubernetes.io/protocol: h2c
-spec:
-  ingressClassName: ingress
-  tls:
-    - hosts:
-        - tasks-api.hanzo.ai
-      secretName: tasks-api-hanzo-ai-tls
-  rules:
-    - host: tasks-api.hanzo.ai
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
                 name: tasks
                 port:
-                  number: 7233
+                  number: 80
