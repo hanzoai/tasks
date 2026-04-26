@@ -142,6 +142,34 @@ type CoroutineEnv interface {
 	// running workflow (ID, RunID, TaskQueue, etc.). Phase 1
 	// returns zero values for fields the worker hasn't wired yet.
 	WorkflowInfo() Info
+
+	// GetVersion returns the recorded version for changeID, clamped to
+	// [minSupported, maxSupported]. The first call records
+	// maxSupported; subsequent calls (and replays) return the recorded
+	// value. See workflow.GetVersion for the user-facing contract.
+	GetVersion(changeID string, minSupported, maxSupported Version) Version
+
+	// SideEffect runs fn exactly once per workflow execution and
+	// records its result into history. ctx is the user Context for
+	// pass-through to fn. The returned bytes are the JSON-encoded
+	// result; replays return the recorded bytes without re-running fn.
+	SideEffect(fn func(ctx Context) any, ctx Context) ([]byte, error)
+
+	// MutableSideEffect runs fn whenever the workflow re-evaluates
+	// changeID. The recorded value is replaced when eq reports the new
+	// value differs from the recorded one; otherwise the recorded
+	// value is preserved across the call.
+	MutableSideEffect(changeID string, fn func(ctx Context) any, eq func(a, b any) bool, ctx Context) ([]byte, error)
+
+	// MetricsHandler returns the workflow-scoped metrics handler, or
+	// nil when no provider is wired. workflow.GetMetricsHandler
+	// upgrades a nil to a noop so user code never sees nil.
+	MetricsHandler() MetricsHandler
+
+	// UpsertSearchAttributes upserts attrs onto the workflow's
+	// visibility record. Phase-1 forwards to the frontend; Phase-2
+	// will record the upsert into history alongside other commands.
+	UpsertSearchAttributes(attrs map[string]any) error
 }
 
 // SelectCase is the internal representation of a case submitted to

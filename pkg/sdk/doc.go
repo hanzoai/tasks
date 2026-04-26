@@ -11,7 +11,7 @@
 //	pkg/sdk/temporal  — RetryPolicy, ActivityError, error constructors
 //
 // All traffic on the wire is ZAP. Schemas live under ../../schema.
-// Transport is luxfi/zap on _tasks._tcp:9652. No gRPC, no
+// Transport is luxfi/zap on _tasks._tcp:9999. No gRPC, no
 // protobuf, no gRPC-Web.
 //
 // Migration contract (applies to base / commerce / ta / any
