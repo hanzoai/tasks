@@ -17,12 +17,14 @@ go build ./cmd/tasksd/
 - Each playground space = a Tasks namespace
 - Each agent = a Tasks worker
 
-## Rebrand Notes (2026-03-19)
+## Rebrand Notes (2026-03-19, updated 2026-04-26)
 - Upstream server packages replaced with `github.com/hanzoai/tasks` in all Go files, go.mod, go.sum
 - `cmd/server` renamed to `cmd/tasksd`, binary name is `tasksd`
-- Docker images: `ghcr.io/hanzoai/tasks` (was the upstream image name)
-- External SDK/API deps are NOT changed — those are separate repos
-- Wire-protocol client names preserved to maintain backward compatibility with existing SDK clients
+- Docker images: `ghcr.io/hanzoai/tasks`
+- 2026-04-26: dropped compat. `temporal/`→`tasks/`, `temporaltest/`→`tasktests/`,
+  `tests/` (upstream-compat suite, 3.7 MB) deleted. No backward-compat shim
+  remains. `tests/testutils/` retained (cert/TLS/IO helpers used by real
+  unit tests).
 
 ## Production Deployment (2026-03-19)
 
@@ -102,3 +104,60 @@ permission model.
 - OTEL traces: `otel-collector.hanzo.svc:4318`
 - Insights analytics: `insights-capture.hanzo.svc:3000`
 - Dynamic config: `/etc/tasks/dynamic-config/dynamic-config.yaml` (ConfigMap)
+
+## Native ZAP-only (2026-04-26)
+
+The temporal fork is GONE. Zero `go.temporal.io/*`. Zero
+`google.golang.org/grpc`. Zero protobuf on the wire. The whole binary is:
+
+```
+cmd/tasksd       # 100 lines: signal handling, ZAP node, HTTP server
+pkg/tasks/       # in-process server (zap.Node + opcode dispatch)
+pkg/sdk/         # client + worker + workflow + activity + converter
+ui/              # embedded React SPA (Vite bundle)
+schema/tasks.zap # canonical wire schema
+```
+
+Build proof: `go build ./cmd/tasksd` → 10 MB native binary, 208 deps.
+Boot proof: `tasksd --zap-port 9999 --http :7243` listens on both,
+serves `/healthz`, `/v1/tasks/health`, `/_/tasks/*` (UI), responds to
+ZAP opcodes 0x0050–0x00A5 from `pkg/sdk/client`.
+
+Workflow execution semantics are NOT yet wired in the native server —
+handlers return a 501 envelope (`opcode 0x00XX: not yet implemented in
+native server`). The native engine is the next build phase. The shape
+is in place so callers depend on the API while the engine lands behind
+it.
+
+### What was deleted (2026-04-26)
+- `tasks/` (renamed temporal/, the fork's runtime)
+- `tasktests/` (renamed temporaltest/)
+- `service/` (frontend / history / matching / worker — 817 files)
+- `chasm/` (component state machine framework — 169 files)
+- `client/` (legacy gRPC clients — 40 files)
+- `api/` (local mirror of temporal protos — 114 files)
+- `proto/`, `tools/` (codegen for temporal protos)
+- `cmd/tools/` (genrpcwrappers, genrpcserverinterceptors, getproto, etc.)
+- `components/` (nexusoperations, callbacks, dummy state machines)
+- `docker/` (pre-native server containerization)
+- `schema/{cassandra,elasticsearch,mysql,postgresql,sqlite}/` (DB driver
+  schemas — embedded SQLite returns via pkg/tasks when persistence lands)
+- 40 tainted `common/` subdirs + 7 top-level common files
+  (`util.go`, `rpc.go`, `rpc_mock.go`, `client_cache.go`, `daemon.go`,
+  `constants.go`)
+- `tests/` (upstream-compat suite, 3.7 MB)
+
+### What remains in `common/`
+Pure stdlib utilities that survive the rip: `aggregate`, `auth`, `build`,
+`channel`, `circuitbreaker`, `clock`, `collection`, `contextutil`,
+`convert`, `debug`, `definition`, `effect`, `finalizer`, `future`, `goro`,
+`health`, `masker`, `number`, `pingable`, `pprof`, `predicates`, `quotas`,
+`resolver`, `routing`, `schedules`, `shuffle`, `stream_batcher`, `tasks`,
+`tasktoken`, `timer`, `util`, `versioninfo`. These are candidates for
+further pruning once the native engine settles.
+
+### Auth: IAM only
+JWT validation against hanzo.id (`https://hanzo.id/.well-known/jwks`).
+Identity headers (`X-User-Id`, `X-Org-Id`, `X-User-Email`) are populated
+by `hanzoai/gateway` after JWT verify; tasksd trusts them as the canonical
+caller identity (vendor-free X-* convention per global CLAUDE.md).
