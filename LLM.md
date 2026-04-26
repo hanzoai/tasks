@@ -102,3 +102,35 @@ permission model.
 - OTEL traces: `otel-collector.hanzo.svc:4318`
 - Insights analytics: `insights-capture.hanzo.svc:3000`
 - Dynamic config: `/etc/tasks/dynamic-config/dynamic-config.yaml` (ConfigMap)
+
+## Native ZAP SDK (2026-04-26)
+
+`pkg/sdk/` is the only public SDK surface. ZAP duplex on port 9999 (in-cluster
+inproc transport at `pkg/sdk/inproc/`). External clients and the Hanzo Tasks
+SDK MUST NOT use `go.temporal.io/sdk` or `google.golang.org/grpc` — those
+packages remain only inside the fork's internal service mesh and are tracked
+for removal by issue #51.
+
+### Embedded boot bridge
+`temporaltest/internal/lite_server.go` skips the system `worker` service when
+booting `tasksd embedded-sqlite`. The system worker fx hook still dials
+frontend over gRPC (legacy SDK), so embedding it would block startup until the
+inproc migration. Frontend + history + matching are sufficient to expose UI,
+REST, and ZAP duplex. This is the keystone bridge until #51 lands.
+
+### Residual gRPC (tracked in #51)
+91 non-test production files still import `google.golang.org/grpc`. They live
+exclusively at the fork's internal service-mesh boundary:
+
+| Boundary | Files | Purpose |
+|----------|-------|---------|
+| `client/{frontend,history,matching,admin}/*` | 23 | Internal cross-service RPC |
+| `service/{frontend,history,matching,worker}/*` | 12 | Service entry points + fx wiring |
+| `common/rpc/*`, `common/rpc/interceptor/*` | 25 | Shared transport + interceptors |
+| `chasm/*` | 9 | Component-state machine RPC fabric |
+| `temporal/*`, `temporaltest/*` | 5 | Embedded boot wiring |
+| `tools/*`, `cmd/tools/*` | 2 | Internal CLI/codegen |
+| Other (`common/{authorization,metrics,sdk,telemetry,testing}`) | 15 | Auxiliary plumbing |
+
+`tests/` (1153 files) is out of scope — it exercises upstream Temporal
+compatibility and will be migrated/deleted when #51 lands.
