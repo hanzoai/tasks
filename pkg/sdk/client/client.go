@@ -31,10 +31,13 @@ const (
 	opSignalWithStartWorkflow uint16 = 0x0066
 	opQueryWorkflow           uint16 = 0x0067
 
-	opCreateSchedule uint16 = 0x0070
-	opListSchedules  uint16 = 0x0071
-	opDeleteSchedule uint16 = 0x0072
-	opPauseSchedule  uint16 = 0x0073
+	opCreateSchedule   uint16 = 0x0070
+	opListSchedules    uint16 = 0x0071
+	opDeleteSchedule   uint16 = 0x0072
+	opPauseSchedule    uint16 = 0x0073
+	opUpdateSchedule   uint16 = 0x0074
+	opTriggerSchedule  uint16 = 0x0075
+	opDescribeSchedule uint16 = 0x0076
 
 	opRegisterNamespace uint16 = 0x0080
 	opDescribeNamespace uint16 = 0x0081
@@ -162,6 +165,17 @@ type Client interface {
 	DeleteSchedule(ctx context.Context, scheduleID string) error
 	// PauseSchedule toggles a schedule's paused flag.
 	PauseSchedule(ctx context.Context, scheduleID string, paused bool) error
+	// UnpauseSchedule resumes a paused schedule.
+	UnpauseSchedule(ctx context.Context, scheduleID string) error
+	// UpdateSchedule replaces the schedule definition. Partial updates
+	// are not supported on the v1 wire.
+	UpdateSchedule(ctx context.Context, opts UpdateScheduleOptions) error
+	// TriggerSchedule fires the schedule once immediately. overlapPolicy
+	// is one of "skip"/"allow"/"buffer-one"; "" defers to the schedule's
+	// configured policy.
+	TriggerSchedule(ctx context.Context, scheduleID, overlapPolicy string) error
+	// DescribeSchedule returns the current definition + runtime info.
+	DescribeSchedule(ctx context.Context, scheduleID string) (*DescribeScheduleResponse, error)
 
 	// Health reports server reachability as two flat strings.
 	Health(ctx context.Context) (service, status string, err error)
@@ -357,7 +371,7 @@ func newZAPTransport(addr string, dialTimeout time.Duration) (*zapTransport, err
 var zapMagic = []byte{'Z', 'A', 'P', 0}
 
 func (t *zapTransport) Call(ctx context.Context, opcode uint16, body []byte) ([]byte, error) {
-	frame, err := frameBody(opcode, body)
+	frame, err := FrameBody(opcode, body)
 	if err != nil {
 		return nil, err
 	}
@@ -377,13 +391,17 @@ func (t *zapTransport) Call(ctx context.Context, opcode uint16, body []byte) ([]
 	return out, nil
 }
 
-// frameBody returns a complete ZAP frame with opcode in the high byte
+// FrameBody returns a complete ZAP frame with opcode in the high byte
 // of the flags. If body is already a framed ZAP object (worker path),
-// frameBody re-stamps the flags to the given opcode. If body is raw
-// payload bytes (user-facing RPC path), frameBody wraps body in the
+// FrameBody re-stamps the flags to the given opcode. If body is raw
+// payload bytes (user-facing RPC path), FrameBody wraps body in the
 // client envelope declared by envelopeBody / envelopeStatus /
 // envelopeError.
-func frameBody(opcode uint16, body []byte) ([]byte, error) {
+//
+// Exported so that pkg/sdk/inproc can produce the same on-the-wire
+// shape as the network transport before handing the parsed message to
+// the frontend's dispatch table.
+func FrameBody(opcode uint16, body []byte) ([]byte, error) {
 	if len(body) >= 8 && string(body[:len(zapMagic)]) == string(zapMagic) {
 		// Already a ZAP frame. Copy and re-stamp the flags so the
 		// opcode the caller passed is authoritative.
