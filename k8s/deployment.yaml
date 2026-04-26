@@ -1,16 +1,8 @@
-# Hanzo Tasks -- Durable Workflow Engine
-#
-# Two services:
-#   tasks    -- Tasks server (auto-setup), port 7233 (gRPC) + 7234 (HTTP)
-#   tasks-ui -- Tasks UI, port 8080
-#
-# PostgreSQL: sql.hanzo.svc:5432 (shared, database: tasks + tasks_visibility)
-# Auth: hanzo.id (IAM) via OIDC
-# Routing: tasks.hanzo.ai (UI) + tasks-api.hanzo.ai (gRPC) via ingress.yaml
-# Secrets: managed by KMS -- see kms-secrets.yaml
+# Hanzo Tasks — native ZAP daemon. One Go binary, embedded UI.
+# Routing: tasks.hanzo.ai (UI + REST) / tasks-zap.hanzo.ai (ZAP) — see ingress.yaml.
+# Auth: hanzo.id IAM JWT, validated upstream by hanzoai/gateway.
 
 ---
-# -- Tasks Server Deployment ---------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,216 +10,9 @@ metadata:
   namespace: hanzo
   labels:
     app: tasks
-    app.kubernetes.io/managed-by: hanzo-universe
     app.kubernetes.io/name: tasks
     app.kubernetes.io/part-of: hanzo-platform
-spec:
-  replicas: 1
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: tasks
-      app.kubernetes.io/managed-by: hanzo-universe
-      app.kubernetes.io/name: tasks
-      app.kubernetes.io/part-of: hanzo-platform
-  template:
-    metadata:
-      labels:
-        app: tasks
-        app.kubernetes.io/managed-by: hanzo-universe
-        app.kubernetes.io/name: tasks
-        app.kubernetes.io/part-of: hanzo-platform
-    spec:
-      imagePullSecrets:
-        - name: ghcr-secret
-      initContainers:
-        - name: wait-for-postgres
-          image: busybox:1.36
-          command: ['sh', '-c', 'until nc -z sql.hanzo.svc.cluster.local 5432; do echo waiting for postgres...; sleep 2; done']
-      containers:
-        - name: tasks
-          image: ghcr.io/hanzoai/tasks:latest
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 7233
-              name: grpc
-            - containerPort: 7234
-              name: http
-          env:
-            # -- Database --
-            - name: DB
-              value: postgres12
-            - name: DB_PORT
-              value: "5432"
-            - name: POSTGRES_SEEDS
-              value: sql.hanzo.svc.cluster.local
-            - name: POSTGRES_USER
-              value: tasks
-            - name: POSTGRES_PWD
-              valueFrom:
-                secretKeyRef:
-                  name: tasks-secrets
-                  key: POSTGRES_PASSWORD
-
-            # -- Dynamic config --
-            - name: DYNAMIC_CONFIG_FILE_PATH
-              value: /etc/tasks/dynamic-config/dynamic-config.yaml
-
-            # -- Tasks server identity --
-            - name: BIND_ON_IP
-              value: "0.0.0.0"
-            - name: NUM_HISTORY_SHARDS
-              value: "512"
-            - name: PUBLIC_FRONTEND_ADDRESS
-              value: "tasks:7233"
-
-            # -- Multi-tenancy --
-            - name: TASKS_AUTH_ENABLED
-              value: "true"
-            - name: TASKS_AUTH_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: tasks-secrets
-                  key: TASKS_AUTH_SECRET
-
-            # -- Hanzo IAM OIDC --
-            - name: IAM_URL
-              value: https://hanzo.id
-            - name: IAM_INTERNAL_URL
-              value: http://iam.hanzo.svc
-            - name: IAM_CLIENT_ID
-              value: app-tasks
-            - name: IAM_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: tasks-secrets
-                  key: IAM_CLIENT_SECRET
-
-            # -- JWT Auth (server-side token validation) --
-            # TODO: Enable server-side JWT validation once internal-frontend
-            # is properly configured. Requires USE_INTERNAL_FRONTEND=true
-            # and the internal frontend port (7236) to be accessible to the
-            # worker service. Without this, the internal system workers
-            # (scanner, archiver) fail with "Request unauthorized" because
-            # they connect to the public frontend without a JWT token.
-            #
-            # For now, auth is handled at the UI layer only (OIDC login).
-            # The gRPC API (tasks-api.hanzo.ai) is network-restricted via
-            # ingress to internal workers only.
-            #
-            # Env vars for future enablement:
-            #   USE_INTERNAL_FRONTEND: "true"
-            #   TASKS_JWT_KEY_SOURCE1: "http://iam.hanzo.svc/.well-known/jwks"
-            #   TASKS_JWT_KEY_REFRESH: "5m"
-            #   TASKS_AUTH_AUTHORIZER: "default"
-            #   TASKS_AUTH_CLAIM_MAPPER: "default"
-            #   TASKS_JWT_PERMISSIONS_CLAIM: "permissions"
-
-            # -- OTEL Tracing --
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://otel-collector.hanzo.svc:4318"
-            - name: OTEL_SERVICE_NAME
-              value: "tasks"
-
-            # -- Insights (Product Analytics) --
-            - name: INSIGHTS_HOST
-              value: "http://insights-capture.hanzo.svc:3000"
-            - name: INSIGHTS_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: insights-client-secrets
-                  key: API_KEY
-                  optional: true
-
-            # -- Logging --
-            - name: LOG_LEVEL
-              value: info
-
-          volumeMounts:
-            - name: dynamic-config
-              mountPath: /etc/tasks/dynamic-config
-            - name: tasks-data
-              mountPath: /etc/tasks/data
-
-          startupProbe:
-            tcpSocket:
-              port: 7233
-            initialDelaySeconds: 15
-            periodSeconds: 10
-            failureThreshold: 30
-          readinessProbe:
-            tcpSocket:
-              port: 7233
-            periodSeconds: 10
-            failureThreshold: 3
-          livenessProbe:
-            tcpSocket:
-              port: 7233
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            failureThreshold: 5
-
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: "2"
-              memory: 2Gi
-
-      volumes:
-        - name: dynamic-config
-          configMap:
-            name: tasks-config
-        - name: tasks-data
-          persistentVolumeClaim:
-            claimName: tasks-data-pvc
-
----
-# -- Tasks Server PVC ---------------------------------------------------------
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: tasks-data-pvc
-  namespace: hanzo
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-
----
-# -- Tasks Server Service ------------------------------------------------------
-apiVersion: v1
-kind: Service
-metadata:
-  name: tasks
-  namespace: hanzo
-spec:
-  selector:
-    app: tasks
-  ports:
-    - name: grpc
-      port: 7233
-      targetPort: 7233
-    - name: http
-      port: 7234
-      targetPort: 7234
-
----
-# -- Tasks UI Deployment -------------------------------------------------------
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: tasks-ui
-  namespace: hanzo
-  labels:
-    app: tasks-ui
     app.kubernetes.io/managed-by: hanzo-universe
-    app.kubernetes.io/name: tasks
-    app.kubernetes.io/part-of: hanzo-platform
 spec:
   replicas: 1
   strategy:
@@ -237,101 +22,94 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: tasks-ui
-      app.kubernetes.io/managed-by: hanzo-universe
-      app.kubernetes.io/name: tasks
-      app.kubernetes.io/part-of: hanzo-platform
+      app: tasks
   template:
     metadata:
       labels:
-        app: tasks-ui
-        app.kubernetes.io/managed-by: hanzo-universe
+        app: tasks
         app.kubernetes.io/name: tasks
         app.kubernetes.io/part-of: hanzo-platform
+        app.kubernetes.io/managed-by: hanzo-universe
     spec:
       imagePullSecrets:
         - name: ghcr-secret
-      initContainers:
-        - name: wait-for-tasks
-          image: busybox:1.36
-          command: ['sh', '-c', 'until nc -z tasks 7233; do echo waiting for tasks server...; sleep 2; done']
       containers:
-        - name: tasks-ui
-          image: ghcr.io/hanzoai/tasks-ui:latest
+        - name: tasks
+          image: ghcr.io/hanzoai/tasks
           imagePullPolicy: Always
+          args:
+            - --zap-port=9999
+            - --http=:7243
+            - --data=/data
+            - --namespace=$(TASKS_NAMESPACE)
           ports:
-            - containerPort: 8080
+            - containerPort: 9999
+              name: zap
+            - containerPort: 7243
               name: http
           env:
-            # -- Tasks server connection --
-            - name: TASKS_ADDRESS
-              value: tasks:7233
-            - name: TASKS_CORS_ORIGINS
-              value: https://tasks.hanzo.ai
-
-            # -- Hanzo IAM OIDC --
-            - name: TASKS_AUTH_ENABLED
-              value: "true"
-            - name: TASKS_AUTH_PROVIDER_URL
-              value: https://hanzo.id
-            - name: TASKS_AUTH_CLIENT_ID
-              value: app-tasks
-            - name: TASKS_AUTH_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: tasks-secrets
-                  key: IAM_CLIENT_SECRET
-            - name: TASKS_AUTH_CALLBACK_URL
-              value: https://tasks.hanzo.ai/auth/sso/callback
-            - name: TASKS_AUTH_SCOPES
-              value: openid,profile,email
-
-            # -- OTEL Tracing --
+            - name: TASKS_NAMESPACE
+              value: hanzo
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://otel-collector.hanzo.svc:4318"
+              value: http://otel-collector.hanzo.svc:4318
             - name: OTEL_SERVICE_NAME
-              value: "tasks-ui"
-
+              value: tasks
+            - name: LOG_LEVEL
+              value: info
+          volumeMounts:
+            - name: data
+              mountPath: /data
           startupProbe:
-            httpGet:
-              path: /
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 12
+            httpGet: { path: /healthz, port: 7243 }
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 30
           readinessProbe:
-            httpGet:
-              path: /
-              port: 8080
-            periodSeconds: 10
+            httpGet: { path: /healthz, port: 7243 }
+            periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
-            httpGet:
-              path: /
-              port: 8080
+            httpGet: { path: /healthz, port: 7243 }
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 5
-
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 64Mi
             limits:
-              cpu: 500m
+              cpu: "1"
               memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tasks-data
 
 ---
-# -- Tasks UI Service ----------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tasks-data
+  namespace: hanzo
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: tasks-ui
+  name: tasks
   namespace: hanzo
 spec:
   selector:
-    app: tasks-ui
+    app: tasks
   ports:
     - name: http
       port: 80
-      targetPort: 8080
+      targetPort: 7243
+    - name: zap
+      port: 9999
+      targetPort: 9999
