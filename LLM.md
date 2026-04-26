@@ -105,34 +105,59 @@ permission model.
 - Insights analytics: `insights-capture.hanzo.svc:3000`
 - Dynamic config: `/etc/tasks/dynamic-config/dynamic-config.yaml` (ConfigMap)
 
-## Native ZAP SDK (2026-04-26)
+## Native ZAP-only (2026-04-26)
 
-`pkg/sdk/` is the only public SDK surface. ZAP duplex on port 9999 (in-cluster
-inproc transport at `pkg/sdk/inproc/`). External clients and the Hanzo Tasks
-SDK MUST NOT use `go.temporal.io/sdk` or `google.golang.org/grpc` — those
-packages remain only inside the fork's internal service mesh and are tracked
-for removal by issue #51.
+The temporal fork is GONE. Zero `go.temporal.io/*`. Zero
+`google.golang.org/grpc`. Zero protobuf on the wire. The whole binary is:
 
-### Embedded boot bridge
-`tasktests/internal/lite_server.go` skips the system `worker` service when
-booting `tasksd embedded-sqlite`. The system worker fx hook still dials
-frontend over the legacy gRPC SDK, so embedding it would block startup
-until the inproc migration. Frontend + history + matching are sufficient to
-expose UI, REST, and ZAP duplex. Bridge stays until the gRPC mesh is
-swapped to ZAP-only.
+```
+cmd/tasksd       # 100 lines: signal handling, ZAP node, HTTP server
+pkg/tasks/       # in-process server (zap.Node + opcode dispatch)
+pkg/sdk/         # client + worker + workflow + activity + converter
+ui/              # embedded React SPA (Vite bundle)
+schema/tasks.zap # canonical wire schema
+```
 
-### Residual gRPC + go.temporal.io (#51 cascade)
-After the 2026-04-26 drop-compat surgery:
-- **151** production files import `google.golang.org/grpc`
-- **722** production files import `go.temporal.io/*` (`api/*` proto types,
-  `sdk/*` legacy SDK)
+Build proof: `go build ./cmd/tasksd` → 10 MB native binary, 208 deps.
+Boot proof: `tasksd --zap-port 9999 --http :7243` listens on both,
+serves `/healthz`, `/v1/tasks/health`, `/_/tasks/*` (UI), responds to
+ZAP opcodes 0x0050–0x00A5 from `pkg/sdk/client`.
 
-These live exclusively at the temporal-fork's internal service-mesh
-boundary (`client/`, `service/`, `common/rpc/`, `chasm/`, `tasks/`,
-`tasktests/`). Removing them is API-level work, not mechanical: every
-`go.temporal.io/api/workflowservice/v1` reference becomes a native ZAP
-opcode call, every `go.temporal.io/sdk/client.Client` use becomes a
-`pkg/sdk` call. Tracked as the multi-week #51 cascade.
+Workflow execution semantics are NOT yet wired in the native server —
+handlers return a 501 envelope (`opcode 0x00XX: not yet implemented in
+native server`). The native engine is the next build phase. The shape
+is in place so callers depend on the API while the engine lands behind
+it.
 
-The compat test suite at the old `tests/` path (3.7 MB, 1153 files) is
-GONE. New tests must use `pkg/sdk` against ZAP, not the legacy gRPC SDK.
+### What was deleted (2026-04-26)
+- `tasks/` (renamed temporal/, the fork's runtime)
+- `tasktests/` (renamed temporaltest/)
+- `service/` (frontend / history / matching / worker — 817 files)
+- `chasm/` (component state machine framework — 169 files)
+- `client/` (legacy gRPC clients — 40 files)
+- `api/` (local mirror of temporal protos — 114 files)
+- `proto/`, `tools/` (codegen for temporal protos)
+- `cmd/tools/` (genrpcwrappers, genrpcserverinterceptors, getproto, etc.)
+- `components/` (nexusoperations, callbacks, dummy state machines)
+- `docker/` (pre-native server containerization)
+- `schema/{cassandra,elasticsearch,mysql,postgresql,sqlite}/` (DB driver
+  schemas — embedded SQLite returns via pkg/tasks when persistence lands)
+- 40 tainted `common/` subdirs + 7 top-level common files
+  (`util.go`, `rpc.go`, `rpc_mock.go`, `client_cache.go`, `daemon.go`,
+  `constants.go`)
+- `tests/` (upstream-compat suite, 3.7 MB)
+
+### What remains in `common/`
+Pure stdlib utilities that survive the rip: `aggregate`, `auth`, `build`,
+`channel`, `circuitbreaker`, `clock`, `collection`, `contextutil`,
+`convert`, `debug`, `definition`, `effect`, `finalizer`, `future`, `goro`,
+`health`, `masker`, `number`, `pingable`, `pprof`, `predicates`, `quotas`,
+`resolver`, `routing`, `schedules`, `shuffle`, `stream_batcher`, `tasks`,
+`tasktoken`, `timer`, `util`, `versioninfo`. These are candidates for
+further pruning once the native engine settles.
+
+### Auth: IAM only
+JWT validation against hanzo.id (`https://hanzo.id/.well-known/jwks`).
+Identity headers (`X-User-Id`, `X-Org-Id`, `X-User-Email`) are populated
+by `hanzoai/gateway` after JWT verify; tasksd trusts them as the canonical
+caller identity (vendor-free X-* convention per global CLAUDE.md).
