@@ -4,12 +4,5 @@ kind: Kustomization
 namespace: hanzo
 
 resources:
-  - kms-secrets.yaml
-  - configmap.yaml
   - deployment.yaml
   - ingress.yaml
-
-# Labels are applied directly in deployment.yaml to match the existing
-# live selector labels (selectors are immutable in K8s deployments).
-# DO NOT add a kustomize labels block here -- it will conflict with
-# the already-deployed selector matchLabels.
