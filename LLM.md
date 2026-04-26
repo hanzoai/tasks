@@ -17,12 +17,14 @@ go build ./cmd/tasksd/
 - Each playground space = a Tasks namespace
 - Each agent = a Tasks worker
 
-## Rebrand Notes (2026-03-19)
+## Rebrand Notes (2026-03-19, updated 2026-04-26)
 - Upstream server packages replaced with `github.com/hanzoai/tasks` in all Go files, go.mod, go.sum
 - `cmd/server` renamed to `cmd/tasksd`, binary name is `tasksd`
-- Docker images: `ghcr.io/hanzoai/tasks` (was the upstream image name)
-- External SDK/API deps are NOT changed — those are separate repos
-- Wire-protocol client names preserved to maintain backward compatibility with existing SDK clients
+- Docker images: `ghcr.io/hanzoai/tasks`
+- 2026-04-26: dropped compat. `temporal/`→`tasks/`, `temporaltest/`→`tasktests/`,
+  `tests/` (upstream-compat suite, 3.7 MB) deleted. No backward-compat shim
+  remains. `tests/testutils/` retained (cert/TLS/IO helpers used by real
+  unit tests).
 
 ## Production Deployment (2026-03-19)
 
@@ -112,25 +114,25 @@ packages remain only inside the fork's internal service mesh and are tracked
 for removal by issue #51.
 
 ### Embedded boot bridge
-`temporaltest/internal/lite_server.go` skips the system `worker` service when
+`tasktests/internal/lite_server.go` skips the system `worker` service when
 booting `tasksd embedded-sqlite`. The system worker fx hook still dials
-frontend over gRPC (legacy SDK), so embedding it would block startup until the
-inproc migration. Frontend + history + matching are sufficient to expose UI,
-REST, and ZAP duplex. This is the keystone bridge until #51 lands.
+frontend over the legacy gRPC SDK, so embedding it would block startup
+until the inproc migration. Frontend + history + matching are sufficient to
+expose UI, REST, and ZAP duplex. Bridge stays until the gRPC mesh is
+swapped to ZAP-only.
 
-### Residual gRPC (tracked in #51)
-91 non-test production files still import `google.golang.org/grpc`. They live
-exclusively at the fork's internal service-mesh boundary:
+### Residual gRPC + go.temporal.io (#51 cascade)
+After the 2026-04-26 drop-compat surgery:
+- **151** production files import `google.golang.org/grpc`
+- **722** production files import `go.temporal.io/*` (`api/*` proto types,
+  `sdk/*` legacy SDK)
 
-| Boundary | Files | Purpose |
-|----------|-------|---------|
-| `client/{frontend,history,matching,admin}/*` | 23 | Internal cross-service RPC |
-| `service/{frontend,history,matching,worker}/*` | 12 | Service entry points + fx wiring |
-| `common/rpc/*`, `common/rpc/interceptor/*` | 25 | Shared transport + interceptors |
-| `chasm/*` | 9 | Component-state machine RPC fabric |
-| `temporal/*`, `temporaltest/*` | 5 | Embedded boot wiring |
-| `tools/*`, `cmd/tools/*` | 2 | Internal CLI/codegen |
-| Other (`common/{authorization,metrics,sdk,telemetry,testing}`) | 15 | Auxiliary plumbing |
+These live exclusively at the temporal-fork's internal service-mesh
+boundary (`client/`, `service/`, `common/rpc/`, `chasm/`, `tasks/`,
+`tasktests/`). Removing them is API-level work, not mechanical: every
+`go.temporal.io/api/workflowservice/v1` reference becomes a native ZAP
+opcode call, every `go.temporal.io/sdk/client.Client` use becomes a
+`pkg/sdk` call. Tracked as the multi-week #51 cascade.
 
-`tests/` (1153 files) is out of scope — it exercises upstream Temporal
-compatibility and will be migrated/deleted when #51 lands.
+The compat test suite at the old `tests/` path (3.7 MB, 1153 files) is
+GONE. New tests must use `pkg/sdk` against ZAP, not the legacy gRPC SDK.
