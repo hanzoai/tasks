@@ -52,7 +52,7 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:              *httpAddr,
-		Handler:           buildHTTP(*ns),
+		Handler:           buildHTTP(*ns, srv),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -70,11 +70,12 @@ func main() {
 	_ = httpSrv.Shutdown(shutdownCtx)
 }
 
-// buildHTTP serves /healthz, /v1/tasks/health, and /_/tasks/* (embedded
-// React UI). Identity headers (X-User-Id, X-Org-Id) are populated by
-// hanzoai/gateway after IAM JWT validation; tasksd trusts them as the
-// canonical caller identity.
-func buildHTTP(ns string) http.Handler {
+// buildHTTP serves /healthz, /v1/tasks/* (browser JSON shim), and
+// /_/tasks/* (embedded React UI). The /v1/tasks/* surface is the same
+// data the ZAP node serves on :9999 — same model functions, no drift.
+// Identity headers (X-User-Id, X-Org-Id) are populated by hanzoai/gateway
+// after IAM JWT validation; tasksd trusts them as the caller identity.
+func buildHTTP(ns string, srv *tasks.Embedded) http.Handler {
 	mux := http.NewServeMux()
 
 	probe := func(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +88,10 @@ func buildHTTP(ns string) http.Handler {
 	}
 	mux.HandleFunc("/healthz", probe)
 	mux.HandleFunc("/v1/tasks/health", probe)
+
+	// /v1/tasks/* — browser JSON shim, mirrors ZAP opcode dispatch.
+	mux.Handle("/v1/tasks/namespaces", srv.HTTPHandler())
+	mux.Handle("/v1/tasks/namespaces/", srv.HTTPHandler())
 
 	// React Router has basename="/_/tasks". The bundle is only valid at
 	// that prefix; serving it at "/" produces a blank page because
