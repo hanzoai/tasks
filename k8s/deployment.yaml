@@ -35,8 +35,8 @@ spec:
         - name: ghcr-secret
       containers:
         - name: tasks
-          image: ghcr.io/hanzoai/tasks
-          imagePullPolicy: Always
+          image: ghcr.io/hanzoai/tasks:v2.49.0
+          imagePullPolicy: IfNotPresent
           args:
             - --zap-port=9999
             - --http=:7243
@@ -50,6 +50,11 @@ spec:
           env:
             - name: TASKS_NAMESPACE
               value: hanzo
+            # Trust X-Org-Id/X-User-Id/X-User-Email from hanzoai/gateway
+            # only. Gateway strips client-supplied identity headers before
+            # forwarding (see global CLAUDE.md HTTP header convention).
+            - name: TASKSD_REQUIRE_IDENTITY
+              value: "true"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-collector.hanzo.svc:4318
             - name: OTEL_SERVICE_NAME
