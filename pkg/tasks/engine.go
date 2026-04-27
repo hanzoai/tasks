@@ -33,6 +33,16 @@ func newEngine(s *store) *engine {
 	return &engine{store: s, broker: newBroker()}
 }
 
+// WithOrg returns an engine view scoped to orgID. Reads and writes go
+// through a store wrapper that prefixes every key with "org:<id>:".
+// orgID == "" returns e unchanged (legacy embedded-use behavior).
+func (e *engine) WithOrg(orgID string) *engine {
+	if orgID == "" {
+		return e
+	}
+	return &engine{store: e.store.withOrg(orgID), broker: e.broker}
+}
+
 // ── ids ─────────────────────────────────────────────────────────────
 
 func newRunId() string {
