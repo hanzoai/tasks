@@ -5,6 +5,7 @@ import { Card } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
 import { ErrorState } from '../components/ErrorState'
 import { Empty } from '../components/Empty'
+import { useRealtime } from '../lib/events'
 
 interface ListResp {
   schedules?: Schedule[]
@@ -12,6 +13,7 @@ interface ListResp {
 
 export function SchedulesPage() {
   const { ns } = useParams()
+  useRealtime(ns)
   const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/schedules`
   const { data, error, isLoading } = useSWR<ListResp>(url)
 

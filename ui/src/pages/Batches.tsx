@@ -22,9 +22,11 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
 import { ErrorState } from '../components/ErrorState'
 import { Empty } from '../components/Empty'
+import { useRealtime } from '../lib/events'
 
 export function BatchesPage() {
   const { ns } = useParams()
+  useRealtime(ns)
   const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/batches`
   const { data, error, isLoading, mutate } = useSWR<{ batches: BatchOperation[] }>(url)
 
