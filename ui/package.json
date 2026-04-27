@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Hanzo Tasks admin UI — namespaces, workflows, schedules. Single-page, embedded via go:embed into tasksd.",
+  "description": "Hanzo Tasks admin UI — namespaces, workflows, schedules. Built on @hanzo/ui primitives.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,11 +11,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.4",
+    "@radix-ui/react-label": "^2.1.1",
+    "@radix-ui/react-slot": "^1.1.1",
+    "@radix-ui/react-tabs": "^1.1.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "lucide-react": "^0.544.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.0.2",
-    "swr": "^2.3.0"
+    "swr": "^2.3.0",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
