@@ -6,16 +6,16 @@
 // into the tasksd binary — no external static-assets directory, no
 // sidecar, no separate deploy.
 //
-// Mount the returned handler at / in the Temporal frontend HTTP
-// router so it serves the SPA shell for every non-API request:
+// Mount the returned handler at /_/tasks/ in the tasksd HTTP router
+// so it serves the SPA shell for every non-API request:
 //
 //	import tasksui "github.com/hanzoai/tasks/ui"
-//	router.PathPrefix("/").Handler(tasksui.Handler())
+//	mux.Handle("/_/tasks/", http.StripPrefix("/_/tasks", tasksui.Handler()))
 //
-// The Temporal gRPC-Gateway routes under /api/v1/* take precedence
-// via earlier route registration; everything else falls through to
-// the SPA, which supports client-side routing (react-router) so
-// deep links survive reload.
+// The /v1/tasks/* routes take precedence via earlier registration;
+// everything else under /_/tasks/* falls through to the SPA, which
+// supports client-side routing (react-router) so deep links survive
+// reload.
 package ui
 
 import (
@@ -46,15 +46,15 @@ func FS() fs.FS {
 // Handler returns an http.Handler that serves the embedded SPA.
 //
 // Behaviour:
-//  - Exact-match static assets (JS/CSS/images) ship with
-//    immutable cache hints because Vite hashes filenames.
-//  - Anything else rewrites to /index.html so the React router
-//    handles the route client-side. This is the standard SPA
-//    fallback and is the only way react-router's BrowserRouter
-//    survives a page reload on a deep link.
-//  - If the build hasn't run and index.html is missing, every
-//    request returns 503 so operators notice in staging before
-//    shipping a blank image to production.
+//   - Exact-match static assets (JS/CSS/images) ship with
+//     immutable cache hints because Vite hashes filenames.
+//   - Anything else rewrites to /index.html so the React router
+//     handles the route client-side. This is the standard SPA
+//     fallback and is the only way react-router's BrowserRouter
+//     survives a page reload on a deep link.
+//   - If the build hasn't run and index.html is missing, every
+//     request returns 503 so operators notice in staging before
+//     shipping a blank image to production.
 func Handler() http.Handler {
 	root := FS()
 	fileServer := http.FileServer(http.FS(root))

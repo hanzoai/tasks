@@ -1,12 +1,9 @@
-// Shared page padding wrapper. The Workflows page bypasses it because
-// it wants edge-to-edge layout with its own header band.
+import type { ReactNode } from 'react'
 
-import { YStack } from 'hanzogui'
+// PageShell adds the standard page padding for surfaces that don't
+// own their own scroll layout (Workflows uses a sidebar+empty hero,
+// so it bypasses this).
 
-export function PageShell({ children }: { children: React.ReactNode }) {
-  return (
-    <YStack flex={1} p="$6" gap="$5" maxW={1280} width="100%" self="center">
-      {children}
-    </YStack>
-  )
+export function PageShell({ children }: { children: ReactNode }) {
+  return <div className="px-8 py-6">{children}</div>
 }

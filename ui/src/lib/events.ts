@@ -1,13 +1,10 @@
 // Realtime event tail. Subscribes to GET /v1/tasks/events (SSE) and
-// fires a callback when relevant transitions arrive. Pages call
-// useTaskEvents(ns, onEvent, [...kinds]) to revalidate their slice
-// without a full reload.
-//
-// useRealtime(ns) is a passive subscription that just keeps the SSE
-// connection warm — it doesn't dispatch anywhere. Use it on pages
-// that don't yet have a per-page mutate hook.
+// invalidates SWR caches on relevant transitions so list views update
+// without polling. The same stream is reachable over the canonical
+// ZAP wire from Go callers via pkg/sdk/client.SubscribeEvents.
 
 import { useEffect } from 'react'
+import { useSWRConfig } from 'swr'
 
 export type EventKind =
   | 'workflow.started'
@@ -32,49 +29,73 @@ export interface TaskEvent {
   data?: unknown
 }
 
-const KINDS: EventKind[] = [
-  'workflow.started',
-  'workflow.canceled',
-  'workflow.terminated',
-  'workflow.signaled',
-  'schedule.created',
-  'schedule.paused',
-  'schedule.resumed',
-  'schedule.deleted',
-  'namespace.registered',
-  'batch.started',
-]
-
-// useTaskEvents subscribes to /v1/tasks/events and invokes onEvent
-// for any kind in kindFilter (or all kinds if omitted) whose
-// namespace matches ns.
-export function useTaskEvents(
-  ns: string | undefined,
-  onEvent: (event: TaskEvent) => void,
-  kindFilter?: EventKind[],
-) {
+// useRealtime opens a single shared EventSource and invalidates SWR
+// caches when events affect the listed surfaces. React StrictMode
+// double-mounts in dev — the cleanup closes the previous handle so
+// we never run two streams against the same backend.
+export function useRealtime(namespace?: string) {
+  const { mutate } = useSWRConfig()
   useEffect(() => {
     if (typeof window === 'undefined') return
     const es = new EventSource('/v1/tasks/events')
-    const handle = (e: MessageEvent) => {
-      let event: TaskEvent
+    const handler = (e: MessageEvent) => {
+      let ev: TaskEvent
       try {
-        event = JSON.parse(e.data)
+        ev = JSON.parse(e.data)
       } catch {
         return
       }
-      if (ns && event.namespace && event.namespace !== ns) return
-      if (kindFilter && !kindFilter.includes(event.kind)) return
-      onEvent(event)
+      const ns = ev.namespace ?? namespace
+      if (!ns) return
+      switch (ev.kind) {
+        case 'workflow.started':
+        case 'workflow.canceled':
+        case 'workflow.terminated':
+        case 'workflow.signaled':
+          mutate(
+            (key) =>
+              typeof key === 'string' &&
+              key.startsWith(`/v1/tasks/namespaces/${encodeURIComponent(ns)}/workflows`)
+          )
+          break
+        case 'schedule.created':
+        case 'schedule.paused':
+        case 'schedule.resumed':
+        case 'schedule.deleted':
+          mutate(`/v1/tasks/namespaces/${encodeURIComponent(ns)}/schedules`)
+          break
+        case 'namespace.registered':
+          mutate('/v1/tasks/namespaces?pageSize=200')
+          break
+        case 'batch.started':
+          mutate(`/v1/tasks/namespaces/${encodeURIComponent(ns)}/batches`)
+          break
+      }
     }
-    KINDS.forEach((k) => es.addEventListener(k, handle as EventListener))
-    es.onmessage = handle
+    // The server emits "event: <kind>\ndata: {...}\n\n" so each kind is
+    // also a named event. Listen on each so this hook works whether the
+    // server uses generic 'message' or named events.
+    const kinds: EventKind[] = [
+      'workflow.started',
+      'workflow.canceled',
+      'workflow.terminated',
+      'workflow.signaled',
+      'schedule.created',
+      'schedule.paused',
+      'schedule.resumed',
+      'schedule.deleted',
+      'namespace.registered',
+      'batch.started',
+    ]
+    kinds.forEach((k) => es.addEventListener(k, handler as EventListener))
+    es.onmessage = handler
     es.onerror = () => {
-      // Browser auto-reconnects. Surface as banner in a follow-up.
+      // Browser auto-reconnects; nothing to do. Suppressing the error is
+      // intentional — surfacing it as a banner is a v1.42 polish task.
     }
     return () => {
-      KINDS.forEach((k) => es.removeEventListener(k, handle as EventListener))
+      kinds.forEach((k) => es.removeEventListener(k, handler as EventListener))
       es.close()
     }
-  }, [ns, onEvent, kindFilter])
+  }, [namespace, mutate])
 }

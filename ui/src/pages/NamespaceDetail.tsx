@@ -1,228 +1,167 @@
-// Namespace detail — Overview/Identities tabs + Region/Retention/APS
-// cards + Connect dropdown showing ZAP and HTTP endpoints with copy
-// buttons. Mirrors the deprecated React/shadcn page 1:1.
-
+import { useState } from 'react'
+import useSWR from 'swr'
 import { Link, useParams } from 'react-router-dom'
-import {
-  Button,
-  Card,
-  H1,
-  H4,
-  Paragraph,
-  Popover,
-  Tabs,
-  Text,
-  XStack,
-  YStack,
-} from 'hanzogui'
-import {
-  ChevronDown,
-  ChevronLeft,
-  Globe,
-  Plug,
-} from '@hanzogui/lucide-icons-2'
-import type { Identity, Namespace } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
-import { Badge } from '../components/Badge'
-import { CopyField } from '../components/CopyField'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
-import { humanTTL } from '../lib/format'
+import { ChevronLeft, Copy, Check, ChevronDown, Plug, Globe } from 'lucide-react'
+import type { Namespace, Identity } from '../lib/api'
+import { Card, CardContent } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Skeleton } from '../components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
+import { Popover } from '../components/ui/dropdown-menu'
+import { ErrorState } from '../components/ErrorState'
+import { Empty } from '../components/Empty'
 
 export function NamespaceDetailPage() {
   const { ns } = useParams()
-  const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}`
-  const { data, error, isLoading } = useFetch<Namespace>(url)
+  const { data, error, isLoading } = useSWR<Namespace>(`/v1/tasks/namespaces/${encodeURIComponent(ns!)}`)
 
-  if (error) return <ErrorState error={error as Error} />
-  if (isLoading || !data) return <LoadingState />
+  if (error) return <ErrorState error={error} />
+  if (isLoading || !data) return <DetailSkeleton />
 
   const { namespaceInfo, config } = data
   const active = namespaceInfo.state === 'NAMESPACE_STATE_REGISTERED'
 
   return (
-    <YStack gap="$5">
-      <Link to="/namespaces" style={{ textDecoration: 'none', color: 'inherit' }}>
-        <XStack items="center" gap="$1.5" hoverStyle={{ opacity: 0.8 }}>
-          <ChevronLeft size={14} color="#7e8794" />
-          <Text fontSize="$2" color="$placeholderColor">
-            Back to Namespaces
-          </Text>
-          <Text fontSize="$2" color="$placeholderColor" px="$2">
-            |
-          </Text>
-          <Link
-            to={`/namespaces/${encodeURIComponent(ns!)}/workflows`}
-            style={{ textDecoration: 'none' }}
-          >
-            <Text fontSize="$2" color="$placeholderColor" hoverStyle={{ color: '$color' as any }}>
-              Go to Workflows
-            </Text>
-          </Link>
-        </XStack>
+    <section className="space-y-6">
+      <Link
+        to="/namespaces"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft size={14} /> Back to Namespaces <span className="px-2 text-border">|</span>
+        <Link to={`/namespaces/${encodeURIComponent(ns!)}/workflows`} className="hover:text-foreground">
+          Go to Workflows
+        </Link>
       </Link>
 
-      <XStack items="flex-start" gap="$3">
-        <YStack gap="$1" flex={1}>
-          <XStack items="center" gap="$3">
-            <H1 size="$8" color="$color" fontWeight="600">
-              {namespaceInfo.name}
-            </H1>
+      <header className="flex items-start gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight">{namespaceInfo.name}</h1>
             <Badge variant={active ? 'success' : 'muted'}>{active ? 'Active' : 'Inactive'}</Badge>
-          </XStack>
+          </div>
           {namespaceInfo.description && (
-            <Paragraph color="$placeholderColor" fontSize="$2">
-              {namespaceInfo.description}
-            </Paragraph>
+            <p className="text-sm text-muted-foreground">{namespaceInfo.description}</p>
           )}
-        </YStack>
-        <ConnectDropdown ns={namespaceInfo.name} />
-      </XStack>
+        </div>
+        <div className="ml-auto">
+          <ConnectDropdown ns={namespaceInfo.name} />
+        </div>
+      </header>
 
-      <Tabs defaultValue="overview" orientation="horizontal" flexDirection="column">
-        <Tabs.List
-          borderBottomWidth={1}
-          borderBottomColor="$borderColor"
-          gap="$2"
-          self="flex-start"
-        >
-          <TabTrigger value="overview">Overview</TabTrigger>
-          <TabTrigger value="identities">Identities</TabTrigger>
-        </Tabs.List>
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="identities">Identities</TabsTrigger>
+        </TabsList>
 
-        <Tabs.Content value="overview" mt="$4">
-          <XStack gap="$3" flexWrap="wrap">
-            <StatCard label="Region" flexBasis={220}>
-              <XStack items="center" gap="$2">
-                <Globe size={14} color="#7e8794" />
-                <Text fontSize="$5" fontWeight="500" color="$color">
-                  {namespaceInfo.region || 'embedded'}
-                </Text>
-              </XStack>
+        <TabsContent value="overview" className="mt-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <StatCard label="Region">
+              <div className="flex items-center gap-2">
+                <Globe size={14} className="text-muted-foreground" />
+                <span>{namespaceInfo.region || 'embedded'}</span>
+              </div>
             </StatCard>
-            <StatCard
-              label="Retention Policy"
-              hint={config.workflowExecutionRetentionTtl}
-              flexBasis={220}
-            >
-              <Text fontSize="$5" fontWeight="500" color="$color">
-                {humanTTL(config.workflowExecutionRetentionTtl)}
-              </Text>
+            <StatCard label="Retention Policy" hint={config.workflowExecutionRetentionTtl}>
+              {humanTTL(config.workflowExecutionRetentionTtl)}
             </StatCard>
-            <StatCard label="APS Limit" hint="actions per second" flexBasis={220}>
-              <Text fontSize="$5" fontWeight="500" color="$color">
-                {config.apsLimit.toLocaleString()}
-              </Text>
+            <StatCard label="APS Limit" hint="actions per second">
+              {config.apsLimit.toLocaleString()}
             </StatCard>
-          </XStack>
-        </Tabs.Content>
+          </div>
+        </TabsContent>
 
-        <Tabs.Content value="identities" mt="$4">
+        <TabsContent value="identities" className="mt-4">
           <IdentitiesPanel ns={ns!} />
-        </Tabs.Content>
+        </TabsContent>
       </Tabs>
-    </YStack>
-  )
-}
-
-function TabTrigger({ value, children }: { value: string; children: React.ReactNode }) {
-  return (
-    <Tabs.Tab value={value} px="$3" py="$2" unstyled bg="transparent">
-      <Text fontSize="$2" color="$color">
-        {children}
-      </Text>
-    </Tabs.Tab>
+    </section>
   )
 }
 
 function ConnectDropdown({ ns }: { ns: string }) {
   const host = typeof window === 'undefined' ? 'tasks.local' : window.location.hostname
   const zap = `${host}:9999`
-  const http =
-    typeof window === 'undefined'
-      ? `https://tasks.local/v1/tasks/namespaces/${encodeURIComponent(ns)}`
-      : `${window.location.protocol}//${window.location.host}/v1/tasks/namespaces/${encodeURIComponent(ns)}`
+  const http = `${window.location.protocol}//${window.location.host}/v1/tasks/namespaces/${encodeURIComponent(ns)}`
 
   return (
-    <Popover placement="bottom-end">
-      <Popover.Trigger asChild>
-        <Button size="$2" borderWidth={1} borderColor="$borderColor">
-          <XStack items="center" gap="$1.5">
-            <Plug size={14} />
-            <Text fontSize="$2">Connect</Text>
-            <ChevronDown size={14} />
-          </XStack>
+    <Popover
+      align="end"
+      className="w-[28rem] p-3"
+      trigger={
+        <Button variant="outline" size="sm">
+          <Plug />
+          Connect
+          <ChevronDown size={14} />
         </Button>
-      </Popover.Trigger>
-      <Popover.Content
-        bg="$background"
-        borderWidth={1}
-        borderColor="$borderColor"
-        p="$3"
-        minW={420}
-        elevate
-      >
-        <YStack gap="$3">
-          <YStack gap="$1">
-            <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-              ZAP ENDPOINT
-            </Text>
-            <CopyField value={zap} />
-          </YStack>
-          <YStack gap="$1">
-            <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-              HTTP ENDPOINT
-            </Text>
-            <CopyField value={http} />
-          </YStack>
-          <Text fontSize="$1" color="$placeholderColor">
-            ZAP is the canonical native binary transport. HTTP/JSON is browser-only.
-          </Text>
-        </YStack>
-      </Popover.Content>
+      }
+    >
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            ZAP Endpoint
+          </p>
+          <CopyField value={zap} />
+        </div>
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            HTTP Endpoint
+          </p>
+          <CopyField value={http} />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          ZAP is the canonical native binary transport. HTTP/JSON is browser-only.
+        </p>
+      </div>
     </Popover>
+  )
+}
+
+function CopyField({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = () => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
+  }
+  return (
+    <div className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1">
+      <code className="flex-1 truncate text-sm font-mono">{value}</code>
+      <Button variant="ghost" size="icon" onClick={onCopy} aria-label="Copy">
+        {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+      </Button>
+    </div>
   )
 }
 
 function StatCard({
   label,
-  hint,
   children,
-  flexBasis,
+  hint,
 }: {
   label: string
-  hint?: string
   children: React.ReactNode
-  flexBasis?: number
+  hint?: string
 }) {
   return (
-    <Card
-      p="$4"
-      bg="$background"
-      borderColor="$borderColor"
-      borderWidth={1}
-      flexBasis={flexBasis}
-      flexGrow={1}
-    >
-      <YStack gap="$1">
-        <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-          {label.toUpperCase()}
-        </Text>
-        {children}
-        {hint && (
-          <Text fontSize="$1" color="$placeholderColor">
-            {hint}
-          </Text>
-        )}
-      </YStack>
+    <Card>
+      <CardContent className="space-y-1">
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+        <div className="text-lg font-medium">{children}</div>
+        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      </CardContent>
     </Card>
   )
 }
 
 function IdentitiesPanel({ ns }: { ns: string }) {
-  const url = `/v1/tasks/namespaces/${encodeURIComponent(ns)}/identities`
-  const { data, error, isLoading } = useFetch<{ identities: Identity[] }>(url)
-  if (error) return <ErrorState error={error as Error} />
-  if (isLoading) return <LoadingState rows={2} />
+  const { data, error, isLoading } = useSWR<{ identities: Identity[] }>(
+    `/v1/tasks/namespaces/${encodeURIComponent(ns)}/identities`
+  )
+  if (error) return <ErrorState error={error} />
+  if (isLoading) return <Skeleton className="h-32" />
   const rows = data?.identities ?? []
   if (rows.length === 0) {
     return (
@@ -233,44 +172,58 @@ function IdentitiesPanel({ ns }: { ns: string }) {
     )
   }
   return (
-    <Card overflow="hidden" bg="$background" borderColor="$borderColor" borderWidth={1}>
-      <XStack
-        bg={'rgba(255,255,255,0.03)' as never}
-        px="$4"
-        py="$2"
-        borderBottomWidth={1}
-        borderBottomColor="$borderColor"
-      >
-        <H4 flex={2} fontSize="$2" color="$placeholderColor" fontWeight="500">
-          Email
-        </H4>
-        <H4 flex={1} fontSize="$2" color="$placeholderColor" fontWeight="500">
-          Role
-        </H4>
-        <H4 flex={1} fontSize="$2" color="$placeholderColor" fontWeight="500">
-          Granted
-        </H4>
-      </XStack>
-      {rows.map((id, i) => (
-        <XStack
-          key={`${id.email}-${i}`}
-          px="$4"
-          py="$2.5"
-          borderTopWidth={i === 0 ? 0 : 1}
-          borderTopColor="$borderColor"
-          items="center"
-        >
-          <Text flex={2} fontSize="$2" color="$color">
-            {id.email}
-          </Text>
-          <YStack flex={1}>
-            <Badge variant="muted">{id.role}</Badge>
-          </YStack>
-          <Text flex={1} fontSize="$2" color="$placeholderColor">
-            {new Date(id.grantTime).toLocaleString()}
-          </Text>
-        </XStack>
-      ))}
+    <Card className="py-0 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 text-muted-foreground text-left">
+          <tr>
+            <th className="px-4 py-2.5 font-medium">Email</th>
+            <th className="px-4 py-2.5 font-medium">Role</th>
+            <th className="px-4 py-2.5 font-medium">Granted</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((id) => (
+            <tr key={id.email}>
+              <td className="px-4 py-2.5">{id.email}</td>
+              <td className="px-4 py-2.5">
+                <Badge variant="muted">{id.role}</Badge>
+              </td>
+              <td className="px-4 py-2.5 text-muted-foreground">
+                {new Date(id.grantTime).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </Card>
   )
+}
+
+function DetailSkeleton() {
+  return (
+    <section className="space-y-6">
+      <Skeleton className="h-4 w-48" />
+      <Skeleton className="h-9 w-72" />
+      <div className="grid grid-cols-3 gap-4">
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+      </div>
+    </section>
+  )
+}
+
+function humanTTL(raw: string) {
+  if (!raw) return '—'
+  if (raw.endsWith('h')) {
+    const h = parseInt(raw, 10)
+    const days = Math.round(h / 24)
+    return days >= 1 ? `${days} days` : `${h}h`
+  }
+  if (raw.endsWith('s')) {
+    const s = parseInt(raw, 10)
+    const days = Math.round(s / 86400)
+    return days >= 1 ? `${days} days` : `${Math.round(s / 3600)}h`
+  }
+  return raw
 }
