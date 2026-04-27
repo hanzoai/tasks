@@ -88,8 +88,17 @@ func buildHTTP(ns string) http.Handler {
 	mux.HandleFunc("/healthz", probe)
 	mux.HandleFunc("/v1/tasks/health", probe)
 
+	// React Router has basename="/_/tasks". The bundle is only valid at
+	// that prefix; serving it at "/" produces a blank page because
+	// the router refuses to match. Redirect "/" → "/_/tasks/".
 	mux.Handle("/_/tasks/", http.StripPrefix("/_/tasks", tasksui.Handler()))
-	mux.Handle("/", tasksui.Handler())
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Redirect(w, r, "/_/tasks/", http.StatusFound)
+	})
 
 	return mux
 }
