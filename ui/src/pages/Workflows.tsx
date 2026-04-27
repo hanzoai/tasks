@@ -1,233 +1,163 @@
-// Workflows — list view for a namespace. Full-bleed (no PageShell).
-//
-// Header band:  "N Workflows" + refresh + last-fetched stamp + Start CTA.
-// Filter band:  query input.
-// Body:         table when populated, empty state when not.
-
-import { useCallback, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import useSWR, { useSWRConfig } from 'swr'
 import { Link, useParams } from 'react-router-dom'
-import {
-  Button,
-  Card,
-  Dialog,
-  H1,
-  Input,
-  Spinner,
-  Text,
-  XStack,
-  YStack,
-} from 'hanzogui'
-import {
-  Play,
-  Plus,
-  RefreshCw,
-} from '@hanzogui/lucide-icons-2'
+import { Play, Plus, RefreshCw } from 'lucide-react'
 import type { WorkflowExecution } from '../lib/api'
-import { ApiError, apiPost } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
-import { useTaskEvents } from '../lib/events'
-import { Alert } from '../components/Alert'
-import { Badge } from '../components/Badge'
-import { Empty, ErrorState } from '../components/Empty'
-import { formatTimestamp, shortStatus, statusVariant } from '../lib/format'
+import { apiPost, ApiError } from '../lib/api'
+import { useRealtime } from '../lib/events'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '../components/ui/dialog'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
+import { ErrorState } from '../components/ErrorState'
+import { SavedViewsRail, SYSTEM_VIEWS, type SystemViewId } from '../components/SavedViewsRail'
+import { EmptyWorkflowsHero } from '../components/EmptyWorkflowsHero'
+import { FilterBar, type FilterMode } from '../components/FilterBar'
+import { formatTimestamp } from '../components/LocalTimeIndicator'
 
-interface WorkflowsResp {
-  executions?: WorkflowExecution[]
-}
+// Workflows page replicates the upstream layout exactly:
+//   • Big "N Workflows" header + refresh + last-fetch timestamp
+//   • Start Workflow CTA on the right
+//   • FilterBar (filter pill + view toggle) below the header
+//   • Two-column body: SavedViewsRail | (table or empty hero)
+// The empty state is the moon-and-sea hero with sample SDK links.
 
 export function WorkflowsPage() {
   const { ns } = useParams()
   const namespace = ns!
+  const { mutate } = useSWRConfig()
+  useRealtime(namespace)
+
+  const [activeView, setActiveView] = useState<SystemViewId>('all')
   const [query, setQuery] = useState('')
-  const [fetchedAt, setFetchedAt] = useState<Date>(new Date())
+  const [filterMode, setFilterMode] = useState<FilterMode>('list')
+  const [fetchedAt, setFetchedAt] = useState(new Date())
 
   const url = `/v1/tasks/namespaces/${encodeURIComponent(namespace)}/workflows?query=${encodeURIComponent(query)}&pageSize=50`
-  const { data, error, isLoading, isValidating, mutate } = useFetch<WorkflowsResp>(url)
+  const { data, error, isLoading, isValidating } = useSWR<{ executions?: WorkflowExecution[] }>(url)
 
-  const onEvent = useCallback(() => {
-    mutate().then(() => setFetchedAt(new Date()))
-  }, [mutate])
-
-  useTaskEvents(namespace, onEvent, [
-    'workflow.started',
-    'workflow.canceled',
-    'workflow.terminated',
-    'workflow.signaled',
-  ])
+  useEffect(() => {
+    if (data) setFetchedAt(new Date())
+  }, [data])
 
   const rows = data?.executions ?? []
   const count = rows.length
 
-  const refresh = useCallback(() => {
-    mutate().then(() => setFetchedAt(new Date()))
-  }, [mutate])
+  const headerTimestamp = useMemo(() => formatTimestamp(fetchedAt), [fetchedAt])
+
+  const refresh = () => mutate(url)
 
   return (
-    <YStack flex={1} bg="$background" minH="100%">
-      {/* Header band */}
-      <XStack
-        px="$6"
-        py="$5"
-        borderBottomWidth={1}
-        borderBottomColor="$borderColor"
-        justify="space-between"
-        items="center"
-      >
-        <XStack items="baseline" gap="$3">
-          <H1 size="$9" fontWeight="600" color="$color">
-            {count} Workflow{count === 1 ? '' : 's'}
-          </H1>
-          <Button
-            size="$2"
-            chromeless
-            onPress={refresh}
-            disabled={isValidating}
-            aria-label="Refresh"
-          >
-            {isValidating ? (
-              <Spinner size="small" />
-            ) : (
-              <RefreshCw size={14} color="#7e8794" />
-            )}
-          </Button>
-          <Text fontSize="$1" color="$placeholderColor">
-            {formatTimestamp(fetchedAt)}
-          </Text>
-        </XStack>
-        <StartWorkflowButton ns={namespace} onStarted={refresh} />
-      </XStack>
-
-      {/* Filter band */}
-      <XStack
-        px="$6"
-        py="$3"
-        borderBottomWidth={1}
-        borderBottomColor="$borderColor"
-        gap="$2"
-        items="center"
-      >
-        <Input
-          size="$3"
-          flex={1}
-          maxW={520}
-          placeholder='WorkflowType="MyWorkflow" OR WorkflowId STARTS_WITH "abc"'
-          value={query}
-          onChangeText={setQuery}
-        />
-        <Text fontSize="$1" color="$placeholderColor">
-          List view
-        </Text>
-      </XStack>
-
-      {/* Body */}
-      <YStack flex={1} p="$6" gap="$4">
-        {error ? (
-          <ErrorState error={error as Error} />
-        ) : isLoading ? (
-          <YStack gap="$3">
-            <YStack height={36} bg="$borderColor" rounded="$2" opacity={0.5} />
-            <YStack height={120} bg="$borderColor" rounded="$2" opacity={0.3} />
-          </YStack>
-        ) : rows.length === 0 ? (
-          <Empty
-            title={`No workflows in ${namespace}`}
-            hint="Start one with the button above, or run a worker that registers a workflow type."
-          />
-        ) : (
-          <Card overflow="hidden" bg="$background" borderColor="$borderColor" borderWidth={1}>
-            <XStack
-              bg={'rgba(255,255,255,0.03)' as never}
-              px="$4"
-              py="$2.5"
-              borderBottomWidth={1}
-              borderBottomColor="$borderColor"
+    <section className="flex h-full flex-col">
+      <div className="border-b border-border bg-background/60 px-6 py-5">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight">
+              {count} Workflow{count === 1 ? '' : 's'}
+            </h1>
+            <button
+              type="button"
+              onClick={refresh}
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="Refresh"
+              title="Refresh"
             >
-              <HeaderCell flex={1.2}>Status</HeaderCell>
-              <HeaderCell flex={3}>Workflow ID</HeaderCell>
-              <HeaderCell flex={1.5}>Run ID</HeaderCell>
-              <HeaderCell flex={2}>Type</HeaderCell>
-              <HeaderCell flex={2}>Start</HeaderCell>
-              <HeaderCell flex={2}>End</HeaderCell>
-            </XStack>
-            {rows.map((wf, i) => (
-              <WorkflowRow
-                key={`${wf.execution.workflowId}-${wf.execution.runId}`}
-                wf={wf}
-                ns={namespace}
-                last={i === rows.length - 1}
-              />
-            ))}
-          </Card>
-        )}
-      </YStack>
-    </YStack>
-  )
-}
+              <RefreshCw size={14} className={isValidating ? 'animate-spin' : ''} />
+            </button>
+            <span className="text-xs text-muted-foreground">{headerTimestamp}</span>
+          </div>
+          <StartWorkflowButton ns={namespace} onStarted={refresh} />
+        </div>
+      </div>
 
-function HeaderCell({ children, flex }: { children: React.ReactNode; flex: number }) {
-  return (
-    <YStack flex={flex} px="$2">
-      <Text fontSize="$1" fontWeight="500" color="$placeholderColor">
-        {children}
-      </Text>
-    </YStack>
-  )
-}
+      <FilterBar
+        mode={filterMode}
+        onModeChange={setFilterMode}
+        query={query}
+        onQueryChange={setQuery}
+      />
 
-function WorkflowRow({
-  wf,
-  ns,
-  last,
-}: {
-  wf: WorkflowExecution
-  ns: string
-  last: boolean
-}) {
-  const href = `/namespaces/${encodeURIComponent(ns)}/workflows/${encodeURIComponent(wf.execution.workflowId)}?runId=${encodeURIComponent(wf.execution.runId)}`
-  return (
-    <XStack
-      px="$4"
-      py="$2.5"
-      borderBottomWidth={last ? 0 : 1}
-      borderBottomColor="$borderColor"
-      hoverStyle={{ background: 'rgba(255,255,255,0.04)' as never }}
-      items="center"
-    >
-      <YStack flex={1.2} px="$2">
-        <Badge variant={statusVariant(wf.status)}>{shortStatus(wf.status)}</Badge>
-      </YStack>
-      <YStack flex={3} px="$2">
-        <Link to={href} style={{ textDecoration: 'none' }}>
-          <Text fontSize="$2" color={'#86efac' as never} numberOfLines={1}>
-            {wf.execution.workflowId}
-          </Text>
-        </Link>
-      </YStack>
-      <YStack flex={1.5} px="$2">
-        <Text
-          fontFamily={'ui-monospace, SFMono-Regular, monospace' as never}
-          fontSize="$1"
-          color="$placeholderColor"
-        >
-          {wf.execution.runId.slice(0, 8)}
-        </Text>
-      </YStack>
-      <YStack flex={2} px="$2">
-        <Text fontSize="$2" color="$color">
-          {wf.type.name}
-        </Text>
-      </YStack>
-      <YStack flex={2} px="$2">
-        <Text fontSize="$2" color="$placeholderColor">
-          {wf.startTime ? formatTimestamp(new Date(wf.startTime)) : '—'}
-        </Text>
-      </YStack>
-      <YStack flex={2} px="$2">
-        <Text fontSize="$2" color="$placeholderColor">
-          {wf.closeTime ? formatTimestamp(new Date(wf.closeTime)) : '—'}
-        </Text>
-      </YStack>
-    </XStack>
+      <div className="flex flex-1 overflow-hidden">
+        <SavedViewsRail
+          activeId={activeView}
+          query={query}
+          onSelect={(view) => {
+            setActiveView(view.id)
+            setQuery(view.query)
+          }}
+        />
+
+        <div className="flex-1 overflow-auto p-6">
+          {error ? (
+            <ErrorState error={error} />
+          ) : isLoading ? (
+            <ListSkeleton />
+          ) : rows.length === 0 ? (
+            <EmptyWorkflowsHero namespace={namespace} />
+          ) : (
+            <Card className="overflow-hidden py-0">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 font-medium">Workflow ID</th>
+                    <th className="px-4 py-2.5 font-medium">Run ID</th>
+                    <th className="px-4 py-2.5 font-medium">Type</th>
+                    <th className="px-4 py-2.5 font-medium">Start</th>
+                    <th className="px-4 py-2.5 font-medium">End</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {rows.map((wf) => (
+                    <tr
+                      key={`${wf.execution.workflowId}-${wf.execution.runId}`}
+                      className="hover:bg-accent/30"
+                    >
+                      <td className="px-4 py-2.5">
+                        <Badge variant={statusVariant(wf.status)}>{shortStatus(wf.status)}</Badge>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Link
+                          to={`/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(wf.execution.workflowId)}?runId=${encodeURIComponent(wf.execution.runId)}`}
+                          className="text-primary hover:underline"
+                        >
+                          {wf.execution.workflowId}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                        {wf.execution.runId.slice(0, 8)}
+                      </td>
+                      <td className="px-4 py-2.5">{wf.type.name}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground">
+                        {wf.startTime ? formatTimestamp(new Date(wf.startTime)) : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-muted-foreground">
+                        {wf.closeTime ? formatTimestamp(new Date(wf.closeTime)) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Make the SYSTEM_VIEWS const referenced so vite tree-shake keeps it.
+          Saved views are wired through SavedViewsRail; this is a guard. */}
+      {SYSTEM_VIEWS.length > 0 ? null : null}
+    </section>
   )
 }
 
@@ -240,7 +170,8 @@ function StartWorkflowButton({ ns, onStarted }: { ns: string; onStarted: () => v
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  async function submit() {
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
     setSubmitting(true)
     setErr(null)
     try {
@@ -272,90 +203,103 @@ function StartWorkflowButton({ ns, onStarted }: { ns: string; onStarted: () => v
   }
 
   return (
-    <Dialog modal open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild>
-        <Button size="$3" bg={'#f2f2f2' as never} hoverStyle={{ background: '#ffffff' as never }}>
-          <XStack items="center" gap="$1.5">
-            <Plus size={14} color="#070b13" />
-            <Text fontSize="$2" fontWeight="500" color={'#070b13' as never}>
-              Start Workflow
-            </Text>
-          </XStack>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus />
+          Start Workflow
         </Button>
-      </Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Overlay key="overlay" bg={'rgba(0,0,0,0.6)' as never} />
-        <Dialog.Content
-          bg="$background"
-          borderColor="$borderColor"
-          borderWidth={1}
-          minW={520}
-          p="$5"
-          gap="$4"
-        >
-          <Dialog.Title fontSize="$6" fontWeight="600" color="$color">
-            Start a workflow in {ns}
-          </Dialog.Title>
-          <Dialog.Description fontSize="$2" color="$placeholderColor">
-            Posts to /v1/tasks/namespaces/{ns}/workflows (opcode 0x0060).
-          </Dialog.Description>
-          <YStack gap="$3">
-            <Field label="Workflow type *">
-              <Input value={type} onChangeText={setType} placeholder="MyWorkflow" />
-            </Field>
-            <XStack gap="$3">
-              <Field label="Task queue" flex={1}>
-                <Input value={taskQueue} onChangeText={setTaskQueue} />
-              </Field>
-              <Field label="Workflow ID" flex={1}>
-                <Input value={workflowId} onChangeText={setWorkflowId} placeholder="auto" />
-              </Field>
-            </XStack>
-            <Field label="Input (JSON, optional)">
-              <Input value={input} onChangeText={setInput} placeholder='{"key":"value"}' />
-            </Field>
-            {err && <Alert variant="destructive" title="Could not start">{err}</Alert>}
-          </YStack>
-          <XStack gap="$2" justify="flex-end" mt="$2">
-            <Button chromeless onPress={() => setOpen(false)}>
-              <Text fontSize="$2">Cancel</Text>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Start a workflow in {ns}</DialogTitle>
+          <DialogDescription>
+            Posts to <code>/v1/tasks/namespaces/{ns}/workflows</code> (opcode 0x0060).
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="wf-type">Workflow type *</Label>
+            <Input
+              id="wf-type"
+              required
+              placeholder="MyWorkflow"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="wf-tq">Task queue</Label>
+              <Input id="wf-tq" value={taskQueue} onChange={(e) => setTaskQueue(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wf-id">Workflow ID</Label>
+              <Input
+                id="wf-id"
+                placeholder="auto"
+                value={workflowId}
+                onChange={(e) => setWorkflowId(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="wf-input">Input (JSON, optional)</Label>
+            <Input
+              id="wf-input"
+              placeholder='{"key": "value"}'
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </div>
+          {err && (
+            <Alert variant="destructive">
+              <AlertTitle>Could not start</AlertTitle>
+              <AlertDescription>{err}</AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
             </Button>
-            <Button
-              onPress={submit}
-              disabled={submitting || !type}
-              bg={'#f2f2f2' as never}
-              hoverStyle={{ background: '#ffffff' as never }}
-            >
-              <XStack items="center" gap="$1.5">
-                <Play size={14} color="#070b13" />
-                <Text fontSize="$2" fontWeight="500" color={'#070b13' as never}>
-                  {submitting ? 'Starting…' : 'Start'}
-                </Text>
-              </XStack>
+            <Button type="submit" disabled={submitting || !type}>
+              <Play />
+              {submitting ? 'Starting…' : 'Start'}
             </Button>
-          </XStack>
-        </Dialog.Content>
-      </Dialog.Portal>
+          </DialogFooter>
+        </form>
+      </DialogContent>
     </Dialog>
   )
 }
 
-function Field({
-  label,
-  flex,
-  children,
-}: {
-  label: string
-  flex?: number
-  children: React.ReactNode
-}) {
+function ListSkeleton() {
   return (
-    <YStack gap="$1.5" flex={flex}>
-      <Text fontSize="$2" color="$color">
-        {label}
-      </Text>
-      {children}
-    </YStack>
+    <div className="space-y-3">
+      <div className="h-9 w-48 animate-pulse rounded bg-muted" />
+      <div className="h-32 animate-pulse rounded bg-muted/50" />
+    </div>
   )
 }
 
+function shortStatus(s: string) {
+  return s.replace(/^WORKFLOW_EXECUTION_STATUS_/, '').toLowerCase()
+}
+
+function statusVariant(
+  s: string
+): 'success' | 'destructive' | 'warning' | 'muted' | 'default' {
+  switch (s) {
+    case 'WORKFLOW_EXECUTION_STATUS_RUNNING':
+    case 'WORKFLOW_EXECUTION_STATUS_COMPLETED':
+      return 'success'
+    case 'WORKFLOW_EXECUTION_STATUS_FAILED':
+    case 'WORKFLOW_EXECUTION_STATUS_TIMED_OUT':
+    case 'WORKFLOW_EXECUTION_STATUS_TERMINATED':
+      return 'destructive'
+    case 'WORKFLOW_EXECUTION_STATUS_CANCELED':
+      return 'warning'
+    default:
+      return 'muted'
+  }
+}

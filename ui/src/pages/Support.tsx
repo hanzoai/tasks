@@ -1,20 +1,11 @@
-// Support — 4 cards (GitHub, Docs, Issue, Health).
-
-import { Card, H2, Text, XStack, YStack } from 'hanzogui'
-import {
-  BookOpen,
-  ExternalLink,
-  Github,
-  MessageSquare,
-} from '@hanzogui/lucide-icons-2'
+import { ExternalLink, Github, BookOpen, MessageSquare } from 'lucide-react'
+import { Card } from '../components/ui/card'
 
 export function SupportPage() {
   return (
-    <YStack gap="$4" maxW={760}>
-      <H2 size="$7" color="$color">
-        Support
-      </H2>
-      <XStack gap="$3" flexWrap="wrap">
+    <section className="space-y-4 max-w-3xl">
+      <h2 className="text-lg font-medium">Support</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
         <SupportLink
           href="https://github.com/hanzoai/tasks"
           title="hanzoai/tasks on GitHub"
@@ -39,8 +30,8 @@ export function SupportPage() {
           hint="GET /healthz · GET /v1/tasks/health"
           icon={ExternalLink}
         />
-      </XStack>
-    </YStack>
+      </div>
+    </section>
   )
 }
 
@@ -53,34 +44,24 @@ function SupportLink({
   href: string
   title: string
   hint: string
-  icon: React.ComponentType<{ size?: number; color?: string }>
+  icon: React.ComponentType<any>
 }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noreferrer"
-      style={{ flex: '1 1 320px', textDecoration: 'none' }}
+      className="block"
     >
-      <Card
-        p="$5"
-        bg="$background"
-        borderColor="$borderColor"
-        borderWidth={1}
-        hoverStyle={{ background: 'rgba(255,255,255,0.04)' as never }}
-      >
-        <XStack items="flex-start" gap="$3">
-          <Icon size={18} color="#7e8794" />
-          <YStack flex={1} minW={0}>
-            <Text fontSize="$3" fontWeight="500" color="$color">
-              {title}
-            </Text>
-            <Text fontSize="$2" color="$placeholderColor">
-              {hint}
-            </Text>
-          </YStack>
-          <ExternalLink size={14} color="#7e8794" />
-        </XStack>
+      <Card className="p-5 hover:bg-accent/40 transition-colors">
+        <div className="flex items-start gap-3">
+          <Icon size={18} className="text-muted-foreground mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium">{title}</p>
+            <p className="text-sm text-muted-foreground">{hint}</p>
+          </div>
+          <ExternalLink size={14} className="text-muted-foreground" />
+        </div>
       </Card>
     </a>
   )
