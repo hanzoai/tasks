@@ -63,11 +63,17 @@ Hanzo Tasks integrates with the broader Hanzo ecosystem:
 
 ## Repository
 
-This repository contains the source code of the Hanzo Tasks server. To implement Workflows, Activities, and Workers from Go, use the in-process client at [`pkg/tasks`](./pkg/tasks); a full durable-execution SDK is compatible with the server's gRPC surface.
+This repository contains the source code of the Hanzo Tasks server.
+The wire is **luxfi/zap** (binary, native, on `_tasks._tcp:9999`).
+There is no gRPC and no go.temporal.io anywhere in the build.
 
-## Architecture
+To drive Tasks from Go, depend on [`pkg/sdk`](./pkg/sdk) — the native
+ZAP client. To embed the server in a Go process (e.g. a Hanzo Base
+app), depend on [`pkg/tasks`](./pkg/tasks) and call `tasks.Embed()`.
 
-See [docs/architecture/README.md](./docs/architecture/README.md) for server architecture details.
+Browser clients hit the JSON shim at `/v1/tasks/*` and the realtime
+stream at `/v1/tasks/events` (Server-Sent Events). AI agents hit the
+MCP surface at `/v1/tasks/mcp` (JSON-RPC 2.0).
 
 ## Contributing
 
