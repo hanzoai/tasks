@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Play, Plus, RefreshCw } from 'lucide-react'
 import type { WorkflowExecution } from '../lib/api'
 import { apiPost, ApiError } from '../lib/api'
+import { useRealtime } from '../lib/events'
 import { Card } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -36,6 +37,7 @@ export function WorkflowsPage() {
   const { ns } = useParams()
   const namespace = ns!
   const { mutate } = useSWRConfig()
+  useRealtime(namespace)
 
   const [activeView, setActiveView] = useState<SystemViewId>('all')
   const [query, setQuery] = useState('')
