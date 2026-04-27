@@ -1,21 +1,24 @@
-import useSWR from 'swr'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ChevronLeft, Circle } from 'lucide-react'
-import { Card } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Skeleton } from '../components/ui/skeleton'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
-import { ErrorState } from '../components/ErrorState'
-import { Empty } from '../components/Empty'
-import { useRealtime } from '../lib/events'
-import { formatTimestamp } from '../components/LocalTimeIndicator'
+// Workflow history — synthetic event timeline. Native engine doesn't
+// yet emit per-event durable history, so the server returns start +
+// signal counter + (if closed) terminal transition. We label the
+// response as synthetic so this page can show the right hint.
 
-// WorkflowHistory mirrors the upstream
-//   /namespaces/[ns]/workflows/[wf]/[run]/history route.
-// The native engine doesn't yet emit per-event durable history, so the
-// server returns a synthetic timeline: start event, signal counter, and
-// (if closed) the terminal transition. We label the response as
-// synthetic so this page can show the right hint.
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import {
+  Card,
+  H1,
+  H4,
+  Text,
+  XStack,
+  YStack,
+} from 'hanzogui'
+import { ChevronLeft, Circle } from '@hanzogui/lucide-icons-2'
+import { useFetch } from '../lib/useFetch'
+import { useTaskEvents } from '../lib/events'
+import { Alert } from '../components/Alert'
+import { Badge } from '../components/Badge'
+import { Empty, ErrorState, LoadingState } from '../components/Empty'
+import { formatTimestamp } from '../lib/format'
 
 interface HistoryEvent {
   eventId: string
@@ -34,85 +37,113 @@ export function WorkflowHistoryPage() {
   const [sp] = useSearchParams()
   const runId = sp.get('runId') ?? ''
   const namespace = ns!
-  useRealtime(namespace)
   const qs = runId ? `?runId=${encodeURIComponent(runId)}` : ''
   const url = `/v1/tasks/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(workflowId!)}/history${qs}`
-  const { data, error, isLoading } = useSWR<HistoryResp>(url)
+  const { data, error, isLoading, mutate } = useFetch<HistoryResp>(url)
 
-  if (error) return <ErrorState error={error} />
-  if (isLoading || !data) {
-    return (
-      <section className="space-y-4">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-7 w-72" />
-        <Card className="py-6"><Skeleton className="mx-6 h-32" /></Card>
-      </section>
-    )
-  }
+  useTaskEvents(namespace, () => void mutate(), [
+    'workflow.canceled',
+    'workflow.terminated',
+    'workflow.signaled',
+  ])
+
+  if (error) return <ErrorState error={error as Error} />
+  if (isLoading || !data) return <LoadingState />
 
   const events = data.events ?? []
 
   return (
-    <section className="space-y-6">
+    <YStack gap="$5">
       <Link
         to={`/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(workflowId!)}${qs}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        style={{ textDecoration: 'none', color: 'inherit' }}
       >
-        <ChevronLeft size={14} /> {workflowId}
+        <XStack items="center" gap="$1.5" hoverStyle={{ opacity: 0.8 }}>
+          <ChevronLeft size={14} color="#7e8794" />
+          <Text fontSize="$2" color="$placeholderColor">
+            {workflowId}
+          </Text>
+        </XStack>
       </Link>
-      <header className="space-y-1">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">History</p>
-        <h2 className="text-xl font-semibold">{workflowId}</h2>
-        {runId && <p className="font-mono text-sm text-muted-foreground">{runId}</p>}
-      </header>
+
+      <YStack gap="$1">
+        <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
+          HISTORY
+        </Text>
+        <H1 size="$7" color="$color" fontWeight="600">
+          {workflowId}
+        </H1>
+        {runId && (
+          <Text fontFamily={'ui-monospace, SFMono-Regular, monospace' as never} fontSize="$2" color="$placeholderColor">
+            {runId}
+          </Text>
+        )}
+      </YStack>
 
       {data.synthetic ? (
-        <Alert>
-          <AlertTitle>Synthetic timeline</AlertTitle>
-          <AlertDescription>
-            Native engine event history coming in v1.42. Today this view derives
-            events from the workflow record (start, signal count, terminal
-            transition) — no events are fabricated.
-          </AlertDescription>
+        <Alert title="Synthetic timeline">
+          Native engine event history coming in v1.42. Today this view derives
+          events from the workflow record (start, signal count, terminal
+          transition) — no events are fabricated.
         </Alert>
       ) : null}
 
       {events.length === 0 ? (
         <Empty title="No events yet" hint="Events will appear once the workflow runs." />
       ) : (
-        <ol className="relative space-y-3 border-l border-border pl-6">
+        <YStack gap="$3" pl="$4" borderLeftWidth={1} borderLeftColor="$borderColor">
           {events.map((ev) => (
-            <li key={ev.eventId} className="relative">
-              <span className="absolute -left-[27px] top-2 inline-flex size-3 items-center justify-center rounded-full bg-background text-muted-foreground">
-                <Circle size={10} className="fill-foreground stroke-none" />
-              </span>
-              <Card className="py-4">
-                <div className="space-y-2 px-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
+            <YStack key={ev.eventId} position="relative">
+              <YStack
+                position="absolute"
+                l={-29}
+                t={14}
+                width={12}
+                height={12}
+                rounded={9999}
+                bg="$background"
+                items="center"
+                justify="center"
+              >
+                <Circle size={10} color="#f2f2f2" fill="#f2f2f2" />
+              </YStack>
+              <Card p="$4" bg="$background" borderColor="$borderColor" borderWidth={1}>
+                <YStack gap="$2">
+                  <XStack items="center" justify="space-between" gap="$3">
+                    <XStack items="center" gap="$2">
                       <Badge variant="muted">#{ev.eventId}</Badge>
                       <Link
                         to={`/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(workflowId!)}/events/${encodeURIComponent(ev.eventId)}${qs}`}
-                        className="text-sm font-medium text-primary hover:underline"
+                        style={{ textDecoration: 'none' }}
                       >
-                        {ev.eventType}
+                        <H4 fontSize="$3" fontWeight="500" color={'#86efac' as never}>
+                          {ev.eventType}
+                        </H4>
                       </Link>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
+                    </XStack>
+                    <Text fontSize="$1" color="$placeholderColor">
                       {ev.eventTime ? formatTimestamp(new Date(ev.eventTime)) : '—'}
-                    </span>
-                  </div>
+                    </Text>
+                  </XStack>
                   {ev.attributes && Object.keys(ev.attributes).length > 0 && (
-                    <pre className="overflow-auto rounded bg-muted/30 p-2 text-xs text-muted-foreground">
-                      {JSON.stringify(ev.attributes, null, 2)}
-                    </pre>
+                    <YStack
+                      bg={'rgba(255,255,255,0.02)' as never}
+                      p="$2"
+                      rounded="$2"
+                      borderWidth={1}
+                      borderColor="$borderColor"
+                    >
+                      <Text fontFamily={'ui-monospace, SFMono-Regular, monospace' as never} fontSize="$1" color="$placeholderColor">
+                        {JSON.stringify(ev.attributes, null, 2)}
+                      </Text>
+                    </YStack>
                   )}
-                </div>
+                </YStack>
               </Card>
-            </li>
+            </YStack>
           ))}
-        </ol>
+        </YStack>
       )}
-    </section>
+    </YStack>
   )
 }
