@@ -128,3 +128,39 @@ func TestCron(t *testing.T) {
 		t.Logf("warning: pause/unpause did not round-trip (paused=%v resumed=%v)", res.Paused, res.Resumed)
 	}
 }
+
+func TestEmbed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := examples.Embed(ctx)
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if res.HealthService != "tasks" || res.HealthStatus != "ok" {
+		t.Fatalf("Health = %q/%q, want tasks/ok", res.HealthService, res.HealthStatus)
+	}
+	if res.StartedID == "" || res.StartedRunID == "" {
+		t.Fatalf("missing IDs: %+v", res)
+	}
+	if res.ListedCount != 1 {
+		t.Fatalf("ListedCount = %d, want 1", res.ListedCount)
+	}
+}
+
+func TestRealtime(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := examples.Realtime(ctx)
+	if err != nil {
+		t.Fatalf("Realtime: %v", err)
+	}
+	if res.StartedCount == 0 {
+		t.Fatalf("no workflows started")
+	}
+	if res.EventsCaught == 0 {
+		t.Fatalf("no events caught — broker → SSE → SDK pipeline broken")
+	}
+	if res.StartEvents == 0 {
+		t.Fatalf("StartEvents = 0, want ≥1")
+	}
+}
