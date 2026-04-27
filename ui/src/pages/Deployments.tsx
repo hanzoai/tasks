@@ -1,90 +1,65 @@
-// Deployments — worker version series. Cards mirror v1 layout.
-
+import useSWR from 'swr'
 import { useParams } from 'react-router-dom'
-import { Card, H2, Text, XStack, YStack } from 'hanzogui'
 import type { Deployment } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
-import { Badge } from '../components/Badge'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Skeleton } from '../components/ui/skeleton'
+import { ErrorState } from '../components/ErrorState'
+import { Empty } from '../components/Empty'
 
 export function DeploymentsPage() {
   const { ns } = useParams()
-  const namespace = ns!
-  const url = `/v1/tasks/namespaces/${encodeURIComponent(namespace)}/deployments`
-  const { data, error, isLoading } = useFetch<{ deployments: Deployment[] }>(url)
+  const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/deployments`
+  const { data, error, isLoading } = useSWR<{ deployments: Deployment[] }>(url)
 
-  if (error) return <ErrorState error={error as Error} />
-  if (isLoading) return <LoadingState />
+  if (error) return <ErrorState error={error} />
+  if (isLoading) return <Skeleton className="h-40" />
   const rows = data?.deployments ?? []
 
   return (
-    <YStack gap="$4">
-      <XStack items="baseline" justify="space-between">
-        <H2 size="$7" color="$color">
-          Deployments{' '}
-          <Text fontSize="$3" color="$placeholderColor" fontWeight="400">
-            ({rows.length})
-          </Text>
-        </H2>
-      </XStack>
+    <section className="space-y-4">
+      <header className="flex items-center justify-between">
+        <h2 className="text-lg font-medium">
+          Deployments <span className="text-muted-foreground text-sm">({rows.length})</span>
+        </h2>
+      </header>
 
       {rows.length === 0 ? (
         <Empty
-          title={`No worker deployments in ${namespace}`}
+          title={`No worker deployments in ${ns}`}
           hint="Workers register a series + buildId on connect. Routing rules promote a default and ramp new versions."
         />
       ) : (
-        <XStack gap="$4" flexWrap="wrap">
+        <div className="grid gap-4 md:grid-cols-2">
           {rows.map((d) => (
-            <Card
-              key={d.seriesName}
-              p="$5"
-              bg="$background"
-              borderColor="$borderColor"
-              borderWidth={1}
-              flexBasis={320}
-              flexGrow={1}
-              gap="$3"
-            >
-              <YStack gap="$1">
-                <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-                  SERIES
-                </Text>
-                <Text fontSize="$3" fontWeight="500" color="$color">
-                  {d.seriesName}
-                </Text>
-              </YStack>
-              <YStack gap="$1">
-                <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-                  DEFAULT BUILD
-                </Text>
-                <Text fontFamily={'ui-monospace, SFMono-Regular, monospace' as never} fontSize="$2" color="$color">
-                  {d.defaultBuildId || '—'}
-                </Text>
-              </YStack>
-              <YStack gap="$1.5">
-                <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-                  VERSIONS
-                </Text>
-                <YStack gap="$1.5">
+            <Card key={d.seriesName} className="space-y-3 p-6">
+              <div>
+                <p className="text-sm text-muted-foreground">Series</p>
+                <p className="font-medium">{d.seriesName}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Default build</p>
+                <p className="font-mono text-sm">{d.defaultBuildId || '—'}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Versions</p>
+                <ul className="space-y-1">
                   {d.buildIds.map((b) => (
-                    <XStack key={b.buildId} items="center" gap="$2">
-                      <Text fontFamily={'ui-monospace, SFMono-Regular, monospace' as never} fontSize="$2" color="$color">
-                        {b.buildId}
-                      </Text>
+                    <li key={b.buildId} className="flex items-center gap-2 text-sm">
+                      <code className="font-mono">{b.buildId}</code>
                       <Badge
                         variant={b.state === 'DEPLOYMENT_STATE_CURRENT' ? 'success' : 'muted'}
                       >
                         {b.state.replace('DEPLOYMENT_STATE_', '').toLowerCase()}
                       </Badge>
-                    </XStack>
+                    </li>
                   ))}
-                </YStack>
-              </YStack>
+                </ul>
+              </div>
             </Card>
           ))}
-        </XStack>
+        </div>
       )}
-    </YStack>
+    </section>
   )
 }
