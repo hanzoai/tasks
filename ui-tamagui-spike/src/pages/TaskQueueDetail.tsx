@@ -5,13 +5,18 @@ import { useCallback } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Card, H1, H2, H3, Text, XStack, YStack } from 'hanzogui'
 import { ChevronLeft } from '@hanzogui/lucide-icons-2'
+import {
+  Alert,
+  Badge,
+  Empty,
+  ErrorState,
+  LoadingState,
+  formatTimestamp,
+  useFetch,
+} from '@hanzogui/admin'
 import type { WorkflowExecution } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
+import { shortStatus, statusVariant } from '../lib/api'
 import { useTaskEvents } from '../lib/events'
-import { Alert } from '../components/Alert'
-import { Badge } from '../components/Badge'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
-import { formatTimestamp, shortStatus, statusVariant } from '../lib/format'
 
 interface DetailResp {
   name: string
