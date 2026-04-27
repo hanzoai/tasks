@@ -1,41 +1,69 @@
 import useSWR from 'swr'
 import { Link } from 'react-router-dom'
+import { ChevronRight } from 'lucide-react'
 import type { Namespace } from '../lib/api'
-import { StatusPill } from '../components/StatusPill'
+import { Card } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Skeleton } from '../components/ui/skeleton'
+import { ErrorState } from '../components/ErrorState'
+import { Empty } from '../components/Empty'
 
 export function NamespacesPage() {
-  const { data, error, isLoading } = useSWR<{ namespaces: Namespace[] }>('/v1/tasks/namespaces?pageSize=200')
+  const { data, error, isLoading } = useSWR<{ namespaces: Namespace[] }>(
+    '/v1/tasks/namespaces?pageSize=200'
+  )
   if (error) return <ErrorState error={error} />
-  if (isLoading) return <p className="text-zinc-400">Loading namespaces…</p>
+  if (isLoading) return <NamespacesSkeleton />
   const nss = data?.namespaces ?? []
-  if (nss.length === 0)
-    return <Empty title="No namespaces" hint="Create one with `tctl namespace register`" />
+  if (nss.length === 0) return <Empty title="No namespaces" hint="Create one with the SDK or hanzo-tasks CLI." />
+
   return (
-    <section>
-      <h2 className="text-lg font-medium mb-4">Namespaces <span className="text-zinc-500 text-sm">({nss.length})</span></h2>
-      <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800 bg-zinc-900/50">
+    <section className="space-y-4">
+      <header className="flex items-center justify-between">
+        <h2 className="text-lg font-medium">
+          Namespaces <span className="text-muted-foreground text-sm">({nss.length})</span>
+        </h2>
+      </header>
+      <Card className="py-0 overflow-hidden divide-y divide-border">
         {nss.map((ns) => {
           const name = ns.namespaceInfo.name
+          const ok = ns.namespaceInfo.state === 'NAMESPACE_STATE_REGISTERED'
           return (
             <Link
               key={name}
-              to={`/namespaces/${encodeURIComponent(name)}/workflows`}
-              className="flex items-center gap-4 px-4 py-3 hover:bg-zinc-800/50 transition"
+              to={`/namespaces/${encodeURIComponent(name)}`}
+              className="flex items-center gap-4 px-5 py-3.5 hover:bg-accent/40 transition-colors"
             >
               <span className="font-medium">{name}</span>
-              <StatusPill kind={ns.namespaceInfo.state === 'NAMESPACE_STATE_REGISTERED' ? 'ok' : 'muted'}>
-                {shortState(ns.namespaceInfo.state)}
-              </StatusPill>
+              <Badge variant={ok ? 'success' : 'muted'}>{shortState(ns.namespaceInfo.state)}</Badge>
               {ns.namespaceInfo.description && (
-                <span className="text-zinc-400 text-sm truncate">{ns.namespaceInfo.description}</span>
+                <span className="text-muted-foreground text-sm truncate">{ns.namespaceInfo.description}</span>
               )}
-              <span className="ml-auto text-xs text-zinc-500">
+              <span className="ml-auto text-xs text-muted-foreground">
                 retention {humanTTL(ns.config?.workflowExecutionRetentionTtl)}
               </span>
+              <ChevronRight size={16} className="text-muted-foreground" />
             </Link>
           )
         })}
-      </div>
+      </Card>
+    </section>
+  )
+}
+
+function NamespacesSkeleton() {
+  return (
+    <section className="space-y-4">
+      <Skeleton className="h-7 w-48" />
+      <Card className="py-0 divide-y divide-border">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex items-center gap-4 px-5 py-3.5">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="ml-auto h-3 w-24" />
+          </div>
+        ))}
+      </Card>
     </section>
   )
 }
@@ -46,29 +74,17 @@ function shortState(s: string) {
 
 function humanTTL(raw?: string) {
   if (!raw) return '—'
-  // Server returns "604800s" style. Drop trailing s for display.
-  const m = /^(\d+)s$/.exec(raw)
+  const m = /^(\d+)([sm]|h|d)?$/.exec(raw) ?? /^(\d+)h(\d+)?m?(\d+)?s?$/.exec(raw)
   if (!m) return raw
-  const s = Number(m[1])
-  const days = Math.round(s / 86400)
-  return days >= 1 ? `${days}d` : `${Math.round(s / 3600)}h`
-}
-
-export function ErrorState({ error }: { error: unknown }) {
-  const msg = error instanceof Error ? error.message : String(error)
-  return (
-    <div className="border border-red-900/50 bg-red-950/30 rounded-lg p-4">
-      <p className="text-red-300 font-medium">Failed to load</p>
-      <p className="text-red-400/80 text-sm mt-1">{msg}</p>
-    </div>
-  )
-}
-
-function Empty({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <div className="border border-zinc-800 border-dashed rounded-lg p-10 text-center">
-      <p className="text-zinc-300">{title}</p>
-      {hint && <p className="text-zinc-500 text-sm mt-1">{hint}</p>}
-    </div>
-  )
+  // Common case: "720h" → "30d", "604800s" → "7d"
+  const num = Number(m[1])
+  if (raw.endsWith('h')) {
+    const days = Math.round(num / 24)
+    return days >= 1 ? `${days}d` : `${num}h`
+  }
+  if (raw.endsWith('s')) {
+    const days = Math.round(num / 86400)
+    return days >= 1 ? `${days}d` : `${Math.round(num / 3600)}h`
+  }
+  return raw
 }
