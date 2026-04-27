@@ -2,15 +2,8 @@
 
 // Embed runs the in-process Hanzo Tasks server. One backend, two
 // transports: ZAP on :9999 (canonical, native, binary) and HTTP/JSON
-// (browser-only, for the embedded UI). Both speak the same opcode
-// surface and call the same model functions — there is exactly one
-// way to answer each question. No gRPC. No go.temporal.io. No
-// upstream protobuf. Just luxfi/zap + stdlib.
-//
-// Workflow execution semantics are not yet wired — list/describe ops
-// return the empty/default state. The shape exists so the UI is
-// navigable and SDK callers can depend on the API while the native
-// engine is built behind it.
+// (browser-only, for the embedded UI). Both go through the engine →
+// store layer so they cannot drift. No gRPC. No go.temporal.io.
 
 package tasks
 
@@ -18,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -27,19 +21,21 @@ import (
 
 // EmbedConfig configures the in-process Tasks server.
 type EmbedConfig struct {
-	DataDir   string       // workflow + task persistence dir; "" → "./tasks-data"
-	ZAPPort   int          // _tasks._tcp listener; 0 picks ephemeral
-	Namespace string       // default namespace; "" → "default"
+	DataDir   string       // "" → "./tasks-data" (reserved; memdb today)
+	ZAPPort   int          // 0 → 9999
+	Namespace string       // "" → "default"
 	Logger    *slog.Logger // nil → slog.Default()
 }
 
 // Embedded is the handle to a running in-process Tasks server.
 type Embedded struct {
-	cfg  EmbedConfig
-	node *zap.Node
+	cfg    EmbedConfig
+	node   *zap.Node
+	engine *engine
+	stop   chan struct{}
 }
 
-// Embed starts the in-process Tasks server. Stop before exit.
+// Embed starts the Tasks server. Stop before exit.
 func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	if cfg.DataDir == "" {
 		cfg.DataDir = "./tasks-data"
@@ -51,6 +47,21 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		cfg.Logger = slog.Default()
 	}
 
+	st := newStore()
+	en := newEngine(st)
+
+	// Bootstrap default namespace so the UI has something to render
+	// on first boot. Idempotent.
+	_ = en.RegisterNamespace(Namespace{
+		NamespaceInfo: NamespaceInfo{
+			Name:        cfg.Namespace,
+			State:       "NAMESPACE_STATE_REGISTERED",
+			Description: "Default namespace (bootstrapped)",
+			Region:      "embedded",
+		},
+		Config: NamespaceCfg{WorkflowExecutionRetentionTtl: "720h", APSLimit: 400},
+	})
+
 	node := zap.NewNode(zap.NodeConfig{
 		NodeID:      "tasks-embed",
 		ServiceType: "_tasks._tcp",
@@ -59,16 +70,18 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		NoDiscovery: true,
 	})
 
-	// ZAP handlers map opcode → model function via wrap().
-	for op, model := range opModels(cfg.Namespace) {
-		node.Handle(op, wrap(model))
+	for op, h := range zapHandlers(en, cfg.Namespace) {
+		node.Handle(op, h)
 	}
-	node.Handle(opHealth, wrap(healthModel(cfg.Namespace)))
 
 	if err := node.Start(); err != nil {
 		return nil, fmt.Errorf("tasks.Embed: zap start: %w", err)
 	}
-	return &Embedded{cfg: cfg, node: node}, nil
+
+	stop := make(chan struct{})
+	go en.runScheduler(stop)
+
+	return &Embedded{cfg: cfg, node: node, engine: en, stop: stop}, nil
 }
 
 // ZAPPort returns the bound ZAP port.
@@ -81,56 +94,283 @@ func (e *Embedded) ZAPPort() int {
 
 // Stop shuts the server down. Idempotent.
 func (e *Embedded) Stop(ctx context.Context) error {
-	if e == nil || e.node == nil {
+	if e == nil {
 		return nil
 	}
-	e.node.Stop()
-	e.node = nil
+	if e.stop != nil {
+		close(e.stop)
+		e.stop = nil
+	}
+	if e.node != nil {
+		e.node.Stop()
+		e.node = nil
+	}
+	if e.engine != nil && e.engine.store != nil {
+		_ = e.engine.store.close()
+	}
 	_ = ctx
 	return nil
 }
 
-// HTTPHandler returns the browser-only JSON shim. Each route maps to
-// the same model function the ZAP handler uses, so the two transports
-// can never drift.
+// HTTPHandler returns the browser-only JSON shim. Mirrors zapHandlers.
 func (e *Embedded) HTTPHandler() http.Handler {
-	if e == nil {
-		return http.NotFoundHandler()
-	}
-	ns := e.cfg.Namespace
 	mux := http.NewServeMux()
+	en := e.engine
 
-	serve := func(w http.ResponseWriter, m model) {
-		body, status, errMsg := m()
-		writeJSON(w, body, status, errMsg)
-	}
-	// GET /v1/tasks/namespaces[?pageSize=...]
+	// /v1/tasks/namespaces
 	mux.HandleFunc("/v1/tasks/namespaces", func(w http.ResponseWriter, r *http.Request) {
-		serve(w, listNamespacesModel(ns))
-	})
-	// GET /v1/tasks/namespaces/{ns}/workflows
-	// GET /v1/tasks/namespaces/{ns}/schedules
-	// GET /v1/tasks/namespaces/{ns}/workflows/{id}
-	mux.HandleFunc("/v1/tasks/namespaces/", func(w http.ResponseWriter, r *http.Request) {
-		rest := strings.TrimPrefix(r.URL.Path, "/v1/tasks/namespaces/")
-		parts := strings.SplitN(rest, "/", 3)
-		switch {
-		case len(parts) == 2 && parts[1] == "workflows":
-			serve(w, listWorkflowsModel(parts[0]))
-		case len(parts) == 2 && parts[1] == "schedules":
-			serve(w, listSchedulesModel(parts[0]))
-		case len(parts) == 3 && parts[1] == "workflows":
-			serve(w, describeWorkflowModel(parts[0], parts[2]))
+		switch r.Method {
+		case http.MethodGet:
+			rows, err := en.ListNamespaces()
+			writeOK(w, err, map[string]any{"namespaces": rows})
+		case http.MethodPost:
+			var req struct {
+				Namespace
+			}
+			if err := decode(r, &req); err != nil {
+				writeErr(w, 400, err.Error())
+				return
+			}
+			err := en.RegisterNamespace(req.Namespace)
+			writeOK(w, err, req.Namespace)
 		default:
 			http.NotFound(w, r)
 		}
 	})
+
+	// /v1/tasks/namespaces/{ns}[/...]
+	mux.HandleFunc("/v1/tasks/namespaces/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/v1/tasks/namespaces/")
+		parts := strings.Split(rest, "/")
+		ns := parts[0]
+		if ns == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if len(parts) == 1 {
+			n, ok, err := en.DescribeNamespace(ns)
+			if err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+			if !ok {
+				writeErr(w, 404, "namespace not found")
+				return
+			}
+			writeOK(w, nil, n)
+			return
+		}
+		switch parts[1] {
+		case "workflows":
+			handleWorkflows(w, r, en, ns, parts[2:])
+		case "schedules":
+			handleSchedules(w, r, en, ns, parts[2:])
+		case "batches":
+			handleBatches(w, r, en, ns, parts[2:])
+		case "deployments":
+			handleDeployments(w, r, en, ns, parts[2:])
+		case "nexus":
+			handleNexus(w, r, en, ns, parts[2:])
+		case "identities":
+			handleIdentities(w, r, en, ns, parts[2:])
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
 	return mux
 }
 
-// ── opcode allocation (mirror of pkg/sdk/client) ────────────────────
-//
-// Append-only; never rebind a value. Canonical home is pkg/sdk/client.
+// ── per-resource HTTP routers ──────────────────────────────────────
+
+func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		rows, err := en.ListWorkflows(ns)
+		writeOK(w, err, map[string]any{"executions": rows})
+	case len(sub) == 0 && r.Method == http.MethodPost:
+		var req struct {
+			WorkflowId   string  `json:"workflowId"`
+			RunId        string  `json:"runId"`
+			WorkflowType TypeRef `json:"workflowType"`
+			TaskQueue    struct {
+				Name string `json:"name"`
+			} `json:"taskQueue"`
+			Input any `json:"input"`
+		}
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		wf, err := en.StartWorkflow(ns, req.WorkflowId, req.RunId, req.WorkflowType, req.TaskQueue.Name, req.Input)
+		writeOK(w, err, wf)
+	case len(sub) == 1 && r.Method == http.MethodGet:
+		runId := r.URL.Query().Get("execution.runId")
+		wf, ok, err := en.DescribeWorkflow(ns, sub[0], runId)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if !ok {
+			writeErr(w, 404, "workflow not found")
+			return
+		}
+		writeOK(w, nil, map[string]any{
+			"workflowExecutionInfo": wf,
+			"executionConfig": map[string]any{
+				"taskQueue": map[string]string{"name": wf.TaskQueue},
+			},
+		})
+	case len(sub) == 2 && sub[1] == "cancel" && r.Method == http.MethodPost:
+		wf, err := en.CancelWorkflow(ns, sub[0], r.URL.Query().Get("runId"))
+		writeOK(w, err, wf)
+	case len(sub) == 2 && sub[1] == "terminate" && r.Method == http.MethodPost:
+		wf, err := en.TerminateWorkflow(ns, sub[0], r.URL.Query().Get("runId"))
+		writeOK(w, err, wf)
+	case len(sub) == 2 && sub[1] == "signal" && r.Method == http.MethodPost:
+		var req struct {
+			Name    string `json:"name"`
+			Payload any    `json:"payload"`
+		}
+		_ = decode(r, &req)
+		err := en.SignalWorkflow(ns, sub[0], r.URL.Query().Get("runId"), req.Name, req.Payload)
+		writeOK(w, err, map[string]string{"status": "signaled"})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleSchedules(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		rows, err := en.ListSchedules(ns)
+		writeOK(w, err, map[string]any{"schedules": rows})
+	case len(sub) == 0 && r.Method == http.MethodPost:
+		var req Schedule
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		req.Namespace = ns
+		err := en.CreateSchedule(req)
+		writeOK(w, err, req)
+	case len(sub) == 1 && r.Method == http.MethodGet:
+		s, ok, err := en.DescribeSchedule(ns, sub[0])
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if !ok {
+			writeErr(w, 404, "schedule not found")
+			return
+		}
+		writeOK(w, nil, s)
+	case len(sub) == 1 && r.Method == http.MethodDelete:
+		err := en.DeleteSchedule(ns, sub[0])
+		writeOK(w, err, map[string]string{"status": "deleted"})
+	case len(sub) == 2 && sub[1] == "pause" && r.Method == http.MethodPost:
+		var req struct {
+			Note string `json:"note"`
+		}
+		_ = decode(r, &req)
+		err := en.PauseSchedule(ns, sub[0], true, req.Note)
+		writeOK(w, err, map[string]string{"status": "paused"})
+	case len(sub) == 2 && sub[1] == "unpause" && r.Method == http.MethodPost:
+		err := en.PauseSchedule(ns, sub[0], false, "")
+		writeOK(w, err, map[string]string{"status": "running"})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleBatches(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		rows, err := en.ListBatches(ns)
+		writeOK(w, err, map[string]any{"batches": rows})
+	case len(sub) == 0 && r.Method == http.MethodPost:
+		var req BatchOperation
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		req.Namespace = ns
+		b, err := en.StartBatch(req)
+		writeOK(w, err, b)
+	case len(sub) == 1 && r.Method == http.MethodGet:
+		b, ok, err := en.DescribeBatch(ns, sub[0])
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if !ok {
+			writeErr(w, 404, "batch not found")
+			return
+		}
+		writeOK(w, nil, b)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		rows, err := en.ListDeployments(ns)
+		writeOK(w, err, map[string]any{"deployments": rows})
+	case len(sub) == 0 && r.Method == http.MethodPost:
+		var req Deployment
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		req.Namespace = ns
+		err := en.CreateDeployment(req)
+		writeOK(w, err, req)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleNexus(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		rows, err := en.ListNexusEndpoints(ns)
+		writeOK(w, err, map[string]any{"endpoints": rows})
+	case len(sub) == 0 && r.Method == http.MethodPost:
+		var req NexusEndpoint
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		req.Namespace = ns
+		err := en.CreateNexusEndpoint(req)
+		writeOK(w, err, req)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleIdentities(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		rows, err := en.ListIdentities(ns)
+		writeOK(w, err, map[string]any{"identities": rows})
+	case len(sub) == 0 && r.Method == http.MethodPost:
+		var req Identity
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		req.Namespace = ns
+		err := en.GrantIdentity(req)
+		writeOK(w, err, req)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// ── ZAP handler dispatch ────────────────────────────────────────────
 
 const (
 	opStartWorkflow           uint16 = 0x0060
@@ -139,25 +379,176 @@ const (
 	opTerminateWorkflow       uint16 = 0x0063
 	opDescribeWorkflow        uint16 = 0x0064
 	opListWorkflows           uint16 = 0x0065
-	opSignalWithStartWorkflow uint16 = 0x0066
-	opQueryWorkflow           uint16 = 0x0067
 	opCreateSchedule          uint16 = 0x0070
 	opDeleteSchedule          uint16 = 0x0071
 	opListSchedules           uint16 = 0x0072
 	opPauseSchedule           uint16 = 0x0073
 	opUnpauseSchedule         uint16 = 0x0074
-	opUpdateSchedule          uint16 = 0x0075
 	opDescribeSchedule        uint16 = 0x0076
-	opTriggerSchedule         uint16 = 0x0077
 	opRegisterNamespace       uint16 = 0x0080
 	opDescribeNamespace       uint16 = 0x0081
 	opListNamespaces          uint16 = 0x0082
 	opHealth                  uint16 = 0x0090
 )
 
-// ── envelope ────────────────────────────────────────────────────────
-//
-// {body, status, error} — the only ZAP response shape on this wire.
+func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
+	envBody := func(v any) ([]byte, error) { return json.Marshal(v) }
+	wrap := func(fn func(req map[string]any) (any, uint32, string)) zap.Handler {
+		return func(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+			req := map[string]any{}
+			if msg != nil {
+				root := msg.Root()
+				if !root.IsNull() {
+					if rb := root.Bytes(envelopeBody); len(rb) > 0 {
+						_ = json.Unmarshal(rb, &req)
+					}
+				}
+			}
+			out, status, errMsg := fn(req)
+			body, _ := envBody(out)
+			return envelope(body, status, errMsg)
+		}
+	}
+	str := func(req map[string]any, k string) string {
+		if v, ok := req[k].(string); ok {
+			return v
+		}
+		return ""
+	}
+	return map[uint16]zap.Handler{
+		opHealth: wrap(func(_ map[string]any) (any, uint32, string) {
+			return map[string]any{"service": "tasks", "status": "ok", "namespace": defaultNS}, 200, ""
+		}),
+		opListNamespaces: wrap(func(_ map[string]any) (any, uint32, string) {
+			rows, err := en.ListNamespaces()
+			if err != nil {
+				return nil, 500, err.Error()
+			}
+			return map[string]any{"namespaces": rows}, 200, ""
+		}),
+		opDescribeNamespace: wrap(func(req map[string]any) (any, uint32, string) {
+			n, ok, err := en.DescribeNamespace(str(req, "namespace"))
+			if err != nil {
+				return nil, 500, err.Error()
+			}
+			if !ok {
+				return nil, 404, "namespace not found"
+			}
+			return n, 200, ""
+		}),
+		opRegisterNamespace: wrap(func(req map[string]any) (any, uint32, string) {
+			var ns Namespace
+			if b, _ := json.Marshal(req); b != nil {
+				_ = json.Unmarshal(b, &ns)
+			}
+			if err := en.RegisterNamespace(ns); err != nil {
+				return nil, 400, err.Error()
+			}
+			return ns, 200, ""
+		}),
+		opStartWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			ns := str(req, "namespace")
+			typeName := ""
+			if t, ok := req["workflowType"].(map[string]any); ok {
+				typeName, _ = t["name"].(string)
+			}
+			tq := ""
+			if q, ok := req["taskQueue"].(map[string]any); ok {
+				tq, _ = q["name"].(string)
+			}
+			wf, err := en.StartWorkflow(ns, str(req, "workflowId"), str(req, "runId"), TypeRef{Name: typeName}, tq, req["input"])
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return wf, 200, ""
+		}),
+		opListWorkflows: wrap(func(req map[string]any) (any, uint32, string) {
+			rows, err := en.ListWorkflows(str(req, "namespace"))
+			if err != nil {
+				return nil, 500, err.Error()
+			}
+			return map[string]any{"executions": rows}, 200, ""
+		}),
+		opDescribeWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			wf, ok, err := en.DescribeWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"))
+			if err != nil {
+				return nil, 500, err.Error()
+			}
+			if !ok {
+				return nil, 404, "workflow not found"
+			}
+			return wf, 200, ""
+		}),
+		opSignalWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			err := en.SignalWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"), str(req, "signalName"), req["payload"])
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return map[string]string{"status": "signaled"}, 200, ""
+		}),
+		opCancelWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			wf, err := en.CancelWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"))
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return wf, 200, ""
+		}),
+		opTerminateWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			wf, err := en.TerminateWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"))
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return wf, 200, ""
+		}),
+		opListSchedules: wrap(func(req map[string]any) (any, uint32, string) {
+			rows, err := en.ListSchedules(str(req, "namespace"))
+			if err != nil {
+				return nil, 500, err.Error()
+			}
+			return map[string]any{"schedules": rows}, 200, ""
+		}),
+		opCreateSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+			var s Schedule
+			if b, _ := json.Marshal(req); b != nil {
+				_ = json.Unmarshal(b, &s)
+			}
+			if err := en.CreateSchedule(s); err != nil {
+				return nil, 400, err.Error()
+			}
+			return s, 200, ""
+		}),
+		opDescribeSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+			s, ok, err := en.DescribeSchedule(str(req, "namespace"), str(req, "scheduleId"))
+			if err != nil {
+				return nil, 500, err.Error()
+			}
+			if !ok {
+				return nil, 404, "schedule not found"
+			}
+			return s, 200, ""
+		}),
+		opDeleteSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+			if err := en.DeleteSchedule(str(req, "namespace"), str(req, "scheduleId")); err != nil {
+				return nil, 400, err.Error()
+			}
+			return map[string]string{"status": "deleted"}, 200, ""
+		}),
+		opPauseSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+			if err := en.PauseSchedule(str(req, "namespace"), str(req, "scheduleId"), true, str(req, "note")); err != nil {
+				return nil, 400, err.Error()
+			}
+			return map[string]string{"status": "paused"}, 200, ""
+		}),
+		opUnpauseSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+			if err := en.PauseSchedule(str(req, "namespace"), str(req, "scheduleId"), false, ""); err != nil {
+				return nil, 400, err.Error()
+			}
+			return map[string]string{"status": "running"}, 200, ""
+		}),
+	}
+}
+
+// ── envelope (ZAP single-field JSON shape) ─────────────────────────
 
 const (
 	envelopeBody       = 0
@@ -165,18 +556,6 @@ const (
 	envelopeError      = 12
 	envelopeObjectSize = 24
 )
-
-// model returns (body, status, errMsg). status=200 means success;
-// other codes carry a human-readable errMsg.
-type model func() (body []byte, status uint32, errMsg string)
-
-// wrap turns a model into a zap.Handler.
-func wrap(m model) zap.Handler {
-	return func(ctx context.Context, from string, msg *zap.Message) (*zap.Message, error) {
-		body, status, errMsg := m()
-		return envelope(body, status, errMsg)
-	}
-}
 
 func envelope(body []byte, status uint32, errMsg string) (*zap.Message, error) {
 	b := zap.NewBuilder(envelopeObjectSize + len(body) + len(errMsg) + 64)
@@ -188,113 +567,32 @@ func envelope(body []byte, status uint32, errMsg string) (*zap.Message, error) {
 	return zap.Parse(b.Finish())
 }
 
-// ── models ──────────────────────────────────────────────────────────
-//
-// Each model returns the same JSON the ZAP envelope and the HTTP shim
-// emit. Today they return the empty/default state; the native engine
-// will replace each one in place without changing the wire shape.
+// ── HTTP helpers ────────────────────────────────────────────────────
 
-func opModels(namespace string) map[uint16]model {
-	notImpl := func(op uint16) model {
-		return func() ([]byte, uint32, string) {
-			return nil, 501, fmt.Sprintf("opcode 0x%04X: not yet implemented", op)
-		}
+func decode(r *http.Request, v any) error {
+	defer r.Body.Close()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
 	}
-	return map[uint16]model{
-		opStartWorkflow:           notImpl(opStartWorkflow),
-		opSignalWorkflow:          notImpl(opSignalWorkflow),
-		opCancelWorkflow:          notImpl(opCancelWorkflow),
-		opTerminateWorkflow:       notImpl(opTerminateWorkflow),
-		opDescribeWorkflow:        describeWorkflowModel(namespace, ""),
-		opListWorkflows:           listWorkflowsModel(namespace),
-		opSignalWithStartWorkflow: notImpl(opSignalWithStartWorkflow),
-		opQueryWorkflow:           notImpl(opQueryWorkflow),
-		opCreateSchedule:          notImpl(opCreateSchedule),
-		opDeleteSchedule:          notImpl(opDeleteSchedule),
-		opListSchedules:           listSchedulesModel(namespace),
-		opPauseSchedule:           notImpl(opPauseSchedule),
-		opUnpauseSchedule:         notImpl(opUnpauseSchedule),
-		opUpdateSchedule:          notImpl(opUpdateSchedule),
-		opDescribeSchedule:        notImpl(opDescribeSchedule),
-		opTriggerSchedule:         notImpl(opTriggerSchedule),
-		opRegisterNamespace:       notImpl(opRegisterNamespace),
-		opDescribeNamespace:       describeNamespaceModel(namespace),
-		opListNamespaces:          listNamespacesModel(namespace),
+	if len(body) == 0 {
+		return nil
 	}
+	return json.Unmarshal(body, v)
 }
 
-func listNamespacesModel(defaultNS string) model {
-	return func() ([]byte, uint32, string) {
-		body, _ := json.Marshal(map[string]any{
-			"namespaces": []map[string]any{{
-				"namespaceInfo": map[string]any{
-					"name":  defaultNS,
-					"state": "NAMESPACE_STATE_REGISTERED",
-				},
-				"config": map[string]any{
-					"workflowExecutionRetentionTtl": "720h",
-				},
-			}},
-		})
-		return body, 200, ""
-	}
-}
-
-func describeNamespaceModel(ns string) model {
-	return func() ([]byte, uint32, string) {
-		body, _ := json.Marshal(map[string]any{
-			"namespaceInfo": map[string]any{
-				"name":  ns,
-				"state": "NAMESPACE_STATE_REGISTERED",
-			},
-		})
-		return body, 200, ""
-	}
-}
-
-func listWorkflowsModel(_ string) model {
-	return func() ([]byte, uint32, string) {
-		body, _ := json.Marshal(map[string]any{"executions": []any{}})
-		return body, 200, ""
-	}
-}
-
-func listSchedulesModel(_ string) model {
-	return func() ([]byte, uint32, string) {
-		body, _ := json.Marshal(map[string]any{"schedules": []any{}})
-		return body, 200, ""
-	}
-}
-
-func describeWorkflowModel(_, _ string) model {
-	return func() ([]byte, uint32, string) {
-		return nil, 404, "workflow not found"
-	}
-}
-
-func healthModel(ns string) model {
-	body, _ := json.Marshal(map[string]any{
-		"service":   "tasks",
-		"status":    "ok",
-		"namespace": ns,
-	})
-	return func() ([]byte, uint32, string) {
-		return body, 200, ""
-	}
-}
-
-// ── http helpers ────────────────────────────────────────────────────
-
-func writeJSON(w http.ResponseWriter, body []byte, status uint32, errMsg string) {
-	w.Header().Set("Content-Type", "application/json")
-	if status == 0 {
-		status = 200
-	}
-	if status >= 400 {
-		w.WriteHeader(int(status))
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": errMsg, "code": status})
+func writeOK(w http.ResponseWriter, err error, body any) {
+	if err != nil {
+		writeErr(w, 500, err.Error())
 		return
 	}
-	w.WriteHeader(int(status))
-	_, _ = w.Write(body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": msg, "code": code})
 }
