@@ -1,9 +1,14 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom'
-import { SWRConfig } from 'swr'
-import './index.css'
-import { App } from './App'
+// Entry point. Wires HanzoguiProvider, BrowserRouter, and the route
+// tree. Workflows renders edge-to-edge; every other page wraps in
+// PageShell for consistent padding.
+
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { HanzoguiProvider } from 'hanzogui'
+import config from '../hanzogui.config'
+import App from './App'
+import { PageShell } from './components/PageShell'
 import { NamespacesPage } from './pages/Namespaces'
 import { NamespaceDetailPage } from './pages/NamespaceDetail'
 import { WorkflowsPage } from './pages/Workflows'
@@ -13,23 +18,18 @@ import { EventDetailPage } from './pages/EventDetail'
 import { SchedulesPage } from './pages/Schedules'
 import { BatchesPage } from './pages/Batches'
 import { DeploymentsPage } from './pages/Deployments'
-import { NexusPage } from './pages/Nexus'
 import { TaskQueuesPage } from './pages/TaskQueues'
 import { TaskQueueDetailPage } from './pages/TaskQueueDetail'
 import { WorkersPage } from './pages/Workers'
+import { NexusPage } from './pages/Nexus'
 import { SupportPage } from './pages/Support'
-import { PageShell } from './components/PageShell'
-import { fetcher } from './lib/api'
 
 const root = document.getElementById('root')
 if (!root) throw new Error('root element missing')
 
-// Workflows owns its full-bleed layout (saved-views rail + empty hero).
-// All other surfaces wrap in PageShell for consistent padding.
-
-createRoot(root).render(
-  <StrictMode>
-    <SWRConfig value={{ fetcher, revalidateOnFocus: false, dedupingInterval: 2000 }}>
+ReactDOM.createRoot(root).render(
+  <React.StrictMode>
+    <HanzoguiProvider config={config} defaultTheme="dark">
       <BrowserRouter basename="/_/tasks">
         <Routes>
           <Route path="/" element={<App />}>
@@ -69,6 +69,6 @@ createRoot(root).render(
           </Route>
         </Routes>
       </BrowserRouter>
-    </SWRConfig>
-  </StrictMode>,
+    </HanzoguiProvider>
+  </React.StrictMode>,
 )
