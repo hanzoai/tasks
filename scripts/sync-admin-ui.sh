@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# sync-admin-ui.sh — sync the admin-tasks Tamagui bundle into ui/dist.
+# sync-admin-ui.sh — sync the admin-tasks @hanzo/gui v7 bundle into ui/dist.
 #
 # The Tasks SPA is built externally in the @hanzo/gui workspace at
-# ~/work/hanzo/gui/code/admin-tasks (Vite + Tamagui). This script
+# ~/work/hanzo/gui/apps/admin-tasks (Vite + @hanzo/gui v7). This script
 # copies the built bundle into ui/dist/ where //go:embed picks it up
 # at compile time of cmd/tasksd. Reproducible, idempotent, CI-friendly.
 #
 # Usage:
-#   scripts/sync-admin-ui.sh                 # uses ../gui/code/admin-tasks
+#   scripts/sync-admin-ui.sh                 # uses ../gui/apps/admin-tasks
 #   ADMIN_TASKS_DIR=/path scripts/sync-admin-ui.sh
 #
 # Exits non-zero if the source dist/ is missing or empty so CI fails
@@ -15,14 +15,14 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_SRC="$(cd "${REPO_ROOT}/../gui/code/admin-tasks" 2>/dev/null && pwd || echo "")"
+DEFAULT_SRC="$(cd "${REPO_ROOT}/../gui/apps/admin-tasks" 2>/dev/null && pwd || echo "")"
 SRC="${ADMIN_TASKS_DIR:-${DEFAULT_SRC}}"
 DST="${REPO_ROOT}/ui/dist"
 
 if [[ -z "${SRC}" || ! -d "${SRC}/dist" ]]; then
   echo "error: admin-tasks dist not found." >&2
   echo "  expected: ${SRC:-<unset>}/dist" >&2
-  echo "  build it first:  cd \"${SRC:-../gui/code/admin-tasks}\" && bun run build" >&2
+  echo "  build it first:  cd \"${SRC:-../gui/apps/admin-tasks}\" && bun run build" >&2
   echo "  or set ADMIN_TASKS_DIR=/abs/path/to/admin-tasks" >&2
   exit 1
 fi
