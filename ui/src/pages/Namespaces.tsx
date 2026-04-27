@@ -1,92 +1,83 @@
-import useSWR from 'swr'
+// Namespaces list — clicking a row navigates to the namespace detail.
+
+import { useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { Card, H2, Text, XStack, YStack } from 'hanzogui'
+import { ChevronRight } from '@hanzogui/lucide-icons-2'
 import type { Namespace } from '../lib/api'
-import { Card } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Skeleton } from '../components/ui/skeleton'
-import { ErrorState } from '../components/ErrorState'
-import { Empty } from '../components/Empty'
-import { useRealtime } from '../lib/events'
+import { useFetch } from '../lib/useFetch'
+import { useTaskEvents } from '../lib/events'
+import { Empty, ErrorState, LoadingState } from '../components/Empty'
+import { Badge } from '../components/Badge'
+import { humanTTL } from '../lib/format'
 
 export function NamespacesPage() {
-  useRealtime()
-  const { data, error, isLoading } = useSWR<{ namespaces: Namespace[] }>(
-    '/v1/tasks/namespaces?pageSize=200'
-  )
-  if (error) return <ErrorState error={error} />
-  if (isLoading) return <NamespacesSkeleton />
+  const url = '/v1/tasks/namespaces?pageSize=200'
+  const { data, error, isLoading, mutate } = useFetch<{ namespaces: Namespace[] }>(url)
+
+  const onEvent = useCallback(() => {
+    void mutate()
+  }, [mutate])
+
+  useTaskEvents(undefined, onEvent, ['namespace.registered'])
+
+  if (error) return <ErrorState error={error as Error} />
+  if (isLoading) return <LoadingState />
   const nss = data?.namespaces ?? []
-  if (nss.length === 0) return <Empty title="No namespaces" hint="Create one with the SDK or hanzo-tasks CLI." />
+  if (nss.length === 0) {
+    return <Empty title="No namespaces" hint="Create one with the SDK or hanzo-tasks CLI." />
+  }
 
   return (
-    <section className="space-y-4">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">
-          Namespaces <span className="text-muted-foreground text-sm">({nss.length})</span>
-        </h2>
-      </header>
-      <Card className="py-0 overflow-hidden divide-y divide-border">
-        {nss.map((ns) => {
+    <YStack gap="$4">
+      <XStack items="baseline" justify="space-between">
+        <H2 size="$7" color="$color">
+          Namespaces{' '}
+          <Text fontSize="$3" color="$placeholderColor" fontWeight="400">
+            ({nss.length})
+          </Text>
+        </H2>
+      </XStack>
+      <Card overflow="hidden" bg="$background" borderColor="$borderColor" borderWidth={1}>
+        {nss.map((ns, i) => {
           const name = ns.namespaceInfo.name
           const ok = ns.namespaceInfo.state === 'NAMESPACE_STATE_REGISTERED'
+          const state = ns.namespaceInfo.state.replace(/^NAMESPACE_STATE_/, '').toLowerCase()
           return (
             <Link
               key={name}
               to={`/namespaces/${encodeURIComponent(name)}`}
-              className="flex items-center gap-4 px-5 py-3.5 hover:bg-accent/40 transition-colors"
+              style={{ textDecoration: 'none', color: 'inherit' }}
             >
-              <span className="font-medium">{name}</span>
-              <Badge variant={ok ? 'success' : 'muted'}>{shortState(ns.namespaceInfo.state)}</Badge>
-              {ns.namespaceInfo.description && (
-                <span className="text-muted-foreground text-sm truncate">{ns.namespaceInfo.description}</span>
-              )}
-              <span className="ml-auto text-xs text-muted-foreground">
-                retention {humanTTL(ns.config?.workflowExecutionRetentionTtl)}
-              </span>
-              <ChevronRight size={16} className="text-muted-foreground" />
+              <XStack
+                items="center"
+                gap="$4"
+                px="$5"
+                py="$3.5"
+                borderTopWidth={i === 0 ? 0 : 1}
+                borderTopColor="$borderColor"
+                hoverStyle={{ background: 'rgba(255,255,255,0.04)' as never }}
+              >
+                <Text fontSize="$3" fontWeight="500" color="$color">
+                  {name}
+                </Text>
+                <Badge variant={ok ? 'success' : 'muted'}>{state}</Badge>
+                {ns.namespaceInfo.description ? (
+                  <Text fontSize="$2" color="$placeholderColor" numberOfLines={1} flex={1}>
+                    {ns.namespaceInfo.description}
+                  </Text>
+                ) : (
+                  <YStack flex={1} />
+                )}
+                <Text fontSize="$1" color="$placeholderColor">
+                  retention {humanTTL(ns.config?.workflowExecutionRetentionTtl)}
+                </Text>
+                <ChevronRight size={16} color="#7e8794" />
+              </XStack>
             </Link>
           )
         })}
       </Card>
-    </section>
+    </YStack>
   )
-}
-
-function NamespacesSkeleton() {
-  return (
-    <section className="space-y-4">
-      <Skeleton className="h-7 w-48" />
-      <Card className="py-0 divide-y divide-border">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="flex items-center gap-4 px-5 py-3.5">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-5 w-20" />
-            <Skeleton className="ml-auto h-3 w-24" />
-          </div>
-        ))}
-      </Card>
-    </section>
-  )
-}
-
-function shortState(s: string) {
-  return s.replace(/^NAMESPACE_STATE_/, '').toLowerCase()
-}
-
-function humanTTL(raw?: string) {
-  if (!raw) return '—'
-  const m = /^(\d+)([sm]|h|d)?$/.exec(raw) ?? /^(\d+)h(\d+)?m?(\d+)?s?$/.exec(raw)
-  if (!m) return raw
-  // Common case: "720h" → "30d", "604800s" → "7d"
-  const num = Number(m[1])
-  if (raw.endsWith('h')) {
-    const days = Math.round(num / 24)
-    return days >= 1 ? `${days}d` : `${num}h`
-  }
-  if (raw.endsWith('s')) {
-    const days = Math.round(num / 86400)
-    return days >= 1 ? `${days}d` : `${Math.round(num / 3600)}h`
-  }
-  return raw
 }
