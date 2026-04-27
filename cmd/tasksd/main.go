@@ -90,8 +90,8 @@ func buildHTTP(ns string, srv *tasks.Embedded) http.Handler {
 	mux.HandleFunc("/v1/tasks/health", probe)
 
 	// /v1/tasks/* — browser JSON shim, mirrors ZAP opcode dispatch.
-	mux.Handle("/v1/tasks/namespaces", srv.HTTPHandler())
-	mux.Handle("/v1/tasks/namespaces/", srv.HTTPHandler())
+	apiHandler := srv.HTTPHandler()
+	mux.Handle("/v1/tasks/", apiHandler)
 
 	// React Router has basename="/_/tasks". The bundle is only valid at
 	// that prefix; serving it at "/" produces a blank page because
