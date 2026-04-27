@@ -1,7 +1,0 @@
-node_modules/
-dist/
-.hanzogui/
-*.log
-.DS_Store
-.vite/
-tsconfig.tsbuildinfo

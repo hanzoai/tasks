@@ -1,93 +1,141 @@
-import { useState } from 'react'
-import useSWR from 'swr'
+// Batches — bulk operations across many workflow executions. List
+// view + Start Batch dialog (terminate / cancel / signal / reset).
+
+import { useCallback, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import {
+  Button,
+  Card,
+  Dialog,
+  H2,
+  Input,
+  Text,
+  XStack,
+  YStack,
+} from 'hanzogui'
+import { Plus } from '@hanzogui/lucide-icons-2'
 import type { BatchOperation } from '../lib/api'
 import { apiPost } from '../lib/api'
-import { Card } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Label } from '../components/ui/label'
-import { Skeleton } from '../components/ui/skeleton'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '../components/ui/dialog'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
-import { ErrorState } from '../components/ErrorState'
-import { Empty } from '../components/Empty'
-import { useRealtime } from '../lib/events'
+import { useFetch } from '../lib/useFetch'
+import { useTaskEvents } from '../lib/events'
+import { Alert } from '../components/Alert'
+import { Badge } from '../components/Badge'
+import { Empty, ErrorState, LoadingState } from '../components/Empty'
+
+const OPS = [
+  { value: 'BATCH_OPERATION_TYPE_TERMINATE', label: 'Terminate' },
+  { value: 'BATCH_OPERATION_TYPE_CANCEL', label: 'Cancel' },
+  { value: 'BATCH_OPERATION_TYPE_SIGNAL', label: 'Signal' },
+  { value: 'BATCH_OPERATION_TYPE_RESET', label: 'Reset' },
+]
 
 export function BatchesPage() {
   const { ns } = useParams()
-  useRealtime(ns)
-  const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/batches`
-  const { data, error, isLoading, mutate } = useSWR<{ batches: BatchOperation[] }>(url)
+  const namespace = ns!
+  const url = `/v1/tasks/namespaces/${encodeURIComponent(namespace)}/batches`
+  const { data, error, isLoading, mutate } = useFetch<{ batches: BatchOperation[] }>(url)
 
-  if (error) return <ErrorState error={error} />
-  if (isLoading) return <Skeleton className="h-40" />
+  const onEvent = useCallback(() => {
+    void mutate()
+  }, [mutate])
+
+  useTaskEvents(namespace, onEvent, ['batch.started'])
+
+  if (error) return <ErrorState error={error as Error} />
+  if (isLoading) return <LoadingState />
   const rows = data?.batches ?? []
 
   return (
-    <section className="space-y-4">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">
-          Batches <span className="text-muted-foreground text-sm">({rows.length})</span>
-        </h2>
-        <StartBatchButton ns={ns!} onCreated={mutate} />
-      </header>
+    <YStack gap="$4">
+      <XStack items="baseline" justify="space-between">
+        <H2 size="$7" color="$color">
+          Batches{' '}
+          <Text fontSize="$3" color="$placeholderColor" fontWeight="400">
+            ({rows.length})
+          </Text>
+        </H2>
+        <StartBatchButton ns={namespace} onCreated={() => void mutate()} />
+      </XStack>
 
       {rows.length === 0 ? (
         <Empty
-          title={`No batch operations in ${ns}`}
+          title={`No batch operations in ${namespace}`}
           hint="Bulk terminate / cancel / signal across many workflow executions."
-          action={<StartBatchButton ns={ns!} onCreated={mutate} />}
         />
       ) : (
-        <Card className="py-0 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-muted-foreground text-left">
-              <tr>
-                <th className="px-4 py-2.5 font-medium">Batch ID</th>
-                <th className="px-4 py-2.5 font-medium">Operation</th>
-                <th className="px-4 py-2.5 font-medium">Reason</th>
-                <th className="px-4 py-2.5 font-medium">State</th>
-                <th className="px-4 py-2.5 font-medium">Progress</th>
-                <th className="px-4 py-2.5 font-medium">Started</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((b) => (
-                <tr key={b.batchId}>
-                  <td className="px-4 py-2.5 font-mono text-xs">{b.batchId}</td>
-                  <td className="px-4 py-2.5">
-                    {b.operation.replace('BATCH_OPERATION_TYPE_', '').toLowerCase()}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{b.reason || '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <Badge variant={b.state.endsWith('COMPLETED') ? 'success' : 'muted'}>
-                      {b.state.replace('BATCH_OPERATION_STATE_', '').toLowerCase()}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {b.completeOperationCount} / {b.totalOperationCount || '—'}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {new Date(b.startTime).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Card overflow="hidden" bg="$background" borderColor="$borderColor" borderWidth={1}>
+          <XStack
+            bg={'rgba(255,255,255,0.03)' as never}
+            px="$4"
+            py="$2.5"
+            borderBottomWidth={1}
+            borderBottomColor="$borderColor"
+          >
+            <HeaderCell flex={2}>Batch ID</HeaderCell>
+            <HeaderCell flex={1}>Operation</HeaderCell>
+            <HeaderCell flex={2}>Reason</HeaderCell>
+            <HeaderCell flex={1}>State</HeaderCell>
+            <HeaderCell flex={1}>Progress</HeaderCell>
+            <HeaderCell flex={2}>Started</HeaderCell>
+          </XStack>
+          {rows.map((b, i) => (
+            <XStack
+              key={b.batchId}
+              px="$4"
+              py="$2.5"
+              borderBottomWidth={i === rows.length - 1 ? 0 : 1}
+              borderBottomColor="$borderColor"
+              items="center"
+            >
+              <YStack flex={2} px="$2">
+                <Text
+                  fontFamily={'ui-monospace, SFMono-Regular, monospace' as never}
+                  fontSize="$1"
+                  color="$color"
+                >
+                  {b.batchId}
+                </Text>
+              </YStack>
+              <YStack flex={1} px="$2">
+                <Text fontSize="$2" color="$color">
+                  {b.operation.replace('BATCH_OPERATION_TYPE_', '').toLowerCase()}
+                </Text>
+              </YStack>
+              <YStack flex={2} px="$2">
+                <Text fontSize="$2" color="$placeholderColor" numberOfLines={1}>
+                  {b.reason || '—'}
+                </Text>
+              </YStack>
+              <YStack flex={1} px="$2">
+                <Badge variant={b.state.endsWith('COMPLETED') ? 'success' : 'muted'}>
+                  {b.state.replace('BATCH_OPERATION_STATE_', '').toLowerCase()}
+                </Badge>
+              </YStack>
+              <YStack flex={1} px="$2">
+                <Text fontSize="$2" color="$placeholderColor">
+                  {b.completeOperationCount} / {b.totalOperationCount || '—'}
+                </Text>
+              </YStack>
+              <YStack flex={2} px="$2">
+                <Text fontSize="$2" color="$placeholderColor">
+                  {new Date(b.startTime).toLocaleString()}
+                </Text>
+              </YStack>
+            </XStack>
+          ))}
         </Card>
       )}
-    </section>
+    </YStack>
+  )
+}
+
+function HeaderCell({ children, flex }: { children: React.ReactNode; flex: number }) {
+  return (
+    <YStack flex={flex} px="$2">
+      <Text fontSize="$1" fontWeight="500" color="$placeholderColor">
+        {children}
+      </Text>
+    </YStack>
   )
 }
 
@@ -99,8 +147,7 @@ function StartBatchButton({ ns, onCreated }: { ns: string; onCreated: () => void
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
+  async function submit() {
     setSubmitting(true)
     setErr(null)
     try {
@@ -119,59 +166,95 @@ function StartBatchButton({ ns, onCreated }: { ns: string; onCreated: () => void
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus />
-          Start Batch
+    <Dialog modal open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger asChild>
+        <Button size="$3" bg={'#f2f2f2' as never} hoverStyle={{ background: '#ffffff' as never }}>
+          <XStack items="center" gap="$1.5">
+            <Plus size={14} color="#070b13" />
+            <Text fontSize="$2" fontWeight="500" color={'#070b13' as never}>
+              Start Batch
+            </Text>
+          </XStack>
         </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Start a batch operation in {ns}</DialogTitle>
-          <DialogDescription>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay key="overlay" bg={'rgba(0,0,0,0.6)' as never} />
+        <Dialog.Content
+          bg="$background"
+          borderColor="$borderColor"
+          borderWidth={1}
+          minW={520}
+          p="$5"
+          gap="$4"
+        >
+          <Dialog.Title fontSize="$6" fontWeight="600" color="$color">
+            Start a batch operation in {ns}
+          </Dialog.Title>
+          <Dialog.Description fontSize="$2" color="$placeholderColor">
             Apply a terminate / cancel / signal across every execution matching the visibility query.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="b-op">Operation</Label>
-            <select
-              id="b-op"
-              value={op}
-              onChange={(e) => setOp(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+          </Dialog.Description>
+          <YStack gap="$3">
+            <Field label="Operation">
+              <XStack gap="$2" flexWrap="wrap">
+                {OPS.map((o) => (
+                  <Button
+                    key={o.value}
+                    size="$2"
+                    onPress={() => setOp(o.value)}
+                    bg={op === o.value ? ('#f2f2f2' as never) : 'transparent'}
+                    borderWidth={1}
+                    borderColor={op === o.value ? ('#f2f2f2' as never) : '$borderColor'}
+                  >
+                    <Text
+                      fontSize="$2"
+                      color={op === o.value ? ('#070b13' as never) : '$color'}
+                    >
+                      {o.label}
+                    </Text>
+                  </Button>
+                ))}
+              </XStack>
+            </Field>
+            <Field label="Visibility query">
+              <Input value={query} onChangeText={setQuery} />
+            </Field>
+            <Field label="Reason">
+              <Input value={reason} onChangeText={setReason} />
+            </Field>
+            {err && (
+              <Alert variant="destructive" title="Could not start">
+                {err}
+              </Alert>
+            )}
+          </YStack>
+          <XStack gap="$2" justify="flex-end" mt="$2">
+            <Button chromeless onPress={() => setOpen(false)}>
+              <Text fontSize="$2">Cancel</Text>
+            </Button>
+            <Button
+              onPress={submit}
+              disabled={submitting}
+              bg={'#f2f2f2' as never}
+              hoverStyle={{ background: '#ffffff' as never }}
             >
-              <option value="BATCH_OPERATION_TYPE_TERMINATE">Terminate</option>
-              <option value="BATCH_OPERATION_TYPE_CANCEL">Cancel</option>
-              <option value="BATCH_OPERATION_TYPE_SIGNAL">Signal</option>
-              <option value="BATCH_OPERATION_TYPE_RESET">Reset</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="b-q">Visibility query</Label>
-            <Input id="b-q" value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="b-r">Reason</Label>
-            <Input id="b-r" value={reason} onChange={(e) => setReason(e.target.value)} />
-          </div>
-          {err && (
-            <Alert variant="destructive">
-              <AlertTitle>Could not start</AlertTitle>
-              <AlertDescription>{err}</AlertDescription>
-            </Alert>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
+              <Text fontSize="$2" fontWeight="500" color={'#070b13' as never}>
+                {submitting ? 'Starting…' : 'Start'}
+              </Text>
             </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? 'Starting…' : 'Start'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+          </XStack>
+        </Dialog.Content>
+      </Dialog.Portal>
     </Dialog>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <YStack gap="$1.5">
+      <Text fontSize="$2" color="$color">
+        {label}
+      </Text>
+      {children}
+    </YStack>
   )
 }

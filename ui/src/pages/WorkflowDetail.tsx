@@ -1,16 +1,34 @@
+// Workflow detail — Summary | Call stack | History tabs.
+//
+// Summary: type, status, task queue, history events, started, closed.
+// Call stack: queries the worker via __stack_trace; shows 501 banner
+//             if engine doesn't yet implement that opcode.
+// History:   pointer to /history page; the actual timeline lives there.
+
 import { useState } from 'react'
-import useSWR from 'swr'
-import { useParams, useSearchParams, Link } from 'react-router-dom'
-import { ChevronLeft, History, RefreshCw } from 'lucide-react'
-import { apiPost, ApiError } from '../lib/api'
-import { Card, CardContent } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Skeleton } from '../components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
-import { ErrorState } from '../components/ErrorState'
-import { useRealtime } from '../lib/events'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import {
+  Button,
+  Card,
+  H1,
+  Spinner,
+  Tabs,
+  Text,
+  XStack,
+  YStack,
+} from 'hanzogui'
+import {
+  ChevronLeft,
+  History,
+  RefreshCw,
+} from '@hanzogui/lucide-icons-2'
+import { ApiError, apiPost } from '../lib/api'
+import { useFetch } from '../lib/useFetch'
+import { useTaskEvents } from '../lib/events'
+import { Alert } from '../components/Alert'
+import { Badge } from '../components/Badge'
+import { ErrorState, LoadingState } from '../components/Empty'
+import { shortStatus, statusVariant } from '../lib/format'
 
 interface DescribeResp {
   workflowExecutionInfo: {
@@ -34,116 +52,182 @@ export function WorkflowDetailPage() {
   const [sp] = useSearchParams()
   const runId = sp.get('runId') ?? ''
   const namespace = ns!
-  useRealtime(namespace)
   const qs = new URLSearchParams({
     'execution.workflowId': workflowId!,
     'execution.runId': runId,
   }).toString()
   const url = `/v1/tasks/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(workflowId!)}?${qs}`
-  const { data, error, isLoading } = useSWR<DescribeResp>(url)
+  const { data, error, isLoading, mutate } = useFetch<DescribeResp>(url)
 
-  if (error) return <ErrorState error={error} />
-  if (isLoading || !data) {
-    return (
-      <section className="space-y-4">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-7 w-64" />
-        <Skeleton className="h-4 w-96" />
-        <Card><CardContent><Skeleton className="h-32" /></CardContent></Card>
-      </section>
-    )
-  }
+  useTaskEvents(namespace, () => void mutate(), [
+    'workflow.canceled',
+    'workflow.terminated',
+    'workflow.signaled',
+  ])
+
+  if (error) return <ErrorState error={error as Error} />
+  if (isLoading || !data) return <LoadingState />
 
   const info = data.workflowExecutionInfo
   const runQs = runId ? `?runId=${encodeURIComponent(runId)}` : ''
 
   return (
-    <section className="space-y-6">
+    <YStack gap="$5">
       <Link
         to={`/namespaces/${encodeURIComponent(namespace)}/workflows`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        style={{ textDecoration: 'none', color: 'inherit' }}
       >
-        <ChevronLeft size={14} /> workflows
+        <XStack items="center" gap="$1.5" hoverStyle={{ opacity: 0.8 }}>
+          <ChevronLeft size={14} color="#7e8794" />
+          <Text fontSize="$2" color="$placeholderColor">
+            workflows
+          </Text>
+        </XStack>
       </Link>
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold">{info.execution.workflowId}</h2>
-          <p className="font-mono text-sm text-muted-foreground">{info.execution.runId}</p>
-        </div>
+
+      <XStack items="flex-start" justify="space-between" gap="$3">
+        <YStack gap="$1" flex={1}>
+          <H1 size="$7" color="$color" fontWeight="600">
+            {info.execution.workflowId}
+          </H1>
+          <Text fontFamily={'ui-monospace, SFMono-Regular, monospace' as never} fontSize="$2" color="$placeholderColor">
+            {info.execution.runId}
+          </Text>
+        </YStack>
         <Link
           to={`/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(info.execution.workflowId)}/history${runQs}`}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          style={{ textDecoration: 'none' }}
         >
-          <History size={14} /> Full history
+          <Button size="$2" borderWidth={1} borderColor="$borderColor">
+            <XStack items="center" gap="$1.5">
+              <History size={14} />
+              <Text fontSize="$2">Full history</Text>
+            </XStack>
+          </Button>
         </Link>
-      </header>
+      </XStack>
 
-      <Tabs defaultValue="summary">
-        <TabsList>
-          <TabsTrigger value="summary">Summary</TabsTrigger>
-          <TabsTrigger value="call-stack">Call stack</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="summary" orientation="horizontal" flexDirection="column">
+        <Tabs.List
+          borderBottomWidth={1}
+          borderBottomColor="$borderColor"
+          gap="$2"
+          self="flex-start"
+        >
+          <TabTrigger value="summary">Summary</TabTrigger>
+          <TabTrigger value="call-stack">Call stack</TabTrigger>
+          <TabTrigger value="history">History</TabTrigger>
+        </Tabs.List>
 
-        <TabsContent value="summary">
-          <Card>
-            <CardContent>
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <Field label="Type">{info.type.name}</Field>
-                <Field label="Status">
-                  <Badge variant={statusVariant(info.status)}>
-                    {info.status.replace(/^WORKFLOW_EXECUTION_STATUS_/, '').toLowerCase()}
-                  </Badge>
-                </Field>
-                <Field label="Task queue">
-                  {info.taskQueue ? (
-                    <Link
-                      to={`/namespaces/${encodeURIComponent(namespace)}/task-queues/${encodeURIComponent(info.taskQueue)}`}
-                      className="text-primary hover:underline"
-                    >
+        <Tabs.Content value="summary" mt="$4">
+          <Card p="$4" bg="$background" borderColor="$borderColor" borderWidth={1}>
+            <YStack gap="$3">
+              <Field label="Type">{info.type.name}</Field>
+              <Field label="Status">
+                <Badge variant={statusVariant(info.status)}>{shortStatus(info.status)}</Badge>
+              </Field>
+              <Field label="Task queue">
+                {info.taskQueue ? (
+                  <Link
+                    to={`/namespaces/${encodeURIComponent(namespace)}/task-queues/${encodeURIComponent(info.taskQueue)}`}
+                    style={{ textDecoration: 'none' }}
+                  >
+                    <Text fontSize="$2" color={'#86efac' as never}>
                       {info.taskQueue}
-                    </Link>
-                  ) : (
-                    data.executionConfig?.taskQueue?.name ?? '—'
-                  )}
-                </Field>
-                <Field label="History events">{info.historyLength ?? '—'}</Field>
-                <Field label="Started">
+                    </Text>
+                  </Link>
+                ) : (
+                  <Text fontSize="$2" color="$color">
+                    {data.executionConfig?.taskQueue?.name ?? '—'}
+                  </Text>
+                )}
+              </Field>
+              <Field label="History events">
+                <Text fontSize="$2" color="$color">
+                  {info.historyLength ?? '—'}
+                </Text>
+              </Field>
+              <Field label="Started">
+                <Text fontSize="$2" color="$color">
                   {info.startTime ? new Date(info.startTime).toLocaleString() : '—'}
-                </Field>
-                <Field label="Closed">
+                </Text>
+              </Field>
+              <Field label="Closed">
+                <Text fontSize="$2" color="$color">
                   {info.closeTime ? new Date(info.closeTime).toLocaleString() : 'running'}
-                </Field>
-              </dl>
-            </CardContent>
+                </Text>
+              </Field>
+            </YStack>
           </Card>
-        </TabsContent>
+        </Tabs.Content>
 
-        <TabsContent value="call-stack">
+        <Tabs.Content value="call-stack" mt="$4">
           <CallStackPane
             ns={namespace}
             workflowId={info.execution.workflowId}
             runId={info.execution.runId}
             running={info.status === 'WORKFLOW_EXECUTION_STATUS_RUNNING'}
           />
-        </TabsContent>
+        </Tabs.Content>
 
-        <TabsContent value="history">
-          <HistoryPreview ns={namespace} workflowId={info.execution.workflowId} runId={info.execution.runId} />
-        </TabsContent>
+        <Tabs.Content value="history" mt="$4">
+          <Card p="$4" bg="$background" borderColor="$borderColor" borderWidth={1}>
+            <YStack gap="$3">
+              <Text fontSize="$2" color="$placeholderColor">
+                The full event timeline lives on its own page so it can paginate
+                large histories without crowding the summary.
+              </Text>
+              <Link
+                to={`/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(info.execution.workflowId)}/history${runQs}`}
+                style={{ textDecoration: 'none' }}
+              >
+                <XStack items="center" gap="$1.5">
+                  <History size={14} color="#86efac" />
+                  <Text fontSize="$2" color={'#86efac' as never}>
+                    Open full history
+                  </Text>
+                </XStack>
+              </Link>
+            </YStack>
+          </Card>
+        </Tabs.Content>
       </Tabs>
-    </section>
+    </YStack>
   )
 }
 
-interface CallStackPaneProps {
+function TabTrigger({ value, children }: { value: string; children: React.ReactNode }) {
+  return (
+    <Tabs.Tab value={value} px="$3" py="$2" unstyled bg="transparent">
+      <Text fontSize="$2" color="$color">
+        {children}
+      </Text>
+    </Tabs.Tab>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <XStack items="center" gap="$3">
+      <Text width={140} fontSize="$2" color="$placeholderColor">
+        {label}
+      </Text>
+      <YStack flex={1}>{children}</YStack>
+    </XStack>
+  )
+}
+
+function CallStackPane({
+  ns,
+  workflowId,
+  runId,
+  running,
+}: {
   ns: string
   workflowId: string
   runId: string
   running: boolean
-}
-
-function CallStackPane({ ns, workflowId, runId, running }: CallStackPaneProps) {
+}) {
   const [stack, setStack] = useState<string | null>(null)
   const [err, setErr] = useState<{ status: number; message: string } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -155,7 +239,7 @@ function CallStackPane({ ns, workflowId, runId, running }: CallStackPaneProps) {
     try {
       const resp = await apiPost<{ stack?: string }>(
         `/v1/tasks/namespaces/${encodeURIComponent(ns)}/workflows/${encodeURIComponent(workflowId)}/query?runId=${encodeURIComponent(runId)}`,
-        { queryType: '__stack_trace' }
+        { queryType: '__stack_trace' },
       )
       setStack(resp?.stack ?? '')
     } catch (e) {
@@ -171,121 +255,59 @@ function CallStackPane({ ns, workflowId, runId, running }: CallStackPaneProps) {
 
   if (!running) {
     return (
-      <Alert>
-        <AlertTitle>Stack trace requires a running workflow</AlertTitle>
-        <AlertDescription>
-          This workflow is not running, so there is no live stack trace to query.
-          Re-open while the workflow is in progress to capture a snapshot.
-        </AlertDescription>
+      <Alert title="Stack trace requires a running workflow">
+        This workflow is not running, so there is no live stack trace to query.
+        Re-open while the workflow is in progress to capture a snapshot.
       </Alert>
     )
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          Calls <code className="font-mono text-xs">QueryWorkflow(__stack_trace)</code> on the
-          worker.
-        </p>
-        <Button size="sm" variant="ghost" onClick={load} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          {loading ? 'Querying…' : 'Capture stack'}
+    <YStack gap="$3">
+      <XStack items="center" justify="space-between">
+        <Text fontSize="$2" color="$placeholderColor">
+          Calls QueryWorkflow(__stack_trace) on the worker.
+        </Text>
+        <Button size="$2" chromeless onPress={load} disabled={loading}>
+          <XStack items="center" gap="$1.5">
+            {loading ? <Spinner size="small" /> : <RefreshCw size={14} color="#7e8794" />}
+            <Text fontSize="$2">{loading ? 'Querying…' : 'Capture stack'}</Text>
+          </XStack>
         </Button>
-      </div>
+      </XStack>
 
       {err ? (
         err.status === 501 ? (
-          <Alert>
-            <AlertTitle>Worker SDK runtime not yet shipped</AlertTitle>
-            <AlertDescription>
-              Stack-trace queries land when the worker SDK runtime ships. Until
-              then the engine returns 501 — that's the honest answer rather than
-              a fabricated frame.
-            </AlertDescription>
+          <Alert title="Worker SDK runtime not yet shipped">
+            Stack-trace queries land when the worker SDK runtime ships. Until then
+            the engine returns 501 — that's the honest answer rather than a
+            fabricated frame.
           </Alert>
         ) : (
-          <Alert variant="destructive">
-            <AlertTitle>Query failed</AlertTitle>
-            <AlertDescription>{err.message}</AlertDescription>
+          <Alert variant="destructive" title="Query failed">
+            {err.message}
           </Alert>
         )
       ) : stack !== null ? (
         stack ? (
-          <Card>
-            <CardContent>
-              <pre className="overflow-auto rounded bg-muted/30 p-3 text-xs">{stack}</pre>
-            </CardContent>
+          <Card p="$3" bg="$background" borderColor="$borderColor" borderWidth={1}>
+            <Text fontFamily={'ui-monospace, SFMono-Regular, monospace' as never} fontSize="$1" color="$color">
+              {stack}
+            </Text>
           </Card>
         ) : (
-          <Alert>
-            <AlertTitle>Empty stack</AlertTitle>
-            <AlertDescription>
-              The worker returned an empty stack — the workflow may be parked
-              between activities.
-            </AlertDescription>
+          <Alert title="Empty stack">
+            The worker returned an empty stack — the workflow may be parked
+            between activities.
           </Alert>
         )
       ) : (
-        <Card>
-          <CardContent className="text-sm text-muted-foreground">
-            Click <em>Capture stack</em> to query the worker.
-          </CardContent>
+        <Card p="$4" bg="$background" borderColor="$borderColor" borderWidth={1}>
+          <Text fontSize="$2" color="$placeholderColor">
+            Click Capture stack to query the worker.
+          </Text>
         </Card>
       )}
-    </div>
+    </YStack>
   )
-}
-
-interface HistoryPreviewProps {
-  ns: string
-  workflowId: string
-  runId: string
-}
-
-function HistoryPreview({ ns, workflowId, runId }: HistoryPreviewProps) {
-  const qs = runId ? `?runId=${encodeURIComponent(runId)}` : ''
-  return (
-    <Card>
-      <CardContent className="space-y-3 text-sm">
-        <p className="text-muted-foreground">
-          The full event timeline lives on its own page so it can paginate
-          large histories without crowding the summary.
-        </p>
-        <Link
-          to={`/namespaces/${encodeURIComponent(ns)}/workflows/${encodeURIComponent(workflowId)}/history${qs}`}
-          className="inline-flex items-center gap-1.5 text-primary hover:underline"
-        >
-          <History size={14} /> Open full history
-        </Link>
-      </CardContent>
-    </Card>
-  )
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd>{children}</dd>
-    </>
-  )
-}
-
-function statusVariant(
-  s: string
-): 'success' | 'destructive' | 'warning' | 'muted' | 'default' {
-  switch (s) {
-    case 'WORKFLOW_EXECUTION_STATUS_RUNNING':
-    case 'WORKFLOW_EXECUTION_STATUS_COMPLETED':
-      return 'success'
-    case 'WORKFLOW_EXECUTION_STATUS_FAILED':
-    case 'WORKFLOW_EXECUTION_STATUS_TIMED_OUT':
-    case 'WORKFLOW_EXECUTION_STATUS_TERMINATED':
-      return 'destructive'
-    case 'WORKFLOW_EXECUTION_STATUS_CANCELED':
-      return 'warning'
-    default:
-      return 'muted'
-  }
 }
