@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@hanzogui/admin':
+        specifier: file:../../gui/code/ui-admin
+        version: file:../../gui/code/ui-admin(@hanzogui/lucide-icons-2@7.0.0(react-dom@19.2.5(react@19.2.5))(react-native-svg@15.15.4(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(hanzogui@102.0.0-rc.41-hanzoai.1(react-dom@19.2.5(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-router-dom@7.14.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)
       '@hanzogui/config':
         specifier: 7.0.0
         version: 7.0.0(react-dom@19.2.5(react@19.2.5))(react-native-reanimated@4.3.0(react-native-worklets@0.8.1(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)
@@ -586,6 +589,14 @@ packages:
     resolution: {integrity: sha512-jkwDyVwEue+6fgM1igoiR8B0BbxiChucheXZu/ZieQgaybdYoRGZVM/nPViBNGgHMbZLn0IVcnh6dqqupw7hhw==}
     peerDependencies:
       react: '>=19'
+
+  '@hanzogui/admin@file:../../gui/code/ui-admin':
+    resolution: {directory: ../../gui/code/ui-admin, type: directory}
+    peerDependencies:
+      '@hanzogui/lucide-icons-2': '>=7.0.0'
+      hanzogui: '>=102.0.0-rc.41-hanzoai.1'
+      react: '>=19'
+      react-router-dom: '>=7'
 
   '@hanzogui/alert-dialog@102.0.0-rc.41-hanzoai.1':
     resolution: {integrity: sha512-64L9wsZgyQ5P+eXTCAJfE2OEPJGBm7VgL1S8wv5X3N5EcdeOyd8PZklYN0mq25CyHNCu8qICB8/PPpx/4m0vPA==}
@@ -3882,6 +3893,13 @@ snapshots:
       - react-native-worklets-core
       - sf-symbols-typescript
       - zeego
+
+  '@hanzogui/admin@file:../../gui/code/ui-admin(@hanzogui/lucide-icons-2@7.0.0(react-dom@19.2.5(react@19.2.5))(react-native-svg@15.15.4(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(hanzogui@102.0.0-rc.41-hanzoai.1(react-dom@19.2.5(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-router-dom@7.14.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)':
+    dependencies:
+      '@hanzogui/lucide-icons-2': 7.0.0(react-dom@19.2.5(react@19.2.5))(react-native-svg@15.15.4(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)
+      hanzogui: 102.0.0-rc.41-hanzoai.1(react-dom@19.2.5(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)
+      react: 19.2.5
+      react-router-dom: 7.14.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
 
   '@hanzogui/alert-dialog@102.0.0-rc.41-hanzoai.1(react-dom@19.2.5(react@19.2.5))(react-native@0.85.2(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.5))(react@19.2.5)':
     dependencies:
