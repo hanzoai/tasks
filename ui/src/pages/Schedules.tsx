@@ -1,7 +1,10 @@
 import useSWR from 'swr'
 import { useParams } from 'react-router-dom'
 import type { Schedule } from '../lib/api'
-import { ErrorState } from './Namespaces'
+import { Card } from '../components/ui/card'
+import { Skeleton } from '../components/ui/skeleton'
+import { ErrorState } from '../components/ErrorState'
+import { Empty } from '../components/Empty'
 
 interface ListResp {
   schedules?: Schedule[]
@@ -11,33 +14,51 @@ export function SchedulesPage() {
   const { ns } = useParams()
   const url = `/v1/tasks/namespaces/${encodeURIComponent(ns!)}/schedules`
   const { data, error, isLoading } = useSWR<ListResp>(url)
+
   if (error) return <ErrorState error={error} />
-  if (isLoading) return <p className="text-zinc-400">Loading schedules…</p>
+  if (isLoading) {
+    return (
+      <section className="space-y-4">
+        <Skeleton className="h-7 w-48" />
+        <Card className="py-6">
+          <Skeleton className="h-5 w-3/4 mx-6" />
+        </Card>
+      </section>
+    )
+  }
   const rows = data?.schedules ?? []
+
   return (
-    <section>
-      <h2 className="text-lg font-medium mb-4">Schedules <span className="text-zinc-500 text-sm">({rows.length})</span></h2>
+    <section className="space-y-4">
+      <header className="flex items-center justify-between">
+        <h2 className="text-lg font-medium">
+          Schedules <span className="text-muted-foreground text-sm">({rows.length})</span>
+        </h2>
+      </header>
+
       {rows.length === 0 ? (
-        <p className="text-zinc-400">No schedules defined in <code>{ns}</code>.</p>
+        <Empty
+          title={`No schedules in ${ns}`}
+          hint="Create one with the Hanzo Tasks SDK; the UI surface is read-only for now."
+        />
       ) : (
-        <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800 bg-zinc-900/50">
+        <Card className="py-0 overflow-hidden divide-y divide-border">
           {rows.map((s) => (
-            <div key={s.scheduleId} className="px-4 py-3">
+            <div key={s.scheduleId} className="px-5 py-3.5">
               <p className="font-medium">{s.scheduleId}</p>
-              <p className="text-xs text-zinc-500 mt-1">{describeSpec(s)}</p>
+              <p className="text-xs text-muted-foreground mt-1">{describeSpec(s)}</p>
             </div>
           ))}
-        </div>
+        </Card>
       )}
     </section>
   )
 }
 
 function describeSpec(s: Schedule): string {
-  const spec = s.schedule?.spec
+  const spec = s.spec
   if (!spec) return 'no spec'
-  if (spec.cronString && spec.cronString.length) return `cron: ${spec.cronString.join(', ')}`
-  if (spec.interval && spec.interval.length) return `every ${spec.interval.map((i) => i.interval).join(', ')}`
-  if (spec.calendar && spec.calendar.length) return 'calendar'
+  if (spec.cronString?.length) return `cron: ${spec.cronString.join(', ')}`
+  if (spec.interval?.length) return `every ${spec.interval.map((i: { interval: string }) => i.interval).join(', ')}`
   return 'custom'
 }
