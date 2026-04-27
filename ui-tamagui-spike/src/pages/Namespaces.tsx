@@ -4,12 +4,9 @@ import { useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, H2, Text, XStack, YStack } from 'hanzogui'
 import { ChevronRight } from '@hanzogui/lucide-icons-2'
+import { Badge, Empty, ErrorState, LoadingState, humanTTL, useFetch } from '@hanzogui/admin'
 import type { Namespace } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
 import { useTaskEvents } from '../lib/events'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
-import { Badge } from '../components/Badge'
-import { humanTTL } from '../lib/format'
 
 export function NamespacesPage() {
   const url = '/v1/tasks/namespaces?pageSize=200'
