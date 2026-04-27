@@ -1,13 +1,9 @@
-// Realtime event tail. Subscribes to GET /v1/tasks/events (SSE) and
-// fires a callback when relevant transitions arrive. Pages call
-// useTaskEvents(ns, onEvent, [...kinds]) to revalidate their slice
-// without a full reload.
-//
-// useRealtime(ns) is a passive subscription that just keeps the SSE
-// connection warm — it doesn't dispatch anywhere. Use it on pages
-// that don't yet have a per-page mutate hook.
+// Realtime event tail for tasks. Thin wrapper over `useEvents` from
+// @hanzogui/admin that pins the SSE URL to /v1/tasks/events and adds
+// the namespace-scoping filter the tasks server emits.
 
-import { useEffect } from 'react'
+import { useCallback } from 'react'
+import { useEvents } from '@hanzogui/admin'
 
 export type EventKind =
   | 'workflow.started'
@@ -32,7 +28,7 @@ export interface TaskEvent {
   data?: unknown
 }
 
-const KINDS: EventKind[] = [
+const ALL_KINDS: EventKind[] = [
   'workflow.started',
   'workflow.canceled',
   'workflow.terminated',
@@ -53,28 +49,18 @@ export function useTaskEvents(
   onEvent: (event: TaskEvent) => void,
   kindFilter?: EventKind[],
 ) {
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const es = new EventSource('/v1/tasks/events')
-    const handle = (e: MessageEvent) => {
-      let event: TaskEvent
-      try {
-        event = JSON.parse(e.data)
-      } catch {
-        return
-      }
-      if (ns && event.namespace && event.namespace !== ns) return
-      if (kindFilter && !kindFilter.includes(event.kind)) return
-      onEvent(event)
-    }
-    KINDS.forEach((k) => es.addEventListener(k, handle as EventListener))
-    es.onmessage = handle
-    es.onerror = () => {
-      // Browser auto-reconnects. Surface as banner in a follow-up.
-    }
-    return () => {
-      KINDS.forEach((k) => es.removeEventListener(k, handle as EventListener))
-      es.close()
-    }
-  }, [ns, onEvent, kindFilter])
+  const filter = useCallback(
+    (event: TaskEvent) => {
+      if (ns && event.namespace && event.namespace !== ns) return false
+      if (kindFilter && !kindFilter.includes(event.kind)) return false
+      return true
+    },
+    [ns, kindFilter],
+  )
+  useEvents<TaskEvent>({
+    url: '/v1/tasks/events',
+    kinds: kindFilter ?? ALL_KINDS,
+    filter,
+    onEvent,
+  })
 }

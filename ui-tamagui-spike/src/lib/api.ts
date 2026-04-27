@@ -1,58 +1,11 @@
-// Thin fetch wrapper over the hanzoai/tasks HTTP API at /v1/tasks/*.
-// The browser is the only HTTP caller; every other client speaks the
-// canonical ZAP binary transport on _tasks._tcp:9999. There is no
-// /api/ prefix and no v2 — append-only opcode evolution behind /v1.
+// Tasks-specific API surface. Transport (apiPost / apiDelete /
+// ApiError / useFetch) lives in @hanzogui/admin. This file only owns
+// the wire-shape types that match pkg/tasks/types.go JSON tags.
+//
+// There is no /api/ prefix and no v2 — append-only opcode evolution
+// behind /v1.
 
-export class ApiError extends Error {
-  constructor(public status: number, public body: unknown, message?: string) {
-    super(message ?? `HTTP ${status}`)
-    this.name = 'ApiError'
-  }
-}
-
-export async function fetcher<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: 'application/json' } })
-  const contentType = res.headers.get('content-type') || ''
-  const body: unknown = contentType.includes('application/json')
-    ? await res.json().catch(() => null)
-    : await res.text().catch(() => null)
-  if (!res.ok) {
-    const msg =
-      body && typeof body === 'object' && 'error' in body
-        ? String((body as { error: unknown }).error)
-        : `${path} → ${res.status}`
-    throw new ApiError(res.status, body, msg)
-  }
-  return body as T
-}
-
-export async function apiPost<T = unknown>(path: string, payload: unknown): Promise<T> {
-  return apiSend('POST', path, payload)
-}
-
-export async function apiDelete<T = unknown>(path: string): Promise<T> {
-  return apiSend('DELETE', path, undefined)
-}
-
-async function apiSend<T>(method: string, path: string, payload: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers:
-      payload === undefined
-        ? { Accept: 'application/json' }
-        : { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: payload === undefined ? undefined : JSON.stringify(payload),
-  })
-  const body: unknown = await res.json().catch(() => null)
-  if (!res.ok) {
-    const msg =
-      body && typeof body === 'object' && 'error' in body
-        ? String((body as { error: unknown }).error)
-        : `${method} ${path} → ${res.status}`
-    throw new ApiError(res.status, body, msg)
-  }
-  return body as T
-}
+export { ApiError, apiPost, apiDelete } from '@hanzogui/admin'
 
 // ── shape types — match pkg/tasks/types.go JSON tags exactly ────────
 
@@ -139,4 +92,29 @@ export interface Identity {
   namespace: string
   role: string
   grantTime: string
+}
+
+// statusVariant maps WORKFLOW_EXECUTION_STATUS_* constants to the
+// admin Badge variant enum. Tasks-specific because Workflow status
+// strings are tasks-specific.
+import type { StatusVariant } from '@hanzogui/admin'
+
+export function statusVariant(s: string): StatusVariant {
+  switch (s) {
+    case 'WORKFLOW_EXECUTION_STATUS_RUNNING':
+    case 'WORKFLOW_EXECUTION_STATUS_COMPLETED':
+      return 'success'
+    case 'WORKFLOW_EXECUTION_STATUS_FAILED':
+    case 'WORKFLOW_EXECUTION_STATUS_TIMED_OUT':
+    case 'WORKFLOW_EXECUTION_STATUS_TERMINATED':
+      return 'destructive'
+    case 'WORKFLOW_EXECUTION_STATUS_CANCELED':
+      return 'warning'
+    default:
+      return 'muted'
+  }
+}
+
+export function shortStatus(s: string) {
+  return s.replace(/^WORKFLOW_EXECUTION_STATUS_/, '').toLowerCase()
 }

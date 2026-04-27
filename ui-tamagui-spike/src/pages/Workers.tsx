@@ -4,9 +4,7 @@
 
 import { useParams } from 'react-router-dom'
 import { H2, Text, XStack, YStack } from 'hanzogui'
-import { useFetch } from '../lib/useFetch'
-import { Alert } from '../components/Alert'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
+import { Alert, Empty, ErrorState, LoadingState, useFetch } from '@hanzogui/admin'
 
 interface WorkersResp {
   workers?: unknown[]

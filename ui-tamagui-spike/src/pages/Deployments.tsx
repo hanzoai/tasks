@@ -2,10 +2,8 @@
 
 import { useParams } from 'react-router-dom'
 import { Card, H2, Text, XStack, YStack } from 'hanzogui'
+import { Badge, Empty, ErrorState, LoadingState, useFetch } from '@hanzogui/admin'
 import type { Deployment } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
-import { Badge } from '../components/Badge'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
 
 export function DeploymentsPage() {
   const { ns } = useParams()

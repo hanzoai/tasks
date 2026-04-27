@@ -21,12 +21,16 @@ import {
   Globe,
   Plug,
 } from '@hanzogui/lucide-icons-2'
+import {
+  Badge,
+  CopyField,
+  Empty,
+  ErrorState,
+  LoadingState,
+  humanTTL,
+  useFetch,
+} from '@hanzogui/admin'
 import type { Identity, Namespace } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
-import { Badge } from '../components/Badge'
-import { CopyField } from '../components/CopyField'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
-import { humanTTL } from '../lib/format'
 
 export function NamespaceDetailPage() {
   const { ns } = useParams()
