@@ -25,14 +25,30 @@ import (
 //   dp/<ns>/<seriesName>        → Deployment
 //   nx/<ns>/<endpointName>      → NexusEndpoint
 //   id/<ns>/<email>             → Identity
+//
+// When orgPrefix is non-empty, every key is transparently prefixed with
+// "org:<id>:". Empty prefix preserves legacy embedded-use behavior.
 type store struct {
-	mu sync.RWMutex
-	db database.Database
+	mu        *sync.RWMutex
+	db        database.Database
+	orgPrefix string
 }
 
 func newStore() *store {
-	return &store{db: memdb.New()}
+	return &store{mu: &sync.RWMutex{}, db: memdb.New()}
 }
+
+// withOrg returns a view of s that prefixes every key with "org:<id>:".
+// The view shares the underlying db + mutex; concurrent use is safe.
+// orgID == "" returns s unchanged.
+func (s *store) withOrg(orgID string) *store {
+	if orgID == "" {
+		return s
+	}
+	return &store{mu: s.mu, db: s.db, orgPrefix: "org:" + orgID + ":"}
+}
+
+func (s *store) k(key string) string { return s.orgPrefix + key }
 
 func (s *store) close() error {
 	if s == nil || s.db == nil {
@@ -49,14 +65,14 @@ func (s *store) put(key string, v any) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.db.Put([]byte(key), body)
+	return s.db.Put([]byte(s.k(key)), body)
 }
 
 // get loads JSON at key into v. Returns false if missing.
 func (s *store) get(key string, v any) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	body, err := s.db.Get([]byte(key))
+	body, err := s.db.Get([]byte(s.k(key)))
 	if err == database.ErrNotFound {
 		return false, nil
 	}
@@ -73,7 +89,7 @@ func (s *store) get(key string, v any) (bool, error) {
 func (s *store) del(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.db.Delete([]byte(key)); err != nil && err != database.ErrNotFound {
+	if err := s.db.Delete([]byte(s.k(key))); err != nil && err != database.ErrNotFound {
 		return err
 	}
 	return nil
@@ -83,13 +99,17 @@ func (s *store) del(key string) error {
 // in lexicographic order. The iteration snapshots under the read lock
 // and releases before calling fn, so the callback is free to put/del
 // against the same store without deadlocking the RWMutex.
+//
+// Keys yielded to fn have the org prefix stripped — callers see the
+// canonical "ns/", "wf/<ns>/…" layout regardless of org scoping.
 func (s *store) list(prefix string, fn func(key string, body []byte) error) error {
 	type kv struct{ k, v []byte }
 	var snap []kv
+	scanPrefix := s.k(prefix)
 	if err := func() error {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
-		it := s.db.NewIteratorWithPrefix([]byte(prefix))
+		it := s.db.NewIteratorWithPrefix([]byte(scanPrefix))
 		defer it.Release()
 		for it.Next() {
 			k := append([]byte(nil), it.Key()...)
@@ -100,8 +120,9 @@ func (s *store) list(prefix string, fn func(key string, body []byte) error) erro
 	}(); err != nil {
 		return err
 	}
+	strip := len(s.orgPrefix)
 	for _, e := range snap {
-		if err := fn(string(e.k), e.v); err != nil {
+		if err := fn(string(e.k[strip:]), e.v); err != nil {
 			return err
 		}
 	}
