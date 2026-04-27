@@ -1,23 +1,20 @@
 # syntax=docker/dockerfile:1
 #
-# hanzoai/tasks — native ZAP daemon. One Go binary with embedded Vite UI.
+# hanzoai/tasks — native ZAP daemon. One Go binary with embedded SPA.
 # No CGO. No SQLite driver. No protobuf. No gRPC.
-
-FROM node:22-alpine AS ui-build
-RUN corepack enable pnpm
-WORKDIR /ui
-COPY ui/package.json ui/pnpm-lock.yaml* ui/tsconfig.json ui/vite.config.ts ui/index.html ui/postcss.config.js ui/tailwind.config.js ./
-RUN pnpm install --frozen-lockfile --prefer-offline
-COPY ui/src ./src
-COPY ui/public ./public
-RUN pnpm build
+#
+# Precondition: ui/dist/ must be populated before `docker build`.
+# Run scripts/sync-admin-ui.sh locally, or the CI pipeline builds
+# admin-tasks (~/work/hanzo/gui/code/admin-tasks) and rsyncs the
+# resulting dist/ into this build context. ui/embed.go imports the
+# bundle via //go:embed all:dist at compile time.
 
 FROM golang:1.26-alpine AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-COPY --from=ui-build /ui/dist ./ui/dist
+RUN test -f ui/dist/index.html || (echo "ui/dist missing — run scripts/sync-admin-ui.sh before docker build" >&2 && exit 1)
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tasksd ./cmd/tasksd
 
 FROM alpine:3.21
