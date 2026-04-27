@@ -1,5 +1,10 @@
-# Hanzo Tasks ingress — single host for UI + REST.
-#   tasks.hanzo.ai → tasks:80   (HTTP: UI + /healthz + /v1/tasks/*)
+# Hanzo Tasks ingress — single Service, two hostnames.
+#   tasks.hanzo.ai     → tasks:80  (UI + REST + /healthz)
+#   tasks-api.hanzo.ai → tasks:80  (REST only — same backend, kept for
+#                                   external workers using the legacy
+#                                   gRPC hostname; native binary speaks
+#                                   ZAP on :9999 in-cluster, not over
+#                                   ingress)
 # ZAP wire (port 9999) is reached over the cluster service directly by
 # in-cluster workers; no external ingress needed for binary RPC.
 
@@ -18,10 +23,20 @@ metadata:
 spec:
   ingressClassName: ingress
   tls:
-    - hosts: [tasks.hanzo.ai]
+    - hosts: [tasks.hanzo.ai, tasks-api.hanzo.ai]
       secretName: tasks-hanzo-ai-tls
   rules:
     - host: tasks.hanzo.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tasks
+                port:
+                  number: 80
+    - host: tasks-api.hanzo.ai
       http:
         paths:
           - path: /
