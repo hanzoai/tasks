@@ -25,10 +25,13 @@ func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 // be inspectable end-to-end and for higher-level callers to depend on
 // the API while the worker SDK runtime lands.
 type engine struct {
-	store *store
+	store  *store
+	broker *broker
 }
 
-func newEngine(s *store) *engine { return &engine{store: s} }
+func newEngine(s *store) *engine {
+	return &engine{store: s, broker: newBroker()}
+}
 
 // ── ids ─────────────────────────────────────────────────────────────
 
@@ -60,7 +63,11 @@ func (e *engine) RegisterNamespace(ns Namespace) error {
 		ns.NamespaceInfo.Region = "embedded"
 	}
 	ns.IsActive = ns.NamespaceInfo.State == "NAMESPACE_STATE_REGISTERED"
-	return e.store.put("ns/"+ns.NamespaceInfo.Name, ns)
+	if err := e.store.put("ns/"+ns.NamespaceInfo.Name, ns); err != nil {
+		return err
+	}
+	e.broker.publish(Event{Kind: "namespace.registered", Namespace: ns.NamespaceInfo.Name, Data: ns})
+	return nil
 }
 
 func (e *engine) DescribeNamespace(name string) (*Namespace, bool, error) {
@@ -106,6 +113,13 @@ func (e *engine) StartWorkflow(ns, workflowId, runId string, typ TypeRef, taskQu
 	if err := e.store.put(key, wf); err != nil {
 		return nil, err
 	}
+	e.broker.publish(Event{
+		Kind:       "workflow.started",
+		Namespace:  ns,
+		WorkflowID: workflowId,
+		RunID:      runId,
+		Data:       wf,
+	})
 	return &wf, nil
 }
 
@@ -136,7 +150,7 @@ func (e *engine) ListWorkflows(ns string) ([]WorkflowExecution, error) {
 	return listInto[WorkflowExecution](e.store, fmt.Sprintf("wf/%s/", ns))
 }
 
-func (e *engine) terminalTransition(ns, workflowId, runId, status string) (*WorkflowExecution, error) {
+func (e *engine) terminalTransition(ns, workflowId, runId, status, evKind string) (*WorkflowExecution, error) {
 	wf, ok, err := e.DescribeWorkflow(ns, workflowId, runId)
 	if !ok {
 		return nil, fmt.Errorf("workflow %s/%s/%s not found", ns, workflowId, runId)
@@ -149,15 +163,22 @@ func (e *engine) terminalTransition(ns, workflowId, runId, status string) (*Work
 	if err := e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, wf.Execution.WorkflowId, wf.Execution.RunId), wf); err != nil {
 		return nil, err
 	}
+	e.broker.publish(Event{
+		Kind:       evKind,
+		Namespace:  ns,
+		WorkflowID: wf.Execution.WorkflowId,
+		RunID:      wf.Execution.RunId,
+		Data:       wf,
+	})
 	return wf, nil
 }
 
 func (e *engine) CancelWorkflow(ns, workflowId, runId string) (*WorkflowExecution, error) {
-	return e.terminalTransition(ns, workflowId, runId, "WORKFLOW_EXECUTION_STATUS_CANCELED")
+	return e.terminalTransition(ns, workflowId, runId, "WORKFLOW_EXECUTION_STATUS_CANCELED", "workflow.canceled")
 }
 
 func (e *engine) TerminateWorkflow(ns, workflowId, runId string) (*WorkflowExecution, error) {
-	return e.terminalTransition(ns, workflowId, runId, "WORKFLOW_EXECUTION_STATUS_TERMINATED")
+	return e.terminalTransition(ns, workflowId, runId, "WORKFLOW_EXECUTION_STATUS_TERMINATED", "workflow.terminated")
 }
 
 func (e *engine) SignalWorkflow(ns, workflowId, runId, name string, payload any) error {
@@ -166,9 +187,17 @@ func (e *engine) SignalWorkflow(ns, workflowId, runId, name string, payload any)
 		return fmt.Errorf("workflow not found")
 	}
 	wf.HistoryLen++
-	_ = name
-	_ = payload
-	return e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, wf.Execution.WorkflowId, wf.Execution.RunId), wf)
+	if err := e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, wf.Execution.WorkflowId, wf.Execution.RunId), wf); err != nil {
+		return err
+	}
+	e.broker.publish(Event{
+		Kind:       "workflow.signaled",
+		Namespace:  ns,
+		WorkflowID: wf.Execution.WorkflowId,
+		RunID:      wf.Execution.RunId,
+		Data:       map[string]any{"signal": name, "input": payload, "history_length": wf.HistoryLen},
+	})
+	return nil
 }
 
 // ── schedules ───────────────────────────────────────────────────────
@@ -181,7 +210,11 @@ func (e *engine) CreateSchedule(s Schedule) error {
 		return fmt.Errorf("namespace required")
 	}
 	s.Info.CreateTime = nowRFC3339()
-	return e.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s)
+	if err := e.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s); err != nil {
+		return err
+	}
+	e.broker.publish(Event{Kind: "schedule.created", Namespace: s.Namespace, ScheduleID: s.ScheduleId, Data: s})
+	return nil
 }
 
 func (e *engine) DescribeSchedule(ns, id string) (*Schedule, bool, error) {
