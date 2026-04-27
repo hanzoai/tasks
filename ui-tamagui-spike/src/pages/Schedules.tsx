@@ -5,10 +5,9 @@
 import { useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Card, H2, Text, XStack, YStack } from 'hanzogui'
+import { Empty, ErrorState, LoadingState, useFetch } from '@hanzogui/admin'
 import type { Schedule } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
 import { useTaskEvents } from '../lib/events'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
 
 interface ListResp {
   schedules?: Schedule[]
