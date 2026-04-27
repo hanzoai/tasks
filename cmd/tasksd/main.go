@@ -92,6 +92,10 @@ func buildHTTP(ns string, srv *tasks.Embedded) http.Handler {
 	// /v1/tasks/* — browser JSON shim, mirrors ZAP opcode dispatch.
 	apiHandler := srv.HTTPHandler()
 	mux.Handle("/v1/tasks/", apiHandler)
+	// /v1/tasks/mcp — MCP (Model Context Protocol) JSON-RPC.
+	mux.Handle("/v1/tasks/mcp", srv.MCPHandler())
+	// /v1/tasks/events — SSE realtime tail of every state-changing event.
+	mux.Handle("/v1/tasks/events", srv.EventsHandler())
 
 	// React Router has basename="/_/tasks". The bundle is only valid at
 	// that prefix; serving it at "/" produces a blank page because
