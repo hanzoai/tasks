@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/hanzoai/tasks/pkg/auth"
 	"github.com/luxfi/zap"
 )
 
@@ -119,12 +120,14 @@ func (e *Embedded) MCPHandler() http.Handler { return e.mcpHandler() }
 func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 
 // HTTPHandler returns the browser-only JSON shim. Mirrors zapHandlers.
+// Per-request engine is scoped to the X-Org-Id header attached upstream
+// by hanzoai/gateway (see pkg/auth). Empty org → legacy unscoped store.
 func (e *Embedded) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
-	en := e.engine
 
 	// /v1/tasks/namespaces
 	mux.HandleFunc("/v1/tasks/namespaces", func(w http.ResponseWriter, r *http.Request) {
+		en := e.engine.WithOrg(auth.OrgID(r.Context()))
 		switch r.Method {
 		case http.MethodGet:
 			rows, err := en.ListNamespaces()
@@ -146,6 +149,7 @@ func (e *Embedded) HTTPHandler() http.Handler {
 
 	// /v1/tasks/namespaces/{ns}[/...]
 	mux.HandleFunc("/v1/tasks/namespaces/", func(w http.ResponseWriter, r *http.Request) {
+		en := e.engine.WithOrg(auth.OrgID(r.Context()))
 		rest := strings.TrimPrefix(r.URL.Path, "/v1/tasks/namespaces/")
 		parts := strings.Split(rest, "/")
 		ns := parts[0]
