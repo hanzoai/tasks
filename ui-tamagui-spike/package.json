@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@hanzogui/admin": "file:../../gui/code/ui-admin",
     "@hanzogui/config": "7.0.0",
     "@hanzogui/core": "102.0.0-rc.41-hanzoai.1",
     "@hanzogui/lucide-icons-2": "7.0.0",
