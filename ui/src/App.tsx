@@ -5,10 +5,12 @@ import {
   BookOpen,
   Heart,
   Layers,
+  ListChecks,
   Network,
   Rocket,
   Timer,
   Upload,
+  Users,
   Workflow,
 } from 'lucide-react'
 import { cn } from './lib/utils'
@@ -75,6 +77,12 @@ function Sidebar({ ns }: { ns?: string }) {
         </NavItem>
         <NavItem to={ent ? `${ent}/deployments` : '/namespaces'} icon={Rocket} disabled={!ns}>
           Deployments
+        </NavItem>
+        <NavItem to={ent ? `${ent}/task-queues` : '/namespaces'} icon={ListChecks} disabled={!ns}>
+          Task Queues
+        </NavItem>
+        <NavItem to={ent ? `${ent}/workers` : '/namespaces'} icon={Users} disabled={!ns}>
+          Workers
         </NavItem>
         <NavItem to={ent ? `${ent}/nexus` : '/namespaces'} icon={Network} disabled={!ns}>
           Nexus
