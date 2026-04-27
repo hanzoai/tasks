@@ -415,6 +415,63 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 		}
 		return ""
 	}
+	strOr := func(req map[string]any, k, def string) string {
+		if v, ok := req[k].(string); ok && v != "" {
+			return v
+		}
+		return def
+	}
+	// scheduleSDK marshals an engine Schedule into the SDK shape.
+	scheduleSDK := func(s *Schedule) map[string]any {
+		return map[string]any{
+			"id": s.ScheduleId,
+			"spec": map[string]any{
+				"cron": s.Spec.CronString,
+			},
+			"action": map[string]any{
+				"workflow_type": s.Action.WorkflowType.Name,
+				"task_queue":    s.Action.TaskQueue,
+			},
+			"paused": s.State.Paused,
+		}
+	}
+	_ = scheduleSDK
+	// wfInfoSDK marshals an engine WorkflowExecution into the
+	// snake_case SDK shape (WorkflowExecutionInfo) expected over ZAP.
+	wfInfoSDK := func(wf *WorkflowExecution) map[string]any {
+		statusInt := 0
+		switch wf.Status {
+		case "WORKFLOW_EXECUTION_STATUS_RUNNING":
+			statusInt = 1
+		case "WORKFLOW_EXECUTION_STATUS_COMPLETED":
+			statusInt = 2
+		case "WORKFLOW_EXECUTION_STATUS_FAILED":
+			statusInt = 3
+		case "WORKFLOW_EXECUTION_STATUS_CANCELED":
+			statusInt = 4
+		case "WORKFLOW_EXECUTION_STATUS_TERMINATED":
+			statusInt = 5
+		case "WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW":
+			statusInt = 6
+		}
+		out := map[string]any{
+			"workflow_id":    wf.Execution.WorkflowId,
+			"run_id":         wf.Execution.RunId,
+			"workflow_type":  wf.Type.Name,
+			"status":         statusInt,
+			"history_length": wf.HistoryLen,
+			"task_queue":     wf.TaskQueue,
+		}
+		// Empty time strings won't parse with omitempty time.Time on the
+		// SDK side; only include when present.
+		if wf.StartTime != "" {
+			out["start_time"] = wf.StartTime
+		}
+		if wf.CloseTime != "" {
+			out["close_time"] = wf.CloseTime
+		}
+		return out
+	}
 	return map[uint16]zap.Handler{
 		opHealth: wrap(func(_ map[string]any) (any, uint32, string) {
 			return map[string]any{"service": "tasks", "status": "ok", "namespace": defaultNS}, 200, ""
@@ -447,100 +504,168 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			return ns, 200, ""
 		}),
 		opStartWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
-			ns := str(req, "namespace")
-			typeName := ""
-			if t, ok := req["workflowType"].(map[string]any); ok {
-				typeName, _ = t["name"].(string)
+			ns := strOr(req, "namespace", defaultNS)
+			typeName := strOr(req, "workflow_type", "")
+			if typeName == "" {
+				if t, ok := req["workflowType"].(map[string]any); ok {
+					typeName, _ = t["name"].(string)
+				}
 			}
-			tq := ""
-			if q, ok := req["taskQueue"].(map[string]any); ok {
-				tq, _ = q["name"].(string)
+			tq := strOr(req, "task_queue", "")
+			if tq == "" {
+				if q, ok := req["taskQueue"].(map[string]any); ok {
+					tq, _ = q["name"].(string)
+				}
 			}
-			wf, err := en.StartWorkflow(ns, str(req, "workflowId"), str(req, "runId"), TypeRef{Name: typeName}, tq, req["input"])
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			wf, err := en.StartWorkflow(ns, wfID, runID, TypeRef{Name: typeName}, tq, req["input"])
 			if err != nil {
 				return nil, 400, err.Error()
 			}
-			return wf, 200, ""
+			// SDK expects {run_id} response shape.
+			return map[string]any{"run_id": wf.Execution.RunId, "workflow_id": wf.Execution.WorkflowId}, 200, ""
 		}),
 		opListWorkflows: wrap(func(req map[string]any) (any, uint32, string) {
-			rows, err := en.ListWorkflows(str(req, "namespace"))
+			ns := strOr(req, "namespace", defaultNS)
+			rows, err := en.ListWorkflows(ns)
 			if err != nil {
 				return nil, 500, err.Error()
 			}
-			return map[string]any{"executions": rows}, 200, ""
+			out := make([]map[string]any, 0, len(rows))
+			for i := range rows {
+				out = append(out, wfInfoSDK(&rows[i]))
+			}
+			return map[string]any{"executions": out}, 200, ""
 		}),
 		opDescribeWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
-			wf, ok, err := en.DescribeWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"))
+			ns := strOr(req, "namespace", defaultNS)
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			wf, ok, err := en.DescribeWorkflow(ns, wfID, runID)
 			if err != nil {
 				return nil, 500, err.Error()
 			}
 			if !ok {
 				return nil, 404, "workflow not found"
 			}
-			return wf, 200, ""
+			return map[string]any{"info": wfInfoSDK(wf)}, 200, ""
 		}),
 		opSignalWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
-			err := en.SignalWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"), str(req, "signalName"), req["payload"])
+			ns := strOr(req, "namespace", defaultNS)
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			sigName := strOr(req, "signal_name", str(req, "signalName"))
+			err := en.SignalWorkflow(ns, wfID, runID, sigName, req["input"])
 			if err != nil {
 				return nil, 400, err.Error()
 			}
 			return map[string]string{"status": "signaled"}, 200, ""
 		}),
 		opCancelWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
-			wf, err := en.CancelWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"))
+			ns := strOr(req, "namespace", defaultNS)
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			wf, err := en.CancelWorkflow(ns, wfID, runID)
 			if err != nil {
 				return nil, 400, err.Error()
 			}
-			return wf, 200, ""
+			return wfInfoSDK(wf), 200, ""
 		}),
 		opTerminateWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
-			wf, err := en.TerminateWorkflow(str(req, "namespace"), str(req, "workflowId"), str(req, "runId"))
+			ns := strOr(req, "namespace", defaultNS)
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			wf, err := en.TerminateWorkflow(ns, wfID, runID)
 			if err != nil {
 				return nil, 400, err.Error()
 			}
-			return wf, 200, ""
+			return wfInfoSDK(wf), 200, ""
 		}),
 		opListSchedules: wrap(func(req map[string]any) (any, uint32, string) {
-			rows, err := en.ListSchedules(str(req, "namespace"))
+			ns := strOr(req, "namespace", defaultNS)
+			rows, err := en.ListSchedules(ns)
 			if err != nil {
 				return nil, 500, err.Error()
 			}
-			return map[string]any{"schedules": rows}, 200, ""
+			out := make([]map[string]any, 0, len(rows))
+			for i := range rows {
+				out = append(out, scheduleSDK(&rows[i]))
+			}
+			return map[string]any{"schedules": out}, 200, ""
 		}),
 		opCreateSchedule: wrap(func(req map[string]any) (any, uint32, string) {
-			var s Schedule
-			if b, _ := json.Marshal(req); b != nil {
-				_ = json.Unmarshal(b, &s)
+			ns := strOr(req, "namespace", defaultNS)
+			id := strOr(req, "schedule_id", str(req, "scheduleId"))
+			s := Schedule{ScheduleId: id, Namespace: ns}
+			// Re-marshal the "schedule" field and let the SDK shape's
+			// custom UnmarshalJSON handle it via a side struct.
+			if sched, ok := req["schedule"].(map[string]any); ok {
+				if spec, ok := sched["spec"].(map[string]any); ok {
+					if cron, ok := spec["cron"].([]any); ok {
+						for _, c := range cron {
+							if cs, ok := c.(string); ok {
+								s.Spec.CronString = append(s.Spec.CronString, cs)
+							}
+						}
+					}
+				}
+				if action, ok := sched["action"].(map[string]any); ok {
+					s.Action.WorkflowType.Name, _ = action["workflow_type"].(string)
+					s.Action.TaskQueue, _ = action["task_queue"].(string)
+				}
+				if p, ok := sched["paused"].(bool); ok {
+					s.State.Paused = p
+				}
+			}
+			if s.ScheduleId == "" {
+				return nil, 400, "schedule_id required"
 			}
 			if err := en.CreateSchedule(s); err != nil {
 				return nil, 400, err.Error()
 			}
-			return s, 200, ""
+			return scheduleSDK(&s), 200, ""
 		}),
 		opDescribeSchedule: wrap(func(req map[string]any) (any, uint32, string) {
-			s, ok, err := en.DescribeSchedule(str(req, "namespace"), str(req, "scheduleId"))
+			ns := strOr(req, "namespace", defaultNS)
+			id := strOr(req, "schedule_id", str(req, "scheduleId"))
+			s, ok, err := en.DescribeSchedule(ns, id)
 			if err != nil {
 				return nil, 500, err.Error()
 			}
 			if !ok {
 				return nil, 404, "schedule not found"
 			}
-			return s, 200, ""
+			return scheduleSDK(s), 200, ""
 		}),
 		opDeleteSchedule: wrap(func(req map[string]any) (any, uint32, string) {
-			if err := en.DeleteSchedule(str(req, "namespace"), str(req, "scheduleId")); err != nil {
+			ns := strOr(req, "namespace", defaultNS)
+			id := strOr(req, "schedule_id", str(req, "scheduleId"))
+			if err := en.DeleteSchedule(ns, id); err != nil {
 				return nil, 400, err.Error()
 			}
 			return map[string]string{"status": "deleted"}, 200, ""
 		}),
 		opPauseSchedule: wrap(func(req map[string]any) (any, uint32, string) {
-			if err := en.PauseSchedule(str(req, "namespace"), str(req, "scheduleId"), true, str(req, "note")); err != nil {
+			ns := strOr(req, "namespace", defaultNS)
+			id := strOr(req, "schedule_id", str(req, "scheduleId"))
+			paused := true
+			if p, ok := req["paused"].(bool); ok {
+				paused = p
+			}
+			if err := en.PauseSchedule(ns, id, paused, str(req, "note")); err != nil {
 				return nil, 400, err.Error()
 			}
-			return map[string]string{"status": "paused"}, 200, ""
+			out := "paused"
+			if !paused {
+				out = "running"
+			}
+			return map[string]string{"status": out}, 200, ""
 		}),
 		opUnpauseSchedule: wrap(func(req map[string]any) (any, uint32, string) {
-			if err := en.PauseSchedule(str(req, "namespace"), str(req, "scheduleId"), false, ""); err != nil {
+			ns := strOr(req, "namespace", defaultNS)
+			id := strOr(req, "schedule_id", str(req, "scheduleId"))
+			if err := en.PauseSchedule(ns, id, false, ""); err != nil {
 				return nil, 400, err.Error()
 			}
 			return map[string]string{"status": "running"}, 200, ""
