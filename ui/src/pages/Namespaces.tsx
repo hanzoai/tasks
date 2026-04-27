@@ -7,8 +7,10 @@ import { Badge } from '../components/ui/badge'
 import { Skeleton } from '../components/ui/skeleton'
 import { ErrorState } from '../components/ErrorState'
 import { Empty } from '../components/Empty'
+import { useRealtime } from '../lib/events'
 
 export function NamespacesPage() {
+  useRealtime()
   const { data, error, isLoading } = useSWR<{ namespaces: Namespace[] }>(
     '/v1/tasks/namespaces?pageSize=200'
   )
