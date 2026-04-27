@@ -1,21 +1,21 @@
-// Package ui exposes the built Vite bundle as an embedded filesystem.
+// Package ui exposes the built admin-tasks (Tamagui) bundle as an
+// embedded filesystem.
 //
-// The bundle is produced by `pnpm --prefix ui build` (CI: the
-// Dockerfile runs it in a node:22 stage, then the final image stage
-// compiles tasksd with this embed). The resulting ui/dist is baked
-// into the tasksd binary — no external static-assets directory, no
-// sidecar, no separate deploy.
+// The bundle is produced externally in the @hanzo/gui workspace at
+// ~/work/hanzo/gui/code/admin-tasks (Vite + Tamagui) and synced into
+// ui/dist by scripts/sync-admin-ui.sh. The synced dist/ is baked into
+// the tasksd binary at compile time — no external static-assets
+// directory, no sidecar, no separate deploy. See ui/README.md.
 //
-// Mount the returned handler at / in the Temporal frontend HTTP
-// router so it serves the SPA shell for every non-API request:
+// Mount the returned handler at /_/tasks/ in the tasksd HTTP router
+// so it serves the SPA shell for every non-API request:
 //
 //	import tasksui "github.com/hanzoai/tasks/ui"
-//	router.PathPrefix("/").Handler(tasksui.Handler())
+//	router.PathPrefix("/_/tasks/").Handler(http.StripPrefix("/_/tasks", tasksui.Handler()))
 //
-// The Temporal gRPC-Gateway routes under /api/v1/* take precedence
-// via earlier route registration; everything else falls through to
-// the SPA, which supports client-side routing (react-router) so
-// deep links survive reload.
+// API routes under /v1/* take precedence via earlier route
+// registration; anything else falls through to the SPA, which uses
+// client-side routing so deep links survive reload.
 package ui
 
 import (
@@ -30,8 +30,8 @@ import (
 var distFS embed.FS
 
 // FS returns the embedded built-UI filesystem rooted at dist/.
-// Empty when the build step has not run (dev workflow uses the Vite
-// dev server instead — see ui/vite.config.ts).
+// Empty when scripts/sync-admin-ui.sh has not been run (dev workflow:
+// run the Vite dev server inside ~/work/hanzo/gui/code/admin-tasks).
 func FS() fs.FS {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
@@ -98,7 +98,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request, root fs.FS) {
 	if err != nil {
 		// No UI bundled — report honestly. Operators see this in
 		// logs and in the browser; no blank screen in production.
-		http.Error(w, "tasks UI not built (run `pnpm --prefix ui build`)", http.StatusServiceUnavailable)
+		http.Error(w, "tasks UI not built (run scripts/sync-admin-ui.sh)", http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
