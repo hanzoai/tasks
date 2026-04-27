@@ -16,9 +16,14 @@ import react from '@vitejs/plugin-react'
 //   UI:  /_/tasks/*          (embedded SPA)
 //   API: /v1/tasks/*         (gofiber JSON over ZAP-backed handlers)
 // No /api/, no split paths, no dual mounts.
+const APP_VERSION = process.env.VITE_APP_VERSION ?? '2.45.3'
+
 export default defineConfig({
   plugins: [react()],
   base: '/_/tasks/',
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(APP_VERSION),
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
