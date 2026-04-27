@@ -1,17 +1,15 @@
-// Task queue detail — workflows targeting one queue + summary cards
-// for total / running / closed.
-
-import { useCallback } from 'react'
+import useSWR from 'swr'
 import { Link, useParams } from 'react-router-dom'
-import { Card, H1, H2, H3, Text, XStack, YStack } from 'hanzogui'
-import { ChevronLeft } from '@hanzogui/lucide-icons-2'
+import { ChevronLeft } from 'lucide-react'
 import type { WorkflowExecution } from '../lib/api'
-import { useFetch } from '../lib/useFetch'
-import { useTaskEvents } from '../lib/events'
-import { Alert } from '../components/Alert'
-import { Badge } from '../components/Badge'
-import { Empty, ErrorState, LoadingState } from '../components/Empty'
-import { formatTimestamp, shortStatus, statusVariant } from '../lib/format'
+import { Card, CardContent } from '../components/ui/card'
+import { Badge } from '../components/ui/badge'
+import { Skeleton } from '../components/ui/skeleton'
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert'
+import { ErrorState } from '../components/ErrorState'
+import { Empty } from '../components/Empty'
+import { useRealtime } from '../lib/events'
+import { formatTimestamp } from '../components/LocalTimeIndicator'
 
 interface DetailResp {
   name: string
@@ -24,70 +22,56 @@ export function TaskQueueDetailPage() {
   const { ns, queue } = useParams()
   const namespace = ns!
   const queueName = queue!
+  useRealtime(namespace)
   const url = `/v1/tasks/namespaces/${encodeURIComponent(namespace)}/task-queues/${encodeURIComponent(queueName)}`
-  const { data, error, isLoading, mutate } = useFetch<DetailResp>(url)
+  const { data, error, isLoading } = useSWR<DetailResp>(url)
 
-  const onEvent = useCallback(() => {
-    void mutate()
-  }, [mutate])
-
-  useTaskEvents(namespace, onEvent, [
-    'workflow.started',
-    'workflow.canceled',
-    'workflow.terminated',
-  ])
-
-  if (error) return <ErrorState error={error as Error} />
-  if (isLoading || !data) return <LoadingState />
+  if (error) return <ErrorState error={error} />
+  if (isLoading || !data) {
+    return (
+      <section className="space-y-4">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-7 w-72" />
+        <Card><CardContent><Skeleton className="h-32" /></CardContent></Card>
+      </section>
+    )
+  }
 
   const rows = data.workflows ?? []
 
   return (
-    <YStack gap="$5">
+    <section className="space-y-6">
       <Link
         to={`/namespaces/${encodeURIComponent(namespace)}/task-queues`}
-        style={{ textDecoration: 'none', color: 'inherit' }}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
-        <XStack items="center" gap="$1.5" hoverStyle={{ opacity: 0.8 }}>
-          <ChevronLeft size={14} color="#7e8794" />
-          <Text fontSize="$2" color="$placeholderColor">
-            task queues
-          </Text>
-        </XStack>
+        <ChevronLeft size={14} /> task queues
       </Link>
+      <header className="space-y-1">
+        <p className="text-xs uppercase tracking-wider text-muted-foreground">Task queue</p>
+        <h2 className="text-xl font-semibold">{data.name}</h2>
+      </header>
 
-      <YStack gap="$1">
-        <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-          TASK QUEUE
-        </Text>
-        <H1 size="$7" color="$color" fontWeight="600">
-          {data.name}
-        </H1>
-      </YStack>
-
-      <XStack gap="$3" flexWrap="wrap">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         <SummaryCard label="Total workflows" value={data.total} />
         <SummaryCard label="Running" value={data.running} accent="success" />
-        <SummaryCard
-          label="Closed"
-          value={Math.max(0, data.total - data.running)}
-          accent="muted"
-        />
-      </XStack>
+        <SummaryCard label="Closed" value={Math.max(0, data.total - data.running)} accent="muted" />
+      </div>
 
-      <Alert title="Workers">
-        Worker registration lands with the worker SDK runtime (pkg/sdk/worker). Until
-        then, this view derives queue stats from listed workflows.
+      <Alert>
+        <AlertTitle>Workers</AlertTitle>
+        <AlertDescription>
+          Worker registration lands with the worker SDK runtime
+          (<code className="font-mono text-xs">pkg/sdk/worker</code>). Until then,
+          this view derives queue stats from listed workflows.
+        </AlertDescription>
       </Alert>
 
-      <XStack items="baseline" justify="space-between">
-        <H3 size="$5" color="$color" fontWeight="500">
-          Workflows on this queue{' '}
-          <Text fontSize="$2" color="$placeholderColor" fontWeight="400">
-            ({rows.length})
-          </Text>
-        </H3>
-      </XStack>
+      <header className="flex items-center justify-between">
+        <h3 className="text-base font-medium">
+          Workflows on this queue <span className="text-sm text-muted-foreground">({rows.length})</span>
+        </h3>
+      </header>
 
       {rows.length === 0 ? (
         <Empty
@@ -95,57 +79,44 @@ export function TaskQueueDetailPage() {
           hint="Workflows are bucketed by their taskQueue field on start."
         />
       ) : (
-        <Card overflow="hidden" bg="$background" borderColor="$borderColor" borderWidth={1}>
-          <XStack
-            bg={'rgba(255,255,255,0.03)' as never}
-            px="$4"
-            py="$2.5"
-            borderBottomWidth={1}
-            borderBottomColor="$borderColor"
-          >
-            <HeaderCell flex={1.2}>Status</HeaderCell>
-            <HeaderCell flex={3}>Workflow ID</HeaderCell>
-            <HeaderCell flex={2}>Type</HeaderCell>
-            <HeaderCell flex={2}>Start</HeaderCell>
-          </XStack>
-          {rows.map((wf, i) => (
-            <XStack
-              key={`${wf.execution.workflowId}-${wf.execution.runId}`}
-              px="$4"
-              py="$2.5"
-              borderBottomWidth={i === rows.length - 1 ? 0 : 1}
-              borderBottomColor="$borderColor"
-              hoverStyle={{ background: 'rgba(255,255,255,0.04)' as never }}
-              items="center"
-            >
-              <YStack flex={1.2} px="$2">
-                <Badge variant={statusVariant(wf.status)}>{shortStatus(wf.status)}</Badge>
-              </YStack>
-              <YStack flex={3} px="$2">
-                <Link
-                  to={`/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(wf.execution.workflowId)}?runId=${encodeURIComponent(wf.execution.runId)}`}
-                  style={{ textDecoration: 'none' }}
+        <Card className="overflow-hidden py-0">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2.5 font-medium">Status</th>
+                <th className="px-4 py-2.5 font-medium">Workflow ID</th>
+                <th className="px-4 py-2.5 font-medium">Type</th>
+                <th className="px-4 py-2.5 font-medium">Start</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((wf) => (
+                <tr
+                  key={`${wf.execution.workflowId}-${wf.execution.runId}`}
+                  className="hover:bg-accent/30"
                 >
-                  <Text fontSize="$2" color={'#86efac' as never} numberOfLines={1}>
-                    {wf.execution.workflowId}
-                  </Text>
-                </Link>
-              </YStack>
-              <YStack flex={2} px="$2">
-                <Text fontSize="$2" color="$color">
-                  {wf.type.name}
-                </Text>
-              </YStack>
-              <YStack flex={2} px="$2">
-                <Text fontSize="$2" color="$placeholderColor">
-                  {wf.startTime ? formatTimestamp(new Date(wf.startTime)) : '—'}
-                </Text>
-              </YStack>
-            </XStack>
-          ))}
+                  <td className="px-4 py-2.5">
+                    <Badge variant={statusVariant(wf.status)}>{shortStatus(wf.status)}</Badge>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Link
+                      to={`/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(wf.execution.workflowId)}?runId=${encodeURIComponent(wf.execution.runId)}`}
+                      className="text-primary hover:underline"
+                    >
+                      {wf.execution.workflowId}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2.5">{wf.type.name}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground">
+                    {wf.startTime ? formatTimestamp(new Date(wf.startTime)) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
       )}
-    </YStack>
+    </section>
   )
 }
 
@@ -158,35 +129,44 @@ function SummaryCard({
   value: number
   accent?: 'success' | 'muted'
 }) {
-  const color =
-    accent === 'success' ? '#86efac' : accent === 'muted' ? '#7e8794' : '#f2f2f2'
   return (
-    <Card
-      p="$4"
-      bg="$background"
-      borderColor="$borderColor"
-      borderWidth={1}
-      flexBasis={200}
-      flexGrow={1}
-    >
-      <YStack gap="$1">
-        <Text fontSize="$1" color="$placeholderColor" fontWeight="600" letterSpacing={0.4}>
-          {label.toUpperCase()}
-        </Text>
-        <H2 size="$8" fontWeight="600" color={color as never}>
+    <Card className="py-4">
+      <CardContent className="space-y-1">
+        <p className="text-xs uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p
+          className={
+            accent === 'success'
+              ? 'text-2xl font-semibold text-emerald-400 dark:text-emerald-300'
+              : accent === 'muted'
+              ? 'text-2xl font-semibold text-muted-foreground'
+              : 'text-2xl font-semibold'
+          }
+        >
           {value}
-        </H2>
-      </YStack>
+        </p>
+      </CardContent>
     </Card>
   )
 }
 
-function HeaderCell({ children, flex }: { children: React.ReactNode; flex: number }) {
-  return (
-    <YStack flex={flex} px="$2">
-      <Text fontSize="$1" fontWeight="500" color="$placeholderColor">
-        {children}
-      </Text>
-    </YStack>
-  )
+function shortStatus(s: string) {
+  return s.replace(/^WORKFLOW_EXECUTION_STATUS_/, '').toLowerCase()
+}
+
+function statusVariant(
+  s: string
+): 'success' | 'destructive' | 'warning' | 'muted' | 'default' {
+  switch (s) {
+    case 'WORKFLOW_EXECUTION_STATUS_RUNNING':
+    case 'WORKFLOW_EXECUTION_STATUS_COMPLETED':
+      return 'success'
+    case 'WORKFLOW_EXECUTION_STATUS_FAILED':
+    case 'WORKFLOW_EXECUTION_STATUS_TIMED_OUT':
+    case 'WORKFLOW_EXECUTION_STATUS_TERMINATED':
+      return 'destructive'
+    case 'WORKFLOW_EXECUTION_STATUS_CANCELED':
+      return 'warning'
+    default:
+      return 'muted'
+  }
 }

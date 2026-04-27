@@ -37,9 +37,10 @@ export async function apiDelete<T = unknown>(path: string): Promise<T> {
 async function apiSend<T>(method: string, path: string, payload: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
-    headers: payload === undefined
-      ? { Accept: 'application/json' }
-      : { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers:
+      payload === undefined
+        ? { Accept: 'application/json' }
+        : { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: payload === undefined ? undefined : JSON.stringify(payload),
   })
   const body: unknown = await res.json().catch(() => null)
@@ -82,6 +83,10 @@ export interface WorkflowExecution {
   input?: unknown
   result?: unknown
   memo?: unknown
+}
+
+export interface WorkflowsResponse {
+  executions?: WorkflowExecution[]
 }
 
 export interface Schedule {
