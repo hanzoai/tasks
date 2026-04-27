@@ -112,6 +112,12 @@ func (e *Embedded) Stop(ctx context.Context) error {
 	return nil
 }
 
+// MCPHandler returns the JSON-RPC 2.0 MCP endpoint.
+func (e *Embedded) MCPHandler() http.Handler { return e.mcpHandler() }
+
+// EventsHandler returns the SSE realtime stream of engine events.
+func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
+
 // HTTPHandler returns the browser-only JSON shim. Mirrors zapHandlers.
 func (e *Embedded) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
