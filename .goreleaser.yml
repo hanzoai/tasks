@@ -12,10 +12,6 @@ archives:
   - id: default
     ids:
       - tasksd
-      - temporal-cassandra-tool
-      - temporal-sql-tool
-      - temporal-elasticsearch-tool
-      - tdbg
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
@@ -27,54 +23,6 @@ builds:
   - id: tasksd
     dir: cmd/tasksd
     binary: tasksd
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-  - id: temporal-cassandra-tool
-    dir: cmd/tools/cassandra
-    binary: temporal-cassandra-tool
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-  - id: temporal-sql-tool
-    dir: cmd/tools/sql
-    binary: temporal-sql-tool
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-  - id: temporal-elasticsearch-tool
-    dir: cmd/tools/elasticsearch
-    binary: temporal-elasticsearch-tool
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-  - id: tdbg
-    dir: cmd/tools/tdbg
-    binary: tdbg
     env:
       - CGO_ENABLED=0
     goos:
