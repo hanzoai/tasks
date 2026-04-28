@@ -211,21 +211,12 @@ func organizeBinaries() error {
 		fmt.Println("Multi-architecture build: amd64, arm64")
 	}
 
-	// Admin tool binaries (for admin-tools image)
-	adminToolBinaries := []string{
-		"temporal-cassandra-tool",
-		"temporal-sql-tool",
-		"temporal-elasticsearch-tool",
-		"tdbg",
-	}
-
-	// Server binaries (for server image)
-	serverBinaries := []string{
+	// Server binary only. Admin tool binaries (cassandra/sql/
+	// elasticsearch/tdbg) were dropped 2026-04-26 with the temporal
+	// fork. Schema drivers return when persistence lands in pkg/tasks.
+	binaries := []string{
 		"tasksd",
 	}
-
-	// All binaries to copy
-	binaries := append(adminToolBinaries, serverBinaries...)
 
 	// Validate architecture and binary names
 	archReg := regexp.MustCompile(`^[a-z0-9]+$`)
