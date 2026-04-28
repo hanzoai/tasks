@@ -4,7 +4,7 @@ Compiled assets only. There is no source in this directory.
 
 ## Where the source lives
 
-`~/work/hanzo/gui/code/admin-tasks/` — Vite + Tamagui app in the
+`~/work/hanzo/gui/code/admin-tasks/` — Vite + @hanzo/gui app in the
 `@hanzo/gui` workspace. Build it from there:
 
 ```
