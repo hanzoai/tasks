@@ -56,8 +56,11 @@ jobs:
           docker push ${REGISTRY}:${{ steps.tags.outputs.sha }}-amd64
 
   build-arm64:
-    # Native arm64 on AWS EKS hanzo-arm64 (t4g.xlarge Graviton2).
-    # DOKS has no arm64 nodes; that's why the scaleset lives on AWS.
+    # arm64 paused — DOKS catalog has no arm64 droplets (133 sizes
+    # inspected, all amd64 Intel/AMD). The hanzo-build-linux-arm64
+    # ARC scale set was uninstalled 2026-04-27. Re-enable when DO
+    # ships arm64 instances by flipping `if:` back to true.
+    if: false
     runs-on: hanzo-build-linux-arm64
     steps:
       - uses: actions/checkout@v5
@@ -85,7 +88,10 @@ jobs:
           docker push ${REGISTRY}:${{ steps.tags.outputs.sha }}-arm64
 
   manifest:
-    needs: [build-amd64, build-arm64]
+    # arm64 build is currently skipped, so manifest only needs amd64.
+    # When arm64 returns, add it back to `needs:` and the manifest
+    # will pick up both arches automatically via `arches_for()`.
+    needs: [build-amd64]
     runs-on: hanzo-build-linux-amd64
     steps:
       - name: Login to GHCR
