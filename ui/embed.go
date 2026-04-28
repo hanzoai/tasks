@@ -1,8 +1,8 @@
-// Package ui exposes the built admin-tasks (Tamagui) bundle as an
+// Package ui exposes the built admin-tasks (@hanzo/gui) bundle as an
 // embedded filesystem.
 //
 // The bundle is produced externally in the @hanzo/gui workspace at
-// ~/work/hanzo/gui/code/admin-tasks (Vite + Tamagui) and synced into
+// ~/work/hanzo/gui/code/admin-tasks (Vite + @hanzo/gui) and synced into
 // ui/dist by scripts/sync-admin-ui.sh. The synced dist/ is baked into
 // the tasksd binary at compile time — no external static-assets
 // directory, no sidecar, no separate deploy. See ui/README.md.
