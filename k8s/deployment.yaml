@@ -35,7 +35,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: tasks
-          image: ghcr.io/hanzoai/tasks:v2.49.0
+          image: ghcr.io/hanzoai/tasks:v3.3.0
           imagePullPolicy: IfNotPresent
           args:
             - --zap-port=9999
