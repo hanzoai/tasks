@@ -4,7 +4,7 @@
 
 all: build
 
-# Sync the admin-tasks (Tamagui) bundle into ui/dist for go:embed.
+# Sync the admin-tasks (@hanzo/gui) bundle into ui/dist for go:embed.
 # Source lives in ~/work/hanzo/gui/code/admin-tasks. Set
 # ADMIN_TASKS_DIR=/abs/path to override.
 ui:
