@@ -97,6 +97,17 @@ func (t *Transport) Call(ctx context.Context, opcode uint16, body []byte) ([]byt
 	return out, nil
 }
 
+// Handle satisfies client.Transport. The inproc transport is request /
+// response only — there is no listener for the server to push to.
+// Callers that need server-pushed deliveries (worker tasks) must use
+// the network ZAP transport. Calling Handle is a no-op so the inproc
+// path satisfies the Transport interface without surprising callers.
+func (t *Transport) Handle(opcode uint16, fn func(from string, body []byte)) {
+	// Intentionally empty — see doc comment.
+	_ = opcode
+	_ = fn
+}
+
 // Close marks the transport closed. Subsequent Call invocations return
 // ErrClosed. Idempotent — repeated Close is a no-op. Does not stop the
 // underlying dispatcher; the dispatcher's lifetime is owned by whoever
