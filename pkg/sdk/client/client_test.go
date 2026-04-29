@@ -57,6 +57,14 @@ func (s *stubTransport) Call(ctx context.Context, op uint16, body []byte) ([]byt
 
 func (s *stubTransport) Close() error { s.closed = true; return nil }
 
+// Handle satisfies client.Transport. The stub does not deliver server-
+// pushed messages — tests that exercise push paths use a different
+// transport.
+func (s *stubTransport) Handle(opcode uint16, fn func(from string, body []byte)) {
+	_ = opcode
+	_ = fn
+}
+
 func TestDialRequiresHostPort(t *testing.T) {
 	t.Parallel()
 	if _, err := Dial(Options{}); err == nil {
