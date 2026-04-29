@@ -177,6 +177,17 @@ func (e *Embedded) HTTPHandler() http.Handler {
 		}
 	})
 
+	// /v1/tasks/nexus — cross-namespace aggregate (read-only).
+	mux.HandleFunc("/v1/tasks/nexus", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		en := e.engine.WithOrg(auth.OrgID(r.Context()))
+		rows, err := en.ListAllNexusEndpoints()
+		writeOK(w, err, map[string]any{"endpoints": rows})
+	})
+
 	// /v1/tasks/namespaces/{ns}[/...]
 	mux.HandleFunc("/v1/tasks/namespaces/", func(w http.ResponseWriter, r *http.Request) {
 		en := e.engine.WithOrg(auth.OrgID(r.Context()))
