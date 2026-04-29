@@ -148,8 +148,10 @@ func (e *Embedded) MCPHandler() http.Handler { return e.mcpHandler() }
 func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 
 // HTTPHandler returns the browser-only JSON shim. Mirrors zapHandlers.
-// Per-request engine is scoped to the X-Org-Id header attached upstream
-// by hanzoai/gateway (see pkg/auth). Empty org → legacy unscoped store.
+// Per-request engine is scoped to the X-Org-Id minted by pkg/auth from
+// the validated IAM JWT (Authorization: Bearer). Client-supplied
+// identity headers are stripped before the handler runs. Empty org →
+// legacy unscoped store (embedded/dev path only).
 func (e *Embedded) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 
