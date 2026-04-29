@@ -1367,6 +1367,12 @@ func (e *engine) ListNexusEndpoints(ns string) ([]NexusEndpoint, error) {
 	return listInto[NexusEndpoint](e.store, fmt.Sprintf("nx/%s/", ns))
 }
 
+// ListAllNexusEndpoints aggregates Nexus endpoints across all namespaces.
+// Used by the cross-namespace top-level UI route.
+func (e *engine) ListAllNexusEndpoints() ([]NexusEndpoint, error) {
+	return listInto[NexusEndpoint](e.store, "nx/")
+}
+
 // ── identities ──────────────────────────────────────────────────────
 
 func (e *engine) GrantIdentity(i Identity) error {
