@@ -97,6 +97,17 @@ func (r *registry) workflowFn(name string) (any, bool) {
 	return fn, ok
 }
 
+// workflowNames returns all registered workflow names (debug helper).
+func (r *registry) workflowNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.workflows))
+	for k := range r.workflows {
+		out = append(out, k)
+	}
+	return out
+}
+
 // activityFn returns the registered activity function for name.
 func (r *registry) activityFn(name string) (any, bool) {
 	r.mu.RLock()
