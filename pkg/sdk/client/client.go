@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -239,7 +241,7 @@ func Dial(opts Options) (Client, error) {
 		if opts.HostPort == "" {
 			return nil, errors.New("hanzo/tasks/client: Options.HostPort is required when no Transport is injected")
 		}
-		zt, err := newZAPTransport(opts.HostPort, opts.DialTimeout)
+		zt, err := newZAPTransport(opts.HostPort, opts.DialTimeout, id)
 		if err != nil {
 			return nil, err
 		}
@@ -352,9 +354,17 @@ type zapTransport struct {
 	peer string
 }
 
-func newZAPTransport(addr string, dialTimeout time.Duration) (*zapTransport, error) {
+func newZAPTransport(addr string, dialTimeout time.Duration, nodeID string) (*zapTransport, error) {
+	if nodeID == "" {
+		nodeID = "hanzo-tasks-sdk"
+	}
+	// Make node IDs unique per process so multiple workers don't
+	// collide on the server side (zap.Node dedupes by NodeID).
+	var rb [4]byte
+	_, _ = cryptorand.Read(rb[:])
+	nodeID = nodeID + "-" + hex.EncodeToString(rb[:])
 	node := zap.NewNode(zap.NodeConfig{
-		NodeID:      "hanzo-tasks-sdk",
+		NodeID:      nodeID,
 		ServiceType: "_tasks._tcp",
 		Port:        0,
 		Logger:      slog.Default(),

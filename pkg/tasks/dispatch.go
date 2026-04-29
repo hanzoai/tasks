@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -173,10 +174,16 @@ func (d *dispatcher) Subscribe(peerID, ns, queue string, kind taskKind) (string,
 	d.subs[sub.key] = append(d.subs[sub.key], sub)
 	d.byPeer[peerID] = append(d.byPeer[peerID], sub)
 
+	if dispatcherTrace {
+		fmt.Fprintf(os.Stderr, "DISPATCH subscribe peer=%s ns=%s queue=%s kind=%d sub_id=%s subs_total=%d\n", peerID, ns, queue, kind, sub.id, len(d.subs[sub.key]))
+	}
 	// Drain any pending tasks for this key.
 	d.drainLocked(sub)
 	return sub.id, nil
 }
+
+// dispatcherTrace — flip to true via env DISPATCH_TRACE=1 (set in main).
+var dispatcherTrace = os.Getenv("DISPATCH_TRACE") == "1"
 
 func (d *dispatcher) Unsubscribe(subID string) {
 	d.mu.Lock()
@@ -293,12 +300,18 @@ func (d *dispatcher) EnqueueWorkflowTask(ns, queue, workflowID, runID, workflowT
 	d.wfByToken[t.tokenStr] = t
 
 	key := subKey{ns, queue, kindWorkflow}
+	if dispatcherTrace {
+		fmt.Fprintf(os.Stderr, "DISPATCH enqueue_workflow ns=%s queue=%s wf=%s subs_for_key=%d\n", ns, queue, workflowID, len(d.subs[key]))
+	}
 	if sub := d.pickLocked(key); sub != nil {
 		t.workerPeer = sub.peerID
 		d.workflowPeer[wfKey(ns, workflowID, runID)] = sub.peerID
 		body := encodeWorkflowTaskDelivery(t)
 		if d.send != nil {
-			_ = d.send(sub.peerID, OpcodeDeliverWorkflowTask, body)
+			err := d.send(sub.peerID, OpcodeDeliverWorkflowTask, body)
+			if dispatcherTrace {
+				fmt.Fprintf(os.Stderr, "DISPATCH delivered_workflow peer=%s err=%v\n", sub.peerID, err)
+			}
 		}
 		return
 	}
