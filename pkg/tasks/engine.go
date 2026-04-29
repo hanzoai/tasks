@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
@@ -27,10 +29,11 @@ func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 type engine struct {
 	store  *store
 	broker *broker
+	disp   *dispatcher
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker()}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher()}
 }
 
 // WithOrg returns an engine view scoped to orgID. Reads and writes go
@@ -40,7 +43,7 @@ func (e *engine) WithOrg(orgID string) *engine {
 	if orgID == "" {
 		return e
 	}
-	return &engine{store: e.store.withOrg(orgID), broker: e.broker}
+	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp}
 }
 
 // ── ids ─────────────────────────────────────────────────────────────
@@ -122,6 +125,13 @@ func (e *engine) StartWorkflow(ns, workflowId, runId string, typ TypeRef, taskQu
 	key := fmt.Sprintf("wf/%s/%s/%s", ns, workflowId, runId)
 	if err := e.store.put(key, wf); err != nil {
 		return nil, err
+	}
+	if e.disp != nil {
+		var inputBytes []byte
+		if input != nil {
+			inputBytes, _ = json.Marshal(input)
+		}
+		e.disp.EnqueueWorkflowTask(ns, taskQueue, workflowId, runId, typ.Name, inputBytes)
 	}
 	e.broker.publish(Event{
 		Kind:       "workflow.started",
@@ -220,6 +230,9 @@ func (e *engine) CreateSchedule(s Schedule) error {
 		return fmt.Errorf("namespace required")
 	}
 	s.Info.CreateTime = nowRFC3339()
+	if next, ok := nextScheduleFire(s, time.Now().UTC()); ok {
+		s.Info.NextActionTime = next.UTC().Format(time.RFC3339)
+	}
 	if err := e.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s); err != nil {
 		return err
 	}
@@ -326,12 +339,11 @@ func (e *engine) ListIdentities(ns string) ([]Identity, error) {
 
 // ── cron sweeper ────────────────────────────────────────────────────
 
-// runScheduler is a stub: it polls schedules every minute and bumps
-// their action count if they are due. It does NOT yet enqueue real
-// workflow starts — that's worker-runtime work. The hook exists so
-// the UI shows non-zero action counts as time passes.
+// runScheduler ticks every 5s and fires due schedules through StartWorkflow.
+// Cron specs are parsed via robfig/cron with seconds-optional 5/6-field
+// syntax; first invalid spec is skipped without aborting the sweep.
 func (e *engine) runScheduler(stop <-chan struct{}) {
-	t := time.NewTicker(60 * time.Second)
+	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
 		select {
@@ -344,8 +356,7 @@ func (e *engine) runScheduler(stop <-chan struct{}) {
 }
 
 func (e *engine) sweepSchedules() error {
-	// Walk all schedules across namespaces. memdb has no batch ops here,
-	// so a simple list works; the volume is admin-tier.
+	now := time.Now().UTC()
 	return e.store.list("sc/", func(_ string, body []byte) error {
 		var s Schedule
 		if err := unmarshal(body, &s); err != nil {
@@ -354,10 +365,75 @@ func (e *engine) sweepSchedules() error {
 		if s.State.Paused {
 			return nil
 		}
-		s.Info.ActionCount++
-		s.Info.UpdateTime = nowRFC3339()
+		next, ok := nextScheduleFire(s, anchorTime(s, now))
+		if !ok {
+			return nil
+		}
+		// Fire any pending actions whose next-time is in the past.
+		fired := false
+		for !next.After(now) {
+			if _, err := e.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input); err != nil {
+				return err
+			}
+			s.Info.ActionCount++
+			s.Info.UpdateTime = next.UTC().Format(time.RFC3339)
+			fired = true
+			n2, ok2 := nextScheduleFire(s, next)
+			if !ok2 {
+				next = time.Time{}
+				break
+			}
+			next = n2
+		}
+		if !fired && s.Info.NextActionTime == next.UTC().Format(time.RFC3339) {
+			return nil
+		}
+		if !next.IsZero() {
+			s.Info.NextActionTime = next.UTC().Format(time.RFC3339)
+		}
 		return e.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s)
 	})
+}
+
+// anchorTime returns the timestamp from which the next cron firing
+// should be computed. Uses the last update time if present, otherwise
+// the create time, otherwise now.
+func anchorTime(s Schedule, fallback time.Time) time.Time {
+	for _, ts := range []string{s.Info.UpdateTime, s.Info.CreateTime} {
+		if ts == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			return t
+		}
+	}
+	return fallback
+}
+
+// cronParser parses both 5-field (minute precision) and 6-field
+// (with-seconds) crontab syntax. Robfig defaults to 5 fields; we add
+// the optional seconds descriptor so workflows can be sub-minute.
+var cronParser = cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+
+// nextScheduleFire computes the next fire time across all configured
+// cron strings, returning the earliest. (false, _) means the schedule
+// has no valid spec.
+func nextScheduleFire(s Schedule, after time.Time) (time.Time, bool) {
+	var earliest time.Time
+	for _, cs := range s.Spec.CronString {
+		sched, err := cronParser.Parse(cs)
+		if err != nil {
+			continue
+		}
+		t := sched.Next(after)
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+	}
+	if earliest.IsZero() {
+		return time.Time{}, false
+	}
+	return earliest, true
 }
 
 func unmarshal(b []byte, v any) error {
