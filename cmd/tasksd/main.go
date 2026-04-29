@@ -99,7 +99,12 @@ func buildHTTP(ns string, srv *tasks.Embedded) http.Handler {
 	mux.HandleFunc("/v1/tasks/health", probe)
 
 	requireID := envBool("TASKSD_REQUIRE_IDENTITY", false)
-	identity := auth.RequireIdentity(requireID)
+	validator := auth.NewValidator(auth.JWTConfig{
+		JWKSURL:  envStr("TASKSD_JWKS_URL", ""),
+		Issuer:   envStr("TASKSD_JWT_ISSUER", ""),
+		Audience: envStr("TASKSD_JWT_AUDIENCE", ""),
+	})
+	identity := auth.RequireIdentity(validator, requireID)
 
 	mux.Handle("/v1/tasks/", identity(srv.HTTPHandler()))
 	mux.Handle("/v1/tasks/mcp", identity(srv.MCPHandler()))
