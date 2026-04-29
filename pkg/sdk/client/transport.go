@@ -4,34 +4,54 @@ package client
 
 import "context"
 
-// Opcodes owned by the worker <-> matching surface. Opcodes 0x0070-0x007F
-// were originally reserved here for worker poll/respond RPCs, but the
-// canonical opcode allocation is:
+// Opcodes owned by the worker <-> matching surface. Allocation:
 //
 //	0x0050-0x005F  pkg/tasks one-shot/schedule (legacy)
 //	0x0060-0x006F  client workflow lifecycle (startWorkflow, signal, ...)
 //	0x0070-0x007F  client schedule ops (createSchedule, ...)
 //	0x0080-0x008F  client namespace ops (registerNamespace, ...)
 //	0x0090-0x009F  client health + meta
-//	0x00A0-0x00AF  worker poll / respond (see below)
+//	0x00A0-0x00AF  worker subscribe / respond + server-pushed delivery
 //
-// Worker opcodes moved up to 0x00A0 to avoid collision with the client
-// schedule ops at 0x0070-0x0073. Append-only across releases; never
-// reuse a value.
+// Server-push wire model (replaces long-poll, 2026-04-28):
+//
+//   Workers Subscribe once per (namespace, taskQueue, kind); the server
+//   pushes Deliver{Workflow,Activity}Task as work arrives, and pushes
+//   DeliverActivityResult to the workflow's worker when an activity
+//   completes. There is no polling. The authoritative wire shapes live
+//   in pkg/tasks/dispatch.go (workflowTaskDeliveryJSON,
+//   activityTaskDeliveryJSON, activityResultDeliveryJSON).
+//
+// Append-only across releases; never reuse a value. 0x00A0 and 0x00A1
+// were repurposed from Poll{Workflow,Activity}Task to
+// Subscribe{Workflow,Activity}Tasks — the old long-poll opcodes are
+// retired and not served by the native frontend.
 const (
-	OpcodePollWorkflowTask              uint16 = 0x00A0
-	OpcodePollActivityTask              uint16 = 0x00A1
-	OpcodeRespondWorkflowTaskCompleted  uint16 = 0x00A2
-	OpcodeRespondActivityTaskCompleted  uint16 = 0x00A3
-	OpcodeRespondActivityTaskFailed     uint16 = 0x00A4
-	OpcodeRecordActivityTaskHeartbeat   uint16 = 0x00A5
+	// Worker → server (Call). Subscribe returns a sub-id used by
+	// Unsubscribe.
+	OpcodeSubscribeWorkflowTasks uint16 = 0x00A0
+	OpcodeSubscribeActivityTasks uint16 = 0x00A1
 
-	// In-workflow activity scheduling (see schema/tasks.zap §
-	// "Worker → server: in-workflow activity scheduling"). The
-	// workerEnv uses these to dispatch activities without racing
-	// against the worker's own pollActivityTask loop.
+	// Worker → server (Call). Respond / heartbeat replies to a
+	// previously delivered task.
+	OpcodeRespondWorkflowTaskCompleted uint16 = 0x00A2
+	OpcodeRespondActivityTaskCompleted uint16 = 0x00A3
+	OpcodeRespondActivityTaskFailed    uint16 = 0x00A4
+	OpcodeRecordActivityTaskHeartbeat  uint16 = 0x00A5
+
+	// Worker → server (Call). Tear down a subscription.
+	OpcodeUnsubscribeTasks uint16 = 0x00A6
+
+	// Server → worker (Send). Worker registers a Handle for each.
+	OpcodeDeliverWorkflowTask   uint16 = 0x00B0
+	OpcodeDeliverActivityTask   uint16 = 0x00B1
+	OpcodeDeliverActivityResult uint16 = 0x00B2
+
+	// In-workflow activity scheduling + child workflows (see
+	// schema/tasks.zap § "Worker → server: in-workflow activity
+	// scheduling"). 0x006C (WaitActivityResult) was retired —
+	// activity results are pushed via OpcodeDeliverActivityResult.
 	OpcodeScheduleActivity   uint16 = 0x006B
-	OpcodeWaitActivityResult uint16 = 0x006C
 	OpcodeStartChildWorkflow uint16 = 0x006D
 
 	// OpcodeError is the generic error response. Any handler can
@@ -82,26 +102,50 @@ const (
 )
 
 // WorkerTransport is the wire abstraction the Worker package depends on.
-// One method per logical RPC that the worker issues against the Hanzo
-// Tasks frontend. Production implementations are backed by luxfi/zap;
-// tests inject an in-memory fake satisfying this same interface.
+// Production implementations are backed by luxfi/zap; tests inject an
+// in-memory fake satisfying this same interface.
 //
-// Return values are pre-parsed native Go types — callers never own a
-// buffer whose backing bytes belong to the transport layer.
+// Wire model (server-push, 2026-04-28):
+//
+//   The worker subscribes once per (namespace, taskQueue, kind) and
+//   registers OnWorkflowTask / OnActivityTask / OnActivityResult
+//   callbacks. The server pushes work as it arrives. The worker
+//   responds via Respond{Workflow,Activity}Task{Completed,Failed} and
+//   RecordActivityTaskHeartbeat — same as before. There is no polling.
 type WorkerTransport interface {
 	// Close tears down the underlying node. Safe to call more than
 	// once.
 	Close() error
 
-	// PollWorkflowTask issues a long-poll for the next workflow
-	// task on the given queue. The ctx carries the long-poll
-	// deadline; returning a nil task and nil error signals "idle,
-	// try again".
-	PollWorkflowTask(ctx context.Context, req PollWorkflowTaskRequest) (*WorkflowTask, error)
+	// SubscribeWorkflowTasks registers this worker to receive workflow
+	// tasks pushed by the server (opcode 0x00A0). Returns the server-
+	// minted subscription ID, used by Unsubscribe on Stop. Call once
+	// per (namespace, taskQueue) the worker handles.
+	SubscribeWorkflowTasks(ctx context.Context, req PollWorkflowTaskRequest) (subID string, err error)
 
-	// PollActivityTask is the activity counterpart of
-	// PollWorkflowTask. Same idle semantics.
-	PollActivityTask(ctx context.Context, req PollActivityTaskRequest) (*ActivityTask, error)
+	// SubscribeActivityTasks is the activity counterpart of
+	// SubscribeWorkflowTasks (opcode 0x00A1).
+	SubscribeActivityTasks(ctx context.Context, req PollActivityTaskRequest) (subID string, err error)
+
+	// Unsubscribe tears down a subscription returned by
+	// Subscribe{Workflow,Activity}Tasks (opcode 0x00A6). Idempotent.
+	Unsubscribe(ctx context.Context, subID string) error
+
+	// OnWorkflowTask installs the callback fired when the server
+	// pushes OpcodeDeliverWorkflowTask. Must be called before
+	// SubscribeWorkflowTasks so no delivery is dropped between
+	// subscribe and handler installation.
+	OnWorkflowTask(fn func(*WorkflowTask))
+
+	// OnActivityTask installs the callback fired when the server
+	// pushes OpcodeDeliverActivityTask.
+	OnActivityTask(fn func(*ActivityTask))
+
+	// OnActivityResult installs the callback fired when the server
+	// pushes OpcodeDeliverActivityResult — i.e. an activity scheduled
+	// from this workflow has completed (or failed). The workerEnv
+	// matches activityID to the pending future and settles it.
+	OnActivityResult(fn func(activityID string, result, failure []byte))
 
 	// RespondWorkflowTaskCompleted uploads the worker's commands
 	// (encoded command list) for a workflow task.
@@ -122,15 +166,9 @@ type WorkerTransport interface {
 	// ScheduleActivity asks the frontend to mint an activity task for
 	// the given type + input and return a stable id (schema/tasks.zap
 	// opcode 0x006B). The workerEnv in pkg/sdk/worker uses this from
-	// inside a workflow to dispatch activities without racing the
-	// worker's own pollActivityTask loop.
+	// inside a workflow to dispatch activities; the eventual result
+	// arrives via OpcodeDeliverActivityResult.
 	ScheduleActivity(ctx context.Context, req ScheduleActivityRequest) (*ScheduleActivityResponse, error)
-
-	// WaitActivityResult long-polls for the result of an activity id
-	// previously returned by ScheduleActivity (opcode 0x006C). A
-	// response with ready=false means "still pending" — the caller
-	// re-issues. The ctx deadline bounds a single round-trip.
-	WaitActivityResult(ctx context.Context, req WaitActivityResultRequest) (*WaitActivityResultResponse, error)
 
 	// StartChildWorkflow asks the server to start a workflow whose
 	// parent is recorded for linkage (opcode 0x006D). Returns the
@@ -170,19 +208,6 @@ type ScheduleActivityResponse struct {
 	// worker must present on RespondActivityTaskCompleted/Failed. Empty
 	// on error, populated on success.
 	TaskToken []byte
-}
-
-// WaitActivityResultRequest mirrors schema/tasks.zap:WaitActivityResultRequest.
-type WaitActivityResultRequest struct {
-	ActivityTaskID string
-	WaitMs         int64
-}
-
-// WaitActivityResultResponse mirrors schema/tasks.zap:WaitActivityResultResponse.
-type WaitActivityResultResponse struct {
-	Ready   bool
-	Result  []byte
-	Failure []byte
 }
 
 // StartChildWorkflowRequest mirrors schema/tasks.zap StartChildWorkflowRequest.

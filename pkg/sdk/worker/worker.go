@@ -1,9 +1,9 @@
 // Copyright © 2026 Hanzo AI. MIT License.
 
-// Package worker is the Hanzo Tasks worker runtime. A Worker owns
-// a pool of long-poll goroutines that claim workflow and activity
-// tasks from the Tasks frontend over luxfi/zap, dispatches each
-// task to the registered user function, and ships the result back.
+// Package worker is the Hanzo Tasks worker runtime. A Worker
+// subscribes once per kind and receives server-pushed workflow and
+// activity tasks over luxfi/zap, dispatches each task to the
+// registered user function, and ships the result back.
 //
 // Layering:
 //
@@ -26,16 +26,19 @@
 // event-sourced replay (a history log and replay decider) without
 // changing this package's public surface.
 //
-// # Poll concurrency
+// # Server-push delivery
 //
-// Options.MaxConcurrentWorkflowTaskPollers goroutines long-poll
-// OpcodePollWorkflowTask. Options.MaxConcurrentActivityExecutionSize
-// goroutines long-poll OpcodePollActivityTask. Both default to
-// reasonable production numbers (see defaultOptions). Each poller
-// blocks on one round trip to the frontend; when a task is returned
-// the same goroutine dispatches it (no hand-off), then re-polls.
-// Back-pressure is the transport's: if the frontend returns a nil
-// task (idle), the poller re-issues immediately.
+// On Start the worker installs OnWorkflowTask / OnActivityTask /
+// OnActivityResult callbacks on the transport and issues one
+// SubscribeWorkflowTasks + one SubscribeActivityTasks. The server
+// pushes work as it arrives via OpcodeDeliverWorkflowTask /
+// OpcodeDeliverActivityTask; the worker dispatches each delivery
+// in a goroutine bounded by the configured concurrency caps
+// (workflowExecSem, activityLimiter, taskQueueLimiter).
+// Options.MaxConcurrentWorkflowTaskPollers /
+// MaxConcurrentActivityExecutionSize remain on Options for API
+// compatibility but no longer drive long-poll loops; they cap
+// in-flight execution only.
 package worker
 
 import (
@@ -254,6 +257,20 @@ type workerImpl struct {
 	// the upstream API without running real sessions.
 	sessionTracker *sessionTracker
 
+	// Subscription IDs (server-pushed delivery). Populated by
+	// startSubscriptions; cleared by Stop via Unsubscribe.
+	subMu         sync.Mutex
+	workflowSubID string
+	activitySubID string
+
+	// pendingActivities holds the chan into which OnActivityResult
+	// pushes the result for an activityID previously scheduled by
+	// a workflow's ExecuteActivity call. The chan is buffered (cap=1)
+	// so the transport delivery goroutine never blocks — the workflow
+	// goroutine drains on its own pace via select.
+	actMu             sync.Mutex
+	pendingActivities map[string]chan *activityResultMsg
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 	startErr  error
@@ -262,12 +279,65 @@ type workerImpl struct {
 	wg     sync.WaitGroup
 }
 
+// activityResultMsg is the payload OnActivityResult delivers to a
+// pending ExecuteActivity future.
+type activityResultMsg struct {
+	result  []byte
+	failure []byte
+}
+
+// registerPendingActivity returns a chan the workflow goroutine can
+// receive on; completeActivity will deliver into it when the server
+// pushes OpcodeDeliverActivityResult for activityID. Caller must
+// removePendingActivity once it has received the result (or the
+// surrounding ctx is done) to avoid leaking the entry.
+func (w *workerImpl) registerPendingActivity(activityID string) chan *activityResultMsg {
+	w.actMu.Lock()
+	defer w.actMu.Unlock()
+	if w.pendingActivities == nil {
+		w.pendingActivities = make(map[string]chan *activityResultMsg)
+	}
+	ch := make(chan *activityResultMsg, 1)
+	w.pendingActivities[activityID] = ch
+	return ch
+}
+
+// removePendingActivity drops the entry for activityID. Idempotent.
+func (w *workerImpl) removePendingActivity(activityID string) {
+	w.actMu.Lock()
+	defer w.actMu.Unlock()
+	delete(w.pendingActivities, activityID)
+}
+
+// completeActivity is the OnActivityResult callback. It looks up the
+// pending channel and delivers the result. If no entry exists (the
+// workflow already gave up, or the activityID is unknown), the
+// delivery is dropped silently — the server is single-source-of-truth
+// and does not retry result pushes for unsubscribed ids.
+func (w *workerImpl) completeActivity(activityID string, result, failure []byte) {
+	w.actMu.Lock()
+	ch, ok := w.pendingActivities[activityID]
+	w.actMu.Unlock()
+	if !ok || ch == nil {
+		return
+	}
+	// chan is buffered cap=1; if a duplicate delivery arrives, drop it.
+	select {
+	case ch <- &activityResultMsg{result: result, failure: failure}:
+	default:
+	}
+}
+
 // sessionTracker is the Phase-1 no-op session worker. Retained as a
 // distinct type so future wiring (real session activities, heartbeat
 // coordination) can replace it without changing the Options shape.
 type sessionTracker struct{}
 
-// Start implements Worker.
+// Start implements Worker. The server-push wire model means Start
+// installs delivery handlers and issues two Subscribe calls (one for
+// workflow tasks, one for activity tasks); subsequent task pushes
+// arrive asynchronously and dispatch in goroutines bounded by the
+// configured concurrency caps. There are no poller goroutines.
 func (w *workerImpl) Start() error {
 	w.startOnce.Do(func() {
 		if w.transport == nil {
@@ -278,15 +348,9 @@ func (w *workerImpl) Start() error {
 			w.startErr = errors.New("hanzo/tasks/worker: taskQueue is required")
 			return
 		}
-		// Launch the workflow-task pollers.
-		for i := 0; i < w.opts.MaxConcurrentWorkflowTaskPollers; i++ {
-			w.wg.Add(1)
-			go w.workflowPollLoop(i)
-		}
-		// Launch the activity-task pollers.
-		for i := 0; i < w.opts.MaxConcurrentActivityExecutionSize; i++ {
-			w.wg.Add(1)
-			go w.activityPollLoop(i)
+		if err := w.startSubscriptions(); err != nil {
+			w.startErr = fmt.Errorf("hanzo/tasks/worker: subscribe: %w", err)
+			return
 		}
 	})
 	return w.startErr
@@ -309,10 +373,28 @@ func (w *workerImpl) Run(interruptCh <-chan any) error {
 	return nil
 }
 
-// Stop implements Worker.
+// Stop implements Worker. Closes stopCh, sends Unsubscribe for each
+// active subscription so the server stops pushing, and waits for any
+// in-flight task dispatches to drain.
 func (w *workerImpl) Stop() {
 	w.stopOnce.Do(func() {
 		close(w.stopCh)
+		// Best-effort unsubscribe; a failed call (server gone) is
+		// harmless because the server cleans up subs on disconnect.
+		w.subMu.Lock()
+		wfSub, actSub := w.workflowSubID, w.activitySubID
+		w.workflowSubID, w.activitySubID = "", ""
+		w.subMu.Unlock()
+		if w.transport != nil {
+			ctx, cancel := context.WithCancel(context.Background())
+			if wfSub != "" {
+				_ = w.transport.Unsubscribe(ctx, wfSub)
+			}
+			if actSub != "" {
+				_ = w.transport.Unsubscribe(ctx, actSub)
+			}
+			cancel()
+		}
 	})
 	w.wg.Wait()
 }
