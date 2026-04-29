@@ -4,8 +4,13 @@ package tasks_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,4 +142,123 @@ func TestE2E_WorkflowExecutesActivityAndCompletes(t *testing.T) {
 	if got := atomic.LoadInt32(&e2eActivityCalls); got != 1 {
 		t.Fatalf("expected exactly 1 activity invocation, got %d", got)
 	}
+}
+
+// TestE2E_HTTPLifecycle exercises the /v1/tasks HTTP surface end-to-end:
+// Start → Signal → History → Query → Terminate. Drives the same path
+// the React UI does, with no worker registered (so the workflow stays
+// in RUNNING until terminated).
+func TestE2E_HTTPLifecycle(t *testing.T) {
+	emb, err := tasks.Embed(context.Background(), tasks.EmbedConfig{ZAPPort: 0})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	defer emb.Stop(context.Background())
+	srv := httptest.NewServer(emb.HTTPHandler())
+	defer srv.Close()
+
+	post := func(path, body string) (int, []byte) {
+		resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("post %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, b
+	}
+	get := func(path string) (int, []byte) {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, b
+	}
+
+	// Start.
+	code, body := post("/v1/tasks/namespaces/default/workflows",
+		`{"workflowId":"e2e-1","workflowType":{"name":"Demo"},"taskQueue":{"name":"default"}}`)
+	if code != 200 {
+		t.Fatalf("start: %d %s", code, body)
+	}
+	var started struct {
+		Execution struct {
+			RunId string `json:"runId"`
+		} `json:"execution"`
+	}
+	_ = json.Unmarshal(body, &started)
+	runID := started.Execution.RunId
+	if runID == "" {
+		t.Fatalf("no runID in start response")
+	}
+
+	// Signal.
+	code, body = post("/v1/tasks/namespaces/default/workflows/e2e-1/signal?runId="+runID,
+		`{"name":"ping","payload":{"x":1}}`)
+	if code != 200 {
+		t.Fatalf("signal: %d %s", code, body)
+	}
+
+	// History.
+	code, body = get("/v1/tasks/namespaces/default/workflows/e2e-1/history?runId=" + runID)
+	if code != 200 {
+		t.Fatalf("history: %d %s", code, body)
+	}
+	var hist struct {
+		Events []map[string]any `json:"events"`
+	}
+	_ = json.Unmarshal(body, &hist)
+	if len(hist.Events) != 2 {
+		t.Fatalf("history len=%d want 2 (start + signal)", len(hist.Events))
+	}
+	if hist.Events[0]["eventType"] != "WORKFLOW_EXECUTION_STARTED" ||
+		hist.Events[1]["eventType"] != "WORKFLOW_EXECUTION_SIGNALED" {
+		t.Fatalf("history event types: %v %v",
+			hist.Events[0]["eventType"], hist.Events[1]["eventType"])
+	}
+
+	// Query.
+	code, body = post("/v1/tasks/namespaces/default/workflows/e2e-1/query?runId="+runID,
+		`{"queryType":"__workflow_metadata"}`)
+	if code != 200 {
+		t.Fatalf("query: %d %s", code, body)
+	}
+
+	// List with visibility query.
+	code, body = get(`/v1/tasks/namespaces/default/workflows?query=` + urlEscape(`WorkflowType = "Demo"`))
+	if code != 200 {
+		t.Fatalf("list: %d %s", code, body)
+	}
+	var listed struct {
+		Executions []map[string]any `json:"executions"`
+	}
+	_ = json.Unmarshal(body, &listed)
+	if len(listed.Executions) != 1 {
+		t.Fatalf("list len=%d", len(listed.Executions))
+	}
+
+	// Terminate.
+	code, body = post("/v1/tasks/namespaces/default/workflows/e2e-1/terminate?runId="+runID,
+		`{"reason":"e2e","identity":"test"}`)
+	if code != 200 {
+		t.Fatalf("terminate: %d %s", code, body)
+	}
+
+	// History now has 3 events: STARTED, SIGNALED, TERMINATED.
+	code, body = get("/v1/tasks/namespaces/default/workflows/e2e-1/history?runId=" + runID)
+	if code != 200 {
+		t.Fatalf("history2: %d %s", code, body)
+	}
+	_ = json.Unmarshal(body, &hist)
+	if len(hist.Events) != 3 {
+		t.Fatalf("history2 len=%d want 3", len(hist.Events))
+	}
+}
+
+// urlEscape is the smallest correct query escape — only ' ', '"',
+// '=' show up in the test queries.
+func urlEscape(s string) string {
+	r := strings.NewReplacer(" ", "%20", `"`, "%22", "=", "%3D")
+	return r.Replace(s)
 }
