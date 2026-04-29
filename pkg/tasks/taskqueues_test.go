@@ -154,7 +154,8 @@ func TestWorkflowHistoryAndQuery(t *testing.T) {
 	}
 	runId := started.Execution.RunId
 
-	// /history — should return synthetic timeline with 1 event.
+	// /history — durable history; the start should have appended a
+	// WORKFLOW_EXECUTION_STARTED event.
 	resp, err = http.Get(srv.URL + "/v1/tasks/namespaces/default/workflows/wf-1/history?runId=" + runId)
 	if err != nil {
 		t.Fatalf("history: %v", err)
@@ -165,28 +166,26 @@ func TestWorkflowHistoryAndQuery(t *testing.T) {
 		t.Fatalf("history status %d: %s", resp.StatusCode, body)
 	}
 	var hist struct {
-		Events    []map[string]any `json:"events"`
-		Synthetic bool             `json:"synthetic"`
+		Events []map[string]any `json:"events"`
 	}
 	if err := json.Unmarshal(body, &hist); err != nil {
 		t.Fatalf("decode history: %v", err)
-	}
-	if !hist.Synthetic {
-		t.Fatalf("expected synthetic=true")
 	}
 	if len(hist.Events) != 1 || hist.Events[0]["eventType"] != "WORKFLOW_EXECUTION_STARTED" {
 		t.Fatalf("unexpected history events: %+v", hist.Events)
 	}
 
-	// /query — returns 501 envelope while runtime hasn't shipped.
+	// /query — synchronous reply (worker poller dispatch is a follow-up;
+	// the engine returns workflow metadata for known synthetic queries).
 	resp, err = http.Post(srv.URL+"/v1/tasks/namespaces/default/workflows/wf-1/query?runId="+runId,
 		"application/json",
-		strings.NewReader(`{"queryType":"__stack_trace"}`))
+		strings.NewReader(`{"queryType":"__workflow_metadata"}`))
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
+	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("query status %d: %s", resp.StatusCode, body)
 	}
 }
