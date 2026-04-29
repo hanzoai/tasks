@@ -217,6 +217,10 @@ func (e *Embedded) HTTPHandler() http.Handler {
 			handleTaskQueues(w, r, en, ns, parts[2:])
 		case "workers":
 			handleWorkers(w, r, ns, parts[2:])
+		case "search-attributes":
+			handleSearchAttributes(w, r, en, ns, parts[2:])
+		case "metadata":
+			handleNamespaceMetadata(w, r, en, ns, parts[2:])
 		default:
 			http.NotFound(w, r)
 		}
@@ -230,7 +234,8 @@ func (e *Embedded) HTTPHandler() http.Handler {
 func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
 	switch {
 	case len(sub) == 0 && r.Method == http.MethodGet:
-		rows, err := en.ListWorkflows(ns)
+		query := r.URL.Query().Get("query")
+		rows, err := en.ListWorkflowExecutions(ns, query)
 		writeOK(w, err, map[string]any{"executions": rows})
 	case len(sub) == 0 && r.Method == http.MethodPost:
 		var req struct {
@@ -240,16 +245,43 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 			TaskQueue    struct {
 				Name string `json:"name"`
 			} `json:"taskQueue"`
-			Input any `json:"input"`
+			Input     any    `json:"input"`
+			RequestId string `json:"requestId"`
 		}
 		if err := decode(r, &req); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		wf, err := en.StartWorkflow(ns, req.WorkflowId, req.RunId, req.WorkflowType, req.TaskQueue.Name, req.Input)
+		wf, err := en.StartWorkflowWithRequestID(ns, req.WorkflowId, req.RunId, req.WorkflowType, req.TaskQueue.Name, req.Input, req.RequestId)
+		writeOK(w, err, wf)
+	case len(sub) == 1 && sub[0] == "signal-with-start" && r.Method == http.MethodPost:
+		var req struct {
+			WorkflowId    string  `json:"workflowId"`
+			RunId         string  `json:"runId"`
+			WorkflowType  TypeRef `json:"workflowType"`
+			TaskQueue     struct {
+				Name string `json:"name"`
+			} `json:"taskQueue"`
+			Input         any    `json:"input"`
+			SignalName    string `json:"signalName"`
+			SignalPayload any    `json:"signalPayload"`
+			RequestId     string `json:"requestId"`
+		}
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if req.SignalName == "" {
+			writeErr(w, 400, "signalName required")
+			return
+		}
+		wf, err := en.SignalWithStartWorkflow(ns, req.WorkflowId, req.RunId, req.WorkflowType, req.TaskQueue.Name, req.Input, req.SignalName, req.SignalPayload, req.RequestId)
 		writeOK(w, err, wf)
 	case len(sub) == 1 && r.Method == http.MethodGet:
 		runId := r.URL.Query().Get("execution.runId")
+		if runId == "" {
+			runId = r.URL.Query().Get("runId")
+		}
 		wf, ok, err := en.DescribeWorkflow(ns, sub[0], runId)
 		if err != nil {
 			writeErr(w, 500, err.Error())
@@ -266,10 +298,20 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 			},
 		})
 	case len(sub) == 2 && sub[1] == "cancel" && r.Method == http.MethodPost:
-		wf, err := en.CancelWorkflow(ns, sub[0], r.URL.Query().Get("runId"))
+		var req struct {
+			Reason   string `json:"reason"`
+			Identity string `json:"identity"`
+		}
+		_ = decode(r, &req)
+		wf, err := en.CancelWorkflowWithReason(ns, sub[0], r.URL.Query().Get("runId"), req.Reason, req.Identity)
 		writeOK(w, err, wf)
 	case len(sub) == 2 && sub[1] == "terminate" && r.Method == http.MethodPost:
-		wf, err := en.TerminateWorkflow(ns, sub[0], r.URL.Query().Get("runId"))
+		var req struct {
+			Reason   string `json:"reason"`
+			Identity string `json:"identity"`
+		}
+		_ = decode(r, &req)
+		wf, err := en.TerminateWorkflowWithReason(ns, sub[0], r.URL.Query().Get("runId"), req.Reason, req.Identity)
 		writeOK(w, err, wf)
 	case len(sub) == 2 && sub[1] == "signal" && r.Method == http.MethodPost:
 		var req struct {
@@ -280,86 +322,76 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 		err := en.SignalWorkflow(ns, sub[0], r.URL.Query().Get("runId"), req.Name, req.Payload)
 		writeOK(w, err, map[string]string{"status": "signaled"})
 	case len(sub) == 2 && sub[1] == "history" && r.Method == http.MethodGet:
-		// Synthetic history derived from the workflow record. The native
-		// engine doesn't yet emit per-event durable history, so we render
-		// the start event, the latest signal counter, and (if closed) the
-		// terminal transition. The UI surfaces a "coming in v1.42" hint
-		// alongside this list — no fake events are fabricated.
-		wf, ok, err := en.DescribeWorkflow(ns, sub[0], r.URL.Query().Get("runId"))
+		runId := r.URL.Query().Get("runId")
+		afterID := parseInt64(r.URL.Query().Get("after"))
+		pageSize := int(parseInt64(r.URL.Query().Get("pageSize")))
+		reverse := r.URL.Query().Get("reverse") == "true"
+		events, next, err := en.GetWorkflowHistory(ns, sub[0], runId, afterID, pageSize, reverse)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeErr(w, 404, err.Error())
 			return
 		}
-		if !ok {
-			writeErr(w, 404, "workflow not found")
-			return
-		}
-		writeOK(w, nil, map[string]any{"events": synthHistory(wf), "synthetic": true})
+		writeOK(w, nil, map[string]any{"events": events, "nextCursor": next})
 	case len(sub) == 2 && sub[1] == "query" && r.Method == http.MethodPost:
-		// Queries (including __stack_trace) require the worker SDK
-		// runtime to be running. Until that lands, return a typed 501
-		// the UI can render gracefully.
-		writeErr(w, 501, "QueryWorkflow lands when the worker SDK runtime ships")
+		var req struct {
+			QueryType string `json:"queryType"`
+			Args      any    `json:"args"`
+		}
+		_ = decode(r, &req)
+		runId := r.URL.Query().Get("runId")
+		out, err := en.QueryWorkflowCtx(r.Context(), ns, sub[0], runId, req.QueryType, req.Args)
+		if err == ErrNoWorkersSubscribed {
+			writeErr(w, 503, err.Error())
+			return
+		}
+		if err != nil && strings.Contains(err.Error(), "timeout") {
+			writeErr(w, 504, err.Error())
+			return
+		}
+		writeOK(w, err, map[string]any{"queryResult": out})
+	case len(sub) == 2 && sub[1] == "metadata" && r.Method == http.MethodPost:
+		var req WorkflowUserMetadata
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		runId := r.URL.Query().Get("runId")
+		wf, err := en.UpdateWorkflowMetadata(ns, sub[0], runId, req)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, wf)
+	case len(sub) == 2 && sub[1] == "reset" && r.Method == http.MethodPost:
+		var req struct {
+			RunId    string `json:"runId"`
+			EventId  int64  `json:"eventId"`
+			Reason   string `json:"reason"`
+			Identity string `json:"identity"`
+		}
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		wf, err := en.ResetWorkflow(ns, sub[0], req.RunId, req.EventId, req.Reason, req.Identity)
+		writeOK(w, err, wf)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-// synthHistory returns a small, honest event list derived from the
-// workflow record. The engine doesn't yet store full history; this is
-// what we know.
-func synthHistory(wf *WorkflowExecution) []map[string]any {
-	out := []map[string]any{
-		{
-			"eventId":   "1",
-			"eventType": "WORKFLOW_EXECUTION_STARTED",
-			"eventTime": wf.StartTime,
-			"attributes": map[string]any{
-				"workflowType": wf.Type.Name,
-				"taskQueue":    wf.TaskQueue,
-				"input":        wf.Input,
-			},
-		},
+func parseInt64(s string) int64 {
+	if s == "" {
+		return 0
 	}
-	if wf.HistoryLen > 1 {
-		out = append(out, map[string]any{
-			"eventId":   "2",
-			"eventType": "WORKFLOW_TASK_SIGNALED",
-			"eventTime": wf.StartTime,
-			"attributes": map[string]any{
-				"signalCount": wf.HistoryLen - 1,
-			},
-		})
+	var n int64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int64(c-'0')
 	}
-	if wf.CloseTime != "" {
-		out = append(out, map[string]any{
-			"eventId":   fmt.Sprintf("%d", len(out)+1),
-			"eventType": closeEventName(wf.Status),
-			"eventTime": wf.CloseTime,
-			"attributes": map[string]any{
-				"status": wf.Status,
-				"result": wf.Result,
-			},
-		})
-	}
-	return out
-}
-
-func closeEventName(status string) string {
-	switch status {
-	case "WORKFLOW_EXECUTION_STATUS_COMPLETED":
-		return "WORKFLOW_EXECUTION_COMPLETED"
-	case "WORKFLOW_EXECUTION_STATUS_FAILED":
-		return "WORKFLOW_EXECUTION_FAILED"
-	case "WORKFLOW_EXECUTION_STATUS_CANCELED":
-		return "WORKFLOW_EXECUTION_CANCELED"
-	case "WORKFLOW_EXECUTION_STATUS_TERMINATED":
-		return "WORKFLOW_EXECUTION_TERMINATED"
-	case "WORKFLOW_EXECUTION_STATUS_TIMED_OUT":
-		return "WORKFLOW_EXECUTION_TIMED_OUT"
-	default:
-		return "WORKFLOW_EXECUTION_CLOSED"
-	}
+	return n
 }
 
 // handleTaskQueues derives queues from listed workflows. Honest: there
@@ -529,9 +561,78 @@ func handleBatches(w http.ResponseWriter, r *http.Request, en *engine, ns string
 			return
 		}
 		writeOK(w, nil, b)
+	case len(sub) == 2 && sub[1] == "terminate" && r.Method == http.MethodPost:
+		var req struct {
+			Reason   string `json:"reason"`
+			Identity string `json:"identity"`
+		}
+		_ = decode(r, &req)
+		b, err := en.TerminateBatch(ns, sub[0], req.Reason, req.Identity)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, b)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleSearchAttributes — POST adds, GET lists.
+func handleSearchAttributes(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	if len(sub) != 0 {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := en.ListSearchAttributes(ns)
+		writeOK(w, err, map[string]any{"searchAttributes": rows})
+	case http.MethodPost:
+		var req SearchAttribute
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if err := en.AddSearchAttribute(ns, req); err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				writeErr(w, 409, err.Error())
+				return
+			}
+			if strings.Contains(err.Error(), "not registered") {
+				writeErr(w, 404, err.Error())
+				return
+			}
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeOK(w, nil, req)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// handleNamespaceMetadata — POST patches namespace metadata.
+func handleNamespaceMetadata(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	if len(sub) != 0 || r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	var req NamespaceMetadataPatch
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	n, err := en.UpdateNamespaceMetadata(ns, req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not registered") {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeErr(w, 400, err.Error())
+		return
+	}
+	writeOK(w, nil, n)
 }
 
 func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
@@ -600,6 +701,10 @@ const (
 	opTerminateWorkflow       uint16 = 0x0063
 	opDescribeWorkflow        uint16 = 0x0064
 	opListWorkflows           uint16 = 0x0065
+	opGetWorkflowHistory      uint16 = 0x0066
+	opQueryWorkflow           uint16 = 0x0067
+	opResetWorkflow           uint16 = 0x0068
+	opSignalWithStartWorkflow uint16 = 0x0069
 	opCreateSchedule          uint16 = 0x0070
 	opDeleteSchedule          uint16 = 0x0071
 	opListSchedules           uint16 = 0x0072
@@ -815,11 +920,70 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
-			wf, err := en.TerminateWorkflow(ns, wfID, runID)
+			reason := strOr(req, "reason", "")
+			identity := strOr(req, "identity", "")
+			wf, err := en.TerminateWorkflowWithReason(ns, wfID, runID, reason, identity)
 			if err != nil {
 				return nil, 400, err.Error()
 			}
 			return wfInfoSDK(wf), 200, ""
+		}),
+		opGetWorkflowHistory: wrap(func(req map[string]any) (any, uint32, string) {
+			ns := strOr(req, "namespace", defaultNS)
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			after := int64Field(req, "after_event_id")
+			page := int(int64Field(req, "page_size"))
+			reverse := false
+			if v, ok := req["reverse"].(bool); ok {
+				reverse = v
+			}
+			events, next, err := en.GetWorkflowHistory(ns, wfID, runID, after, page, reverse)
+			if err != nil {
+				return nil, 404, err.Error()
+			}
+			return map[string]any{"events": events, "next_cursor": next}, 200, ""
+		}),
+		opQueryWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			ns := strOr(req, "namespace", defaultNS)
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			qType := strOr(req, "query_type", str(req, "queryType"))
+			out, err := en.QueryWorkflow(ns, wfID, runID, qType, req["args"])
+			if err != nil {
+				return nil, 404, err.Error()
+			}
+			return map[string]any{"query_result": out}, 200, ""
+		}),
+		opResetWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			ns := strOr(req, "namespace", defaultNS)
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			eventID := int64Field(req, "event_id")
+			reason := strOr(req, "reason", "")
+			identity := strOr(req, "identity", "")
+			wf, err := en.ResetWorkflow(ns, wfID, runID, eventID, reason, identity)
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return wfInfoSDK(wf), 200, ""
+		}),
+		opSignalWithStartWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+			ns := strOr(req, "namespace", defaultNS)
+			typeName := strOr(req, "workflow_type", "")
+			tq := strOr(req, "task_queue", "")
+			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
+			runID := strOr(req, "run_id", str(req, "runId"))
+			sigName := strOr(req, "signal_name", str(req, "signalName"))
+			reqID := strOr(req, "request_id", "")
+			if sigName == "" {
+				return nil, 400, "signal_name required"
+			}
+			wf, err := en.SignalWithStartWorkflow(ns, wfID, runID, TypeRef{Name: typeName}, tq, req["input"], sigName, req["signal_input"], reqID)
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return map[string]any{"workflow_id": wf.Execution.WorkflowId, "run_id": wf.Execution.RunId}, 200, ""
 		}),
 		opListSchedules: wrap(func(req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
@@ -964,6 +1128,20 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 		client.OpcodeStartChildWorkflow: wrap(func(_ map[string]any) (any, uint32, string) {
 			return nil, 501, "start_child_workflow: not yet implemented"
 		}),
+
+		// 0x00C4 — worker → server query response.
+		OpcodeRespondQuery: wrap(func(req map[string]any) (any, uint32, string) {
+			token := strOr(req, "token", "")
+			if token == "" {
+				return nil, 400, "token required"
+			}
+			result, _ := decodeBytesField(req, "result")
+			errMsg := strOr(req, "error", "")
+			if !en.disp.CompleteQuery(token, result, errMsg) {
+				return nil, 404, "query token not found"
+			}
+			return map[string]bool{"ok": true}, 200, ""
+		}),
 	}
 }
 
@@ -995,10 +1173,12 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 		for _, c := range env.Commands {
 			switch c.Kind {
 			case 0: // complete
-				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_COMPLETED", "workflow.completed")
+				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_COMPLETED", "workflow.completed", "WORKFLOW_EXECUTION_COMPLETED", map[string]any{"result": string(c.Result)})
 			case 1: // fail
-				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_FAILED", "workflow.failed")
+				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_FAILED", "workflow.failed", "WORKFLOW_EXECUTION_FAILED", map[string]any{"failure": string(c.Failure)})
 			case 2: // schedule_activity (already scheduled by 0x006B; no-op)
+			case 3: // canceled — worker ack of a CANCELING handshake
+				_, _ = en.AckCanceled(t.ns, t.workflowID, t.runID, string(c.Failure), "")
 			}
 		}
 		return objectAck(0, "", 200)
