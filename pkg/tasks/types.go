@@ -25,20 +25,40 @@ type NamespaceInfo struct {
 type NamespaceCfg struct {
 	WorkflowExecutionRetentionTtl string `json:"workflowExecutionRetentionTtl"` // "720h"
 	APSLimit                      int    `json:"apsLimit"`                      // actions per second
+	HistoryArchivalState          string `json:"historyArchivalState,omitempty"`
+	HistoryArchivalUri            string `json:"historyArchivalUri,omitempty"`
+	VisibilityArchivalState       string `json:"visibilityArchivalState,omitempty"`
+	VisibilityArchivalUri         string `json:"visibilityArchivalUri,omitempty"`
+	CustomData                    map[string]string `json:"customData,omitempty"`
+}
+
+// SearchAttribute is a typed search attribute registered to a namespace.
+type SearchAttribute struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // Keyword|Text|Int|Double|Bool|Datetime|KeywordList
+}
+
+// WorkflowUserMetadata is operator-supplied summary/details for a workflow.
+type WorkflowUserMetadata struct {
+	Summary   string `json:"summary,omitempty"`
+	Details   string `json:"details,omitempty"`
+	UpdatedBy string `json:"updatedBy,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 type WorkflowExecution struct {
-	Execution   ExecutionRef `json:"execution"`
-	Type        TypeRef      `json:"type"`
-	StartTime   string       `json:"startTime,omitempty"`
-	CloseTime   string       `json:"closeTime,omitempty"`
-	Status      string       `json:"status"` // WORKFLOW_EXECUTION_STATUS_*
-	TaskQueue   string       `json:"taskQueue,omitempty"`
-	HistoryLen  int64        `json:"historyLength,omitempty"`
-	Memo        any          `json:"memo,omitempty"`
-	SearchAttrs map[string]any `json:"searchAttrs,omitempty"`
-	Input       any          `json:"input,omitempty"`
-	Result      any          `json:"result,omitempty"`
+	Execution    ExecutionRef          `json:"execution"`
+	Type         TypeRef               `json:"type"`
+	StartTime    string                `json:"startTime,omitempty"`
+	CloseTime    string                `json:"closeTime,omitempty"`
+	Status       string                `json:"status"` // WORKFLOW_EXECUTION_STATUS_*
+	TaskQueue    string                `json:"taskQueue,omitempty"`
+	HistoryLen   int64                 `json:"historyLength,omitempty"`
+	Memo         any                   `json:"memo,omitempty"`
+	SearchAttrs  map[string]any        `json:"searchAttrs,omitempty"`
+	Input        any                   `json:"input,omitempty"`
+	Result       any                   `json:"result,omitempty"`
+	UserMetadata *WorkflowUserMetadata `json:"userMetadata,omitempty"`
 }
 
 type ExecutionRef struct {
@@ -131,4 +151,16 @@ type Identity struct {
 	Namespace string `json:"namespace"`
 	Role      string `json:"role"` // owner|admin|developer|viewer
 	GrantTime string `json:"grantTime"`
+}
+
+// HistoryEvent — a single durable record in a workflow execution's
+// history. Modeled on Temporal's HistoryEvent but JSON-native and owned
+// by Hanzo. EventId is monotonic per (namespace, workflowId, runId);
+// EventType matches the WORKFLOW_EXECUTION_* / WORKFLOW_TASK_* /
+// ACTIVITY_TASK_* / TIMER_* family.
+type HistoryEvent struct {
+	EventId    int64          `json:"eventId"`
+	EventTime  string         `json:"eventTime"`
+	EventType  string         `json:"eventType"`
+	Attributes map[string]any `json:"attributes,omitempty"`
 }

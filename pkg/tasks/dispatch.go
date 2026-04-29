@@ -61,6 +61,9 @@ type dispatcher struct {
 	// running the workflow execution. Activity results are pushed
 	// back to this peer.
 	workflowPeer map[string]string
+
+	// queries[token] → pending query awaiting a worker response.
+	queries map[string]*pendingQuery
 }
 
 type subKey struct {
@@ -134,6 +137,7 @@ func newDispatcher() *dispatcher {
 		actByToken:   make(map[string]*pendingActivityTask),
 		activities:   make(map[string]*pendingActivity),
 		workflowPeer: make(map[string]string),
+		queries:      make(map[string]*pendingQuery),
 	}
 	if _, err := rand.Read(d.secret[:]); err != nil {
 		// /dev/urandom never fails on supported platforms; if it does,
@@ -499,7 +503,148 @@ const (
 	OpcodeUnsubscribeTasks       uint16 = 0x00A6
 
 	// Server → worker (Send).
-	OpcodeDeliverWorkflowTask  uint16 = 0x00B0
-	OpcodeDeliverActivityTask  uint16 = 0x00B1
+	OpcodeDeliverWorkflowTask   uint16 = 0x00B0
+	OpcodeDeliverActivityTask   uint16 = 0x00B1
 	OpcodeDeliverActivityResult uint16 = 0x00B2
+	OpcodeDeliverCancelRequest  uint16 = 0x00B3
+	OpcodeDeliverQuery          uint16 = 0x00B4
+
+	// Worker → server (Call). Query response.
+	OpcodeRespondQuery uint16 = 0x00C4
 )
+
+// ErrNoWorkersSubscribed is returned by QueryWorkflow when no worker is
+// subscribed to the workflow's task queue. Callers must surface this as
+// a 503-class condition; there is no engine-side fallback.
+var ErrNoWorkersSubscribed = fmt.Errorf("no workers subscribed to task queue")
+
+// ── cancel push ─────────────────────────────────────────────────────
+
+type cancelRequestDeliveryJSON struct {
+	Namespace  string `json:"namespace"`
+	WorkflowID string `json:"workflow_id"`
+	RunID      string `json:"run_id"`
+	Reason     string `json:"reason,omitempty"`
+	Identity   string `json:"identity,omitempty"`
+}
+
+// PushCancelRequest pushes OpcodeDeliverCancelRequest to every worker
+// subscribed to the workflow's task queue. Returns the number of peers
+// notified. Caller holds no engine lock.
+func (d *dispatcher) PushCancelRequest(ns, queue, workflowID, runID, reason, identity string) int {
+	d.mu.Lock()
+	subs := append([]*subscription(nil), d.subs[subKey{ns, queue, kindWorkflow}]...)
+	send := d.send
+	d.mu.Unlock()
+	if send == nil || len(subs) == 0 {
+		return 0
+	}
+	body, _ := json.Marshal(cancelRequestDeliveryJSON{
+		Namespace:  ns,
+		WorkflowID: workflowID,
+		RunID:      runID,
+		Reason:     reason,
+		Identity:   identity,
+	})
+	n := 0
+	for _, s := range subs {
+		if err := send(s.peerID, OpcodeDeliverCancelRequest, body); err == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// HasSubscribers reports whether any worker is subscribed to (ns, queue, kind).
+func (d *dispatcher) HasSubscribers(ns, queue string, kind taskKind) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.subs[subKey{ns, queue, kind}]) > 0
+}
+
+// ── query push / respond ───────────────────────────────────────────
+
+type queryDeliveryJSON struct {
+	Token      string `json:"token"`
+	Namespace  string `json:"namespace"`
+	WorkflowID string `json:"workflow_id"`
+	RunID      string `json:"run_id"`
+	QueryType  string `json:"query_type"`
+	Args       []byte `json:"args,omitempty"`
+}
+
+type pendingQuery struct {
+	resCh chan queryResponse
+}
+
+type queryResponse struct {
+	result []byte
+	errMsg string
+}
+
+// PushQuery picks a subscribed worker for (ns, queue, kindWorkflow),
+// mints a query token, and sends OpcodeDeliverQuery. Returns the token
+// (used as map key for the response) and the response channel that
+// CompleteQuery resolves. Returns ErrNoWorkersSubscribed if no peer.
+func (d *dispatcher) PushQuery(ns, queue, workflowID, runID, queryType string, args []byte) (string, <-chan queryResponse, error) {
+	d.mu.Lock()
+	sub := d.pickLocked(subKey{ns, queue, kindWorkflow})
+	if sub == nil {
+		d.mu.Unlock()
+		return "", nil, ErrNoWorkersSubscribed
+	}
+	if d.queries == nil {
+		d.queries = make(map[string]*pendingQuery)
+	}
+	token := newRandID()
+	pq := &pendingQuery{resCh: make(chan queryResponse, 1)}
+	d.queries[token] = pq
+	send := d.send
+	peer := sub.peerID
+	d.mu.Unlock()
+
+	if send == nil {
+		d.mu.Lock()
+		delete(d.queries, token)
+		d.mu.Unlock()
+		return "", nil, fmt.Errorf("dispatcher send not wired")
+	}
+	body, _ := json.Marshal(queryDeliveryJSON{
+		Token:      token,
+		Namespace:  ns,
+		WorkflowID: workflowID,
+		RunID:      runID,
+		QueryType:  queryType,
+		Args:       args,
+	})
+	if err := send(peer, OpcodeDeliverQuery, body); err != nil {
+		d.mu.Lock()
+		delete(d.queries, token)
+		d.mu.Unlock()
+		return "", nil, err
+	}
+	return token, pq.resCh, nil
+}
+
+// CompleteQuery resolves a pending query by token. Returns false if
+// the token was not registered (already timed out / unknown).
+func (d *dispatcher) CompleteQuery(token string, result []byte, errMsg string) bool {
+	d.mu.Lock()
+	pq, ok := d.queries[token]
+	if ok {
+		delete(d.queries, token)
+	}
+	d.mu.Unlock()
+	if !ok {
+		return false
+	}
+	pq.resCh <- queryResponse{result: result, errMsg: errMsg}
+	return true
+}
+
+// CancelQuery drops the pending query without resolving (caller timeout).
+func (d *dispatcher) CancelQuery(token string) {
+	d.mu.Lock()
+	delete(d.queries, token)
+	d.mu.Unlock()
+}
