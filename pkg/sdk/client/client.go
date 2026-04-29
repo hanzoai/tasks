@@ -86,6 +86,17 @@ type Transport interface {
 	// response frame.
 	Call(ctx context.Context, opcode uint16, body []byte) (respFrame []byte, err error)
 
+	// Handle registers a callback for server-pushed messages on
+	// opcode. fn receives the source peer ID and the JSON payload
+	// extracted from the incoming envelope. Used by the worker to
+	// receive Deliver{Workflow,Activity}Task and DeliverActivityResult
+	// pushes that the server initiates after a Subscribe call.
+	//
+	// Implementations must register the callback against the underlying
+	// node and reply with an empty 200 envelope so the server's Send
+	// path completes cleanly.
+	Handle(opcode uint16, fn func(from string, body []byte))
+
 	// Close releases transport resources.
 	Close() error
 }
@@ -414,6 +425,34 @@ func FrameBody(opcode uint16, body []byte) ([]byte, error) {
 		return out, nil
 	}
 	return encodeEnvelope(opcode, body)
+}
+
+// Handle registers a luxfi/zap.Handler that decodes the envelope body
+// from incoming frames on opcode and forwards it to fn. The handler
+// returns an empty 200 envelope so the server's Send completes; the
+// payload travels in a one-way fashion (worker consumes, server moves
+// on). Calling Handle on the same opcode twice replaces the previous
+// callback (zap.Node.Handle is last-write-wins).
+func (t *zapTransport) Handle(opcode uint16, fn func(from string, body []byte)) {
+	if t == nil || t.node == nil || fn == nil {
+		return
+	}
+	t.node.Handle(opcode, func(ctx context.Context, from string, msg *zap.Message) (*zap.Message, error) {
+		root := msg.Root()
+		body := root.Bytes(envelopeBody)
+		// Copy out — msg is owned by the receive loop.
+		payload := make([]byte, len(body))
+		copy(payload, body)
+		fn(from, payload)
+		// Reply with an empty 200 envelope so the server's Send
+		// path observes a clean ack (Call-style server pushes wait on
+		// a response; raw Send-style does not).
+		ackFrame, err := encodeEnvelope(opcode, nil)
+		if err != nil {
+			return nil, err
+		}
+		return zap.Parse(ackFrame)
+	})
 }
 
 func (t *zapTransport) Close() error {

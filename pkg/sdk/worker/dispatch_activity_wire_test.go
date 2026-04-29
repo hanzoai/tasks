@@ -18,49 +18,35 @@ import (
 // activity-wire methods so the test can assert they were hit
 // and capture the requests for inspection.
 //
-// This directly exercises Red §5.1 (CRITICAL-1): prior to PR-B
-// ExecuteActivity settled (nil, nil) without touching the wire.
-// Here we assert that (a) ScheduleActivity was called with the
-// correct activity type, (b) WaitActivityResult was long-polled
-// for the same activityTaskId, (c) the activity fn registered in
-// the worker's registry was NOT invoked locally, and (d) the
-// Future returned to the workflow settled with the wire-returned
-// result bytes.
+// Red §5.1 (CRITICAL-1) coverage: prior to the server-push migration
+// ExecuteActivity settled (nil, nil) without touching the wire. Here
+// we assert that (a) ScheduleActivity was called with the correct
+// activity type, (b) the worker is awaiting the activity result via
+// the pending-result registry installed by Subscribe, (c) the activity
+// fn registered locally was NOT invoked (the wire is source of truth),
+// and (d) the workflow Future settles with the wire-returned bytes
+// after the server push lands.
 type recordingTransport struct {
 	fakeTransport
 
 	mu       sync.Mutex
 	schedReq []client.ScheduleActivityRequest
-	waitReq  []client.WaitActivityResultRequest
 
-	// wireResult is what WaitActivityResult returns (Ready=true).
+	// wireResult is what the server pushes via OnActivityResult.
 	wireResult []byte
-	// waitCalls counts how many Wait calls we've fielded; the
-	// first returns ready=false to exercise the long-poll loop,
-	// the second returns ready=true with wireResult.
-	waitCalls atomic.Int32
 }
 
 func (r *recordingTransport) ScheduleActivity(ctx context.Context, req client.ScheduleActivityRequest) (*client.ScheduleActivityResponse, error) {
 	r.mu.Lock()
 	r.schedReq = append(r.schedReq, req)
 	r.mu.Unlock()
+	// Schedule the server push asynchronously so the workflow
+	// goroutine has time to register the pending channel.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		r.PushActivityResult("wire-act-1", r.wireResult, nil)
+	}()
 	return &client.ScheduleActivityResponse{ActivityTaskID: "wire-act-1"}, nil
-}
-
-func (r *recordingTransport) WaitActivityResult(ctx context.Context, req client.WaitActivityResultRequest) (*client.WaitActivityResultResponse, error) {
-	r.mu.Lock()
-	r.waitReq = append(r.waitReq, req)
-	r.mu.Unlock()
-	n := r.waitCalls.Add(1)
-	if n == 1 {
-		// Exercise the long-poll "not ready yet" path.
-		return &client.WaitActivityResultResponse{Ready: false}, nil
-	}
-	return &client.WaitActivityResultResponse{
-		Ready:  true,
-		Result: r.wireResult,
-	}, nil
 }
 
 // activityLocalCallCount tracks whether the activity fn was
@@ -99,6 +85,12 @@ func TestDispatch_WorkflowExecuteActivity_HitsWire(t *testing.T) {
 	}
 	w := newTestWorker(t, &rt.fakeTransport)
 	w.transport = rt // rebind to the recording transport
+	// Wire the OnActivityResult callback to the worker's
+	// completeActivity router so PushActivityResult drains into the
+	// workflow's pending channel.
+	rt.OnActivityResult(func(activityID string, result, failure []byte) {
+		w.completeActivity(activityID, result, failure)
+	})
 	w.RegisterWorkflow(wireCallingWorkflow)
 	w.RegisterActivity(wireTargetActivity)
 
@@ -126,18 +118,7 @@ func TestDispatch_WorkflowExecuteActivity_HitsWire(t *testing.T) {
 			rt.schedReq[0].WorkflowID, "wf-wire")
 	}
 
-	// (b) WaitActivityResult was long-polled for the same id.
-	if len(rt.waitReq) < 1 {
-		t.Fatalf("WaitActivityResult called %d times, want >=1", len(rt.waitReq))
-	}
-	for i, wr := range rt.waitReq {
-		if wr.ActivityTaskID != "wire-act-1" {
-			t.Errorf("WaitActivityResult[%d].ActivityTaskID = %q, want %q",
-				i, wr.ActivityTaskID, "wire-act-1")
-		}
-	}
-
-	// (c) The in-process activity fn MUST NOT have been called.
+	// (b) The in-process activity fn MUST NOT have been called.
 	// The wire is the source of truth.
 	if got := activityLocalCallCount.Load(); got != 0 {
 		t.Fatalf("activity fn invoked locally %d times; wire dispatch "+

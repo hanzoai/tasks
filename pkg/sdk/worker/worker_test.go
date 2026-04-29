@@ -20,14 +20,21 @@ import (
 
 // -------- fake transport ---------------------------------------------------
 //
-// fakeTransport is an in-memory client.WorkerTransport that queues one
-// workflow task + one activity task, then reports "idle" (nil task) for
-// the remainder of the test. Responds are captured atomically.
+// fakeTransport is an in-memory client.WorkerTransport for the
+// server-push wire model. Tests inject tasks via PushWorkflowTask /
+// PushActivityTask, which call the registered OnWorkflowTask /
+// OnActivityTask handlers exactly as the real transport would on a
+// server-pushed delivery. Respond* / Heartbeat invocations are
+// captured atomically.
 type fakeTransport struct {
 	mu sync.Mutex
 
-	workflowTasks []*client.WorkflowTask
-	activityTasks []*client.ActivityTask
+	onWFTask  func(*client.WorkflowTask)
+	onActTask func(*client.ActivityTask)
+	onActRes  func(activityID string, result, failure []byte)
+
+	subWF, subAct atomic.Int32
+	unsubCount    atomic.Int32
 
 	workflowCompleted atomic.Int32
 	activityCompleted atomic.Int32
@@ -41,29 +48,67 @@ type fakeTransport struct {
 
 func (f *fakeTransport) Close() error { return nil }
 
-func (f *fakeTransport) PollWorkflowTask(ctx context.Context, req client.PollWorkflowTaskRequest) (*client.WorkflowTask, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.workflowTasks) == 0 {
-		// Block briefly so the poll loop doesn't spin. A zero-length
-		// sleep here keeps the test fast; in production the server
-		// holds the long-poll open.
-		return nil, nil
-	}
-	t := f.workflowTasks[0]
-	f.workflowTasks = f.workflowTasks[1:]
-	return t, nil
+func (f *fakeTransport) SubscribeWorkflowTasks(ctx context.Context, req client.PollWorkflowTaskRequest) (string, error) {
+	f.subWF.Add(1)
+	return "wf-sub", nil
 }
 
-func (f *fakeTransport) PollActivityTask(ctx context.Context, req client.PollActivityTaskRequest) (*client.ActivityTask, error) {
+func (f *fakeTransport) SubscribeActivityTasks(ctx context.Context, req client.PollActivityTaskRequest) (string, error) {
+	f.subAct.Add(1)
+	return "act-sub", nil
+}
+
+func (f *fakeTransport) Unsubscribe(ctx context.Context, subID string) error {
+	f.unsubCount.Add(1)
+	return nil
+}
+
+func (f *fakeTransport) OnWorkflowTask(fn func(*client.WorkflowTask)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.activityTasks) == 0 {
-		return nil, nil
+	f.onWFTask = fn
+}
+
+func (f *fakeTransport) OnActivityTask(fn func(*client.ActivityTask)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onActTask = fn
+}
+
+func (f *fakeTransport) OnActivityResult(fn func(activityID string, result, failure []byte)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onActRes = fn
+}
+
+// PushWorkflowTask simulates a server-pushed workflow task delivery.
+func (f *fakeTransport) PushWorkflowTask(t *client.WorkflowTask) {
+	f.mu.Lock()
+	cb := f.onWFTask
+	f.mu.Unlock()
+	if cb != nil {
+		cb(t)
 	}
-	t := f.activityTasks[0]
-	f.activityTasks = f.activityTasks[1:]
-	return t, nil
+}
+
+// PushActivityTask simulates a server-pushed activity task delivery.
+func (f *fakeTransport) PushActivityTask(t *client.ActivityTask) {
+	f.mu.Lock()
+	cb := f.onActTask
+	f.mu.Unlock()
+	if cb != nil {
+		cb(t)
+	}
+}
+
+// PushActivityResult simulates a server-pushed activity-result delivery.
+func (f *fakeTransport) PushActivityResult(activityID string, result, failure []byte) {
+	f.mu.Lock()
+	cb := f.onActRes
+	f.mu.Unlock()
+	if cb != nil {
+		cb(activityID, result, failure)
+	}
 }
 
 func (f *fakeTransport) RespondWorkflowTaskCompleted(ctx context.Context, req client.RespondWorkflowTaskCompletedRequest) error {
@@ -102,30 +147,9 @@ func (f *fakeTransport) ScheduleActivity(ctx context.Context, req client.Schedul
 	return &client.ScheduleActivityResponse{ActivityTaskID: "stub-id"}, nil
 }
 
-// WaitActivityResult satisfies WorkerTransport. Returns ready=false
-// so workflows that exercise the wire path fall out via ctx
-// deadline; tests wanting completion override this.
-func (f *fakeTransport) WaitActivityResult(ctx context.Context, req client.WaitActivityResultRequest) (*client.WaitActivityResultResponse, error) {
-	return &client.WaitActivityResultResponse{Ready: false}, nil
-}
-
 // StartChildWorkflow satisfies WorkerTransport.
 func (f *fakeTransport) StartChildWorkflow(ctx context.Context, req client.StartChildWorkflowRequest) (*client.StartChildWorkflowResponse, error) {
 	return &client.StartChildWorkflowResponse{RunID: "stub-run-id"}, nil
-}
-
-// queueWorkflow enqueues one workflow task. Input is marshalled as a
-// JSON array so decodeWorkflowArgs can pull args out.
-func (f *fakeTransport) queueWorkflow(t *client.WorkflowTask) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.workflowTasks = append(f.workflowTasks, t)
-}
-
-func (f *fakeTransport) queueActivity(t *client.ActivityTask) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.activityTasks = append(f.activityTasks, t)
 }
 
 // -------- test harness ----------------------------------------------------
@@ -358,11 +382,11 @@ func TestWorker_DispatchActivityTask_UserError(t *testing.T) {
 	}
 }
 
-// -------- poll loop smoke test --------------------------------------------
+// -------- server-push smoke test ------------------------------------------
 //
-// runs the actual workflow poll loop for a single tick — enqueue one
-// task, verify it's dispatched and the loop stops cleanly.
-func TestWorker_WorkflowPollLoop_OneCycle(t *testing.T) {
+// Subscribe and push a workflow task, verify dispatch fires, Stop
+// cleanly unsubscribes.
+func TestWorker_WorkflowPush_OneCycle(t *testing.T) {
 	t.Parallel()
 	workflowRan.Store(0)
 
@@ -370,18 +394,21 @@ func TestWorker_WorkflowPollLoop_OneCycle(t *testing.T) {
 	w := newTestWorker(t, ft)
 	w.RegisterWorkflow(sampleWorkflow)
 
+	if err := w.startSubscriptions(); err != nil {
+		t.Fatalf("startSubscriptions: %v", err)
+	}
+	if ft.subWF.Load() != 1 || ft.subAct.Load() != 1 {
+		t.Fatalf("subscribe counts wf=%d act=%d, want 1/1", ft.subWF.Load(), ft.subAct.Load())
+	}
+
 	input, _ := json.Marshal([]any{"loop"})
-	ft.queueWorkflow(&client.WorkflowTask{
+	ft.PushWorkflowTask(&client.WorkflowTask{
 		TaskToken:        []byte{0x01},
 		WorkflowID:       "wf-loop",
 		WorkflowTypeName: "sampleWorkflow",
 		History:          input,
 	})
 
-	w.wg.Add(1)
-	go w.workflowPollLoop(0)
-
-	// Wait (briefly) for the task to be consumed.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if ft.workflowCompleted.Load() == 1 {
@@ -397,11 +424,14 @@ func TestWorker_WorkflowPollLoop_OneCycle(t *testing.T) {
 	if ft.workflowCompleted.Load() != 1 {
 		t.Fatalf("RespondWorkflowTaskCompleted = %d, want 1", ft.workflowCompleted.Load())
 	}
+	if ft.unsubCount.Load() != 2 {
+		t.Fatalf("Unsubscribe count = %d, want 2 (wf + act)", ft.unsubCount.Load())
+	}
 }
 
-// -------- activity poll loop smoke test -----------------------------------
+// -------- activity push smoke test ----------------------------------------
 
-func TestWorker_ActivityPollLoop_OneCycle(t *testing.T) {
+func TestWorker_ActivityPush_OneCycle(t *testing.T) {
 	t.Parallel()
 	activityRan.Store(0)
 
@@ -409,16 +439,17 @@ func TestWorker_ActivityPollLoop_OneCycle(t *testing.T) {
 	w := newTestWorker(t, ft)
 	w.RegisterActivity(sampleActivity)
 
+	if err := w.startSubscriptions(); err != nil {
+		t.Fatalf("startSubscriptions: %v", err)
+	}
+
 	input, _ := json.Marshal([]any{"loop"})
-	ft.queueActivity(&client.ActivityTask{
+	ft.PushActivityTask(&client.ActivityTask{
 		TaskToken:        []byte{0x02},
 		ActivityID:       "act-loop",
 		ActivityTypeName: "sampleActivity",
 		Input:            input,
 	})
-
-	w.wg.Add(1)
-	go w.activityPollLoop(0)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

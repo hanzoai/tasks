@@ -92,7 +92,7 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 		Namespace:    w.namespace,
 		Attempt:      1,
 	}
-	env := newWorkerEnv(ctx, w.transport, info, w.taskQueue, w.logger)
+	env := newWorkerEnv(ctx, w, w.transport, info, w.taskQueue, w.logger)
 	defer env.cancelAll()
 	ctx2 := workflow.NewContextFromEnv(env)
 

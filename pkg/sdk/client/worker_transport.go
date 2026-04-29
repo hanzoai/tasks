@@ -7,25 +7,41 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/luxfi/zap"
 )
 
 // NewWorkerTransport returns a typed wrapper over the generic Transport
-// that issues the worker poll / respond RPCs defined in schema/tasks.zap.
+// that issues the worker subscribe / respond RPCs and routes server-pushed
+// task deliveries to user-installed callbacks.
 //
-// The wire layout (object fields) follows the constants declared in
-// transport.go. v1 encodes the body portions as JSON; native ZAP serde
-// replaces JSON in a follow-up without changing opcodes.
+// The wire layout for Subscribe / Respond / Heartbeat / Schedule follows
+// the constants declared in transport.go. Server-push deliveries
+// (OpcodeDeliverWorkflowTask / ActivityTask / ActivityResult) carry
+// JSON bodies matching the workflowTaskDeliveryJSON /
+// activityTaskDeliveryJSON / activityResultDeliveryJSON shapes in
+// pkg/tasks/dispatch.go — those are authoritative.
 func NewWorkerTransport(t Transport) WorkerTransport {
 	return &workerTransport{t: t}
 }
 
 // workerTransport is the default WorkerTransport implementation. It
-// wraps a generic Transport and handles the request/response ZAP
-// encoding for each worker RPC.
+// wraps a generic Transport, encodes worker calls, and demultiplexes
+// server-pushed deliveries into per-kind callbacks.
 type workerTransport struct {
 	t Transport
+
+	mu        sync.RWMutex
+	onWFTask  func(*WorkflowTask)
+	onActTask func(*ActivityTask)
+	onActRes  func(activityID string, result, failure []byte)
+
+	// installed tracks which delivery opcodes already have a Transport
+	// Handle registered. We register lazily on the first On* call so a
+	// Transport that does not need pushes (a Client doing user-facing
+	// RPCs only) never installs handlers.
+	installed map[uint16]bool
 }
 
 // Close releases the underlying transport.
@@ -36,35 +52,241 @@ func (w *workerTransport) Close() error {
 	return w.t.Close()
 }
 
-// PollWorkflowTask issues OpcodePollWorkflowTask and decodes the
-// returned WorkflowTask. A zero-token response signals "idle, try
-// again" — the caller's loop re-polls.
-func (w *workerTransport) PollWorkflowTask(ctx context.Context, req PollWorkflowTaskRequest) (*WorkflowTask, error) {
-	body := encodePollWorkflowReq(req)
-	respBytes, err := w.t.Call(ctx, OpcodePollWorkflowTask, body)
+// ── subscriptions ──────────────────────────────────────────────────────
+
+// SubscribeWorkflowTasks registers this worker for workflow-task pushes.
+// The server returns a sub-id used to Unsubscribe on Stop.
+func (w *workerTransport) SubscribeWorkflowTasks(ctx context.Context, req PollWorkflowTaskRequest) (string, error) {
+	body, err := json.Marshal(struct {
+		Namespace     string `json:"namespace"`
+		TaskQueue     string `json:"task_queue"`
+		TaskQueueKind int8   `json:"task_queue_kind,omitempty"`
+		Identity      string `json:"identity,omitempty"`
+		WorkerBuildID string `json:"worker_build_id,omitempty"`
+	}{
+		Namespace:     req.Namespace,
+		TaskQueue:     req.TaskQueueName,
+		TaskQueueKind: req.TaskQueueKind,
+		Identity:      req.Identity,
+		WorkerBuildID: req.WorkerBuildID,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("worker poll workflow task: %w", err)
+		return "", fmt.Errorf("subscribe workflow tasks: marshal: %w", err)
 	}
-	task := decodeWorkflowTask(respBytes)
-	if len(task.TaskToken) == 0 {
-		return nil, nil
+	respFrame, err := w.t.Call(ctx, OpcodeSubscribeWorkflowTasks, body)
+	if err != nil {
+		return "", fmt.Errorf("subscribe workflow tasks: %w", err)
 	}
-	return task, nil
+	return decodeSubscribeResp(respFrame)
 }
 
-// PollActivityTask issues OpcodePollActivityTask.
-func (w *workerTransport) PollActivityTask(ctx context.Context, req PollActivityTaskRequest) (*ActivityTask, error) {
-	body := encodePollActivityReq(req)
-	respBytes, err := w.t.Call(ctx, OpcodePollActivityTask, body)
+// SubscribeActivityTasks registers this worker for activity-task pushes.
+func (w *workerTransport) SubscribeActivityTasks(ctx context.Context, req PollActivityTaskRequest) (string, error) {
+	body, err := json.Marshal(struct {
+		Namespace     string `json:"namespace"`
+		TaskQueue     string `json:"task_queue"`
+		TaskQueueKind int8   `json:"task_queue_kind,omitempty"`
+		Identity      string `json:"identity,omitempty"`
+	}{
+		Namespace:     req.Namespace,
+		TaskQueue:     req.TaskQueueName,
+		TaskQueueKind: req.TaskQueueKind,
+		Identity:      req.Identity,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("worker poll activity task: %w", err)
+		return "", fmt.Errorf("subscribe activity tasks: marshal: %w", err)
 	}
-	task := decodeActivityTask(respBytes)
-	if len(task.TaskToken) == 0 {
-		return nil, nil
+	respFrame, err := w.t.Call(ctx, OpcodeSubscribeActivityTasks, body)
+	if err != nil {
+		return "", fmt.Errorf("subscribe activity tasks: %w", err)
 	}
-	return task, nil
+	return decodeSubscribeResp(respFrame)
 }
+
+// Unsubscribe tears down a subscription. Idempotent on the server side —
+// an unknown sub-id is treated as already gone.
+func (w *workerTransport) Unsubscribe(ctx context.Context, subID string) error {
+	body, err := json.Marshal(struct {
+		SubID string `json:"subscription_id"`
+	}{SubID: subID})
+	if err != nil {
+		return fmt.Errorf("unsubscribe: marshal: %w", err)
+	}
+	if _, err := w.t.Call(ctx, OpcodeUnsubscribeTasks, body); err != nil {
+		return fmt.Errorf("unsubscribe: %w", err)
+	}
+	return nil
+}
+
+// decodeSubscribeResp pulls the sub-id out of the standard envelope.
+func decodeSubscribeResp(frame []byte) (string, error) {
+	status, detail, payload, err := parseEnvelope(frame)
+	if err != nil {
+		return "", fmt.Errorf("subscribe decode: %w", err)
+	}
+	if status != 0 && status != 200 {
+		return "", fmt.Errorf("subscribe: status %d: %s", status, detail)
+	}
+	var resp struct {
+		SubID string `json:"subscription_id"`
+	}
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &resp); err != nil {
+			return "", fmt.Errorf("subscribe body: %w", err)
+		}
+	}
+	return resp.SubID, nil
+}
+
+// ── server-pushed delivery handlers ────────────────────────────────────
+
+// OnWorkflowTask installs fn as the workflow-task delivery callback and
+// (lazily) registers a Transport.Handle for OpcodeDeliverWorkflowTask.
+func (w *workerTransport) OnWorkflowTask(fn func(*WorkflowTask)) {
+	w.mu.Lock()
+	w.onWFTask = fn
+	already := w.installed[OpcodeDeliverWorkflowTask]
+	if w.installed == nil {
+		w.installed = make(map[uint16]bool)
+	}
+	w.installed[OpcodeDeliverWorkflowTask] = true
+	w.mu.Unlock()
+	if already || w.t == nil {
+		return
+	}
+	w.t.Handle(OpcodeDeliverWorkflowTask, func(_ string, body []byte) {
+		task := decodeWorkflowDelivery(body)
+		if task == nil {
+			return
+		}
+		w.mu.RLock()
+		cb := w.onWFTask
+		w.mu.RUnlock()
+		if cb != nil {
+			cb(task)
+		}
+	})
+}
+
+// OnActivityTask installs fn as the activity-task delivery callback.
+func (w *workerTransport) OnActivityTask(fn func(*ActivityTask)) {
+	w.mu.Lock()
+	w.onActTask = fn
+	already := w.installed[OpcodeDeliverActivityTask]
+	if w.installed == nil {
+		w.installed = make(map[uint16]bool)
+	}
+	w.installed[OpcodeDeliverActivityTask] = true
+	w.mu.Unlock()
+	if already || w.t == nil {
+		return
+	}
+	w.t.Handle(OpcodeDeliverActivityTask, func(_ string, body []byte) {
+		task := decodeActivityDelivery(body)
+		if task == nil {
+			return
+		}
+		w.mu.RLock()
+		cb := w.onActTask
+		w.mu.RUnlock()
+		if cb != nil {
+			cb(task)
+		}
+	})
+}
+
+// OnActivityResult installs fn as the activity-result delivery callback.
+func (w *workerTransport) OnActivityResult(fn func(activityID string, result, failure []byte)) {
+	w.mu.Lock()
+	w.onActRes = fn
+	already := w.installed[OpcodeDeliverActivityResult]
+	if w.installed == nil {
+		w.installed = make(map[uint16]bool)
+	}
+	w.installed[OpcodeDeliverActivityResult] = true
+	w.mu.Unlock()
+	if already || w.t == nil {
+		return
+	}
+	w.t.Handle(OpcodeDeliverActivityResult, func(_ string, body []byte) {
+		id, result, failure := decodeActivityResultDelivery(body)
+		w.mu.RLock()
+		cb := w.onActRes
+		w.mu.RUnlock()
+		if cb != nil {
+			cb(id, result, failure)
+		}
+	})
+}
+
+// decodeWorkflowDelivery parses the JSON shape from
+// pkg/tasks/dispatch.go workflowTaskDeliveryJSON. task_token and input
+// arrive as plain strings on the wire (no base64); we cast to []byte.
+func decodeWorkflowDelivery(body []byte) *WorkflowTask {
+	var msg struct {
+		TaskToken        string `json:"task_token"`
+		WorkflowID       string `json:"workflow_id"`
+		RunID            string `json:"run_id"`
+		WorkflowTypeName string `json:"workflow_type_name"`
+		Input            string `json:"input,omitempty"`
+	}
+	if err := json.Unmarshal(body, &msg); err != nil || msg.TaskToken == "" {
+		return nil
+	}
+	return &WorkflowTask{
+		TaskToken:        []byte(msg.TaskToken),
+		WorkflowID:       msg.WorkflowID,
+		RunID:            msg.RunID,
+		WorkflowTypeName: msg.WorkflowTypeName,
+		History:          []byte(msg.Input),
+	}
+}
+
+// decodeActivityDelivery parses the JSON shape from
+// pkg/tasks/dispatch.go activityTaskDeliveryJSON.
+func decodeActivityDelivery(body []byte) *ActivityTask {
+	var msg struct {
+		TaskToken             string `json:"task_token"`
+		WorkflowID            string `json:"workflow_id"`
+		RunID                 string `json:"run_id"`
+		ActivityID            string `json:"activity_id"`
+		ActivityTypeName      string `json:"activity_type_name"`
+		Input                 string `json:"input,omitempty"`
+		ScheduledTimeMs       int64  `json:"scheduled_time_ms"`
+		StartToCloseTimeoutMs int64  `json:"start_to_close_timeout_ms,omitempty"`
+		HeartbeatTimeoutMs    int64  `json:"heartbeat_timeout_ms,omitempty"`
+	}
+	if err := json.Unmarshal(body, &msg); err != nil || msg.TaskToken == "" {
+		return nil
+	}
+	return &ActivityTask{
+		TaskToken:             []byte(msg.TaskToken),
+		WorkflowID:            msg.WorkflowID,
+		RunID:                 msg.RunID,
+		ActivityID:            msg.ActivityID,
+		ActivityTypeName:      msg.ActivityTypeName,
+		Input:                 []byte(msg.Input),
+		ScheduledTimeMs:       msg.ScheduledTimeMs,
+		StartToCloseTimeoutMs: msg.StartToCloseTimeoutMs,
+		HeartbeatTimeoutMs:    msg.HeartbeatTimeoutMs,
+	}
+}
+
+// decodeActivityResultDelivery parses the JSON shape from
+// pkg/tasks/dispatch.go activityResultDeliveryJSON.
+func decodeActivityResultDelivery(body []byte) (string, []byte, []byte) {
+	var msg struct {
+		ActivityID string `json:"activity_id"`
+		Result     string `json:"result,omitempty"`
+		Failure    string `json:"failure,omitempty"`
+	}
+	if err := json.Unmarshal(body, &msg); err != nil {
+		return "", nil, nil
+	}
+	return msg.ActivityID, []byte(msg.Result), []byte(msg.Failure)
+}
+
+// ── responses ──────────────────────────────────────────────────────────
 
 // RespondWorkflowTaskCompleted uploads the commands list for a finished
 // workflow task.
@@ -150,7 +372,7 @@ func (w *workerTransport) ScheduleActivity(ctx context.Context, req ScheduleActi
 	}
 	var resp struct {
 		ActivityTaskID string `json:"activity_task_id"`
-		TaskToken      []byte `json:"task_token,omitempty"`
+		TaskToken      string `json:"task_token,omitempty"`
 	}
 	if len(payload) > 0 {
 		if err := json.Unmarshal(payload, &resp); err != nil {
@@ -159,48 +381,7 @@ func (w *workerTransport) ScheduleActivity(ctx context.Context, req ScheduleActi
 	}
 	return &ScheduleActivityResponse{
 		ActivityTaskID: resp.ActivityTaskID,
-		TaskToken:      resp.TaskToken,
-	}, nil
-}
-
-// WaitActivityResult issues opcode 0x006C.
-func (w *workerTransport) WaitActivityResult(ctx context.Context, req WaitActivityResultRequest) (*WaitActivityResultResponse, error) {
-	bodyJSON := struct {
-		ActivityTaskID string `json:"activity_task_id"`
-		WaitMs         int64  `json:"wait_ms,omitempty"`
-	}{
-		ActivityTaskID: req.ActivityTaskID,
-		WaitMs:         req.WaitMs,
-	}
-	body, err := json.Marshal(bodyJSON)
-	if err != nil {
-		return nil, fmt.Errorf("wait activity: marshal: %w", err)
-	}
-	respFrame, err := w.t.Call(ctx, OpcodeWaitActivityResult, body)
-	if err != nil {
-		return nil, fmt.Errorf("wait activity: %w", err)
-	}
-	status, detail, payload, perr := parseEnvelope(respFrame)
-	if perr != nil {
-		return nil, fmt.Errorf("wait activity decode: %w", perr)
-	}
-	if status != 0 && status != 200 {
-		return nil, fmt.Errorf("wait activity: status %d: %s", status, detail)
-	}
-	var resp struct {
-		Ready   bool   `json:"ready"`
-		Result  []byte `json:"result,omitempty"`
-		Failure []byte `json:"failure,omitempty"`
-	}
-	if len(payload) > 0 {
-		if err := json.Unmarshal(payload, &resp); err != nil {
-			return nil, fmt.Errorf("wait activity body: %w", err)
-		}
-	}
-	return &WaitActivityResultResponse{
-		Ready:   resp.Ready,
-		Result:  resp.Result,
-		Failure: resp.Failure,
+		TaskToken:      []byte(resp.TaskToken),
 	}, nil
 }
 
@@ -254,46 +435,18 @@ func (w *workerTransport) StartChildWorkflow(ctx context.Context, req StartChild
 }
 
 // parseEnvelope is worker_transport's copy of the envelope decode
-// used by user-facing RPCs in client.go. Kept here to avoid exporting
-// an internal decode from the client package.
+// used by user-facing RPCs in client.go.
 func parseEnvelope(frame []byte) (uint32, string, []byte, error) {
 	msg, err := zap.Parse(frame)
 	if err != nil {
 		return 0, "", nil, err
 	}
 	root := msg.Root()
-	// Envelope field offsets mirror the constants in client.go.
 	const envBody, envStatus, envError = 0, 8, 12
 	status := root.Uint32(envStatus)
 	detail := string(root.Bytes(envError))
 	body := root.Bytes(envBody)
 	return status, detail, body, nil
-}
-
-// encodePollWorkflowReq serialises a PollWorkflowTaskRequest into the
-// object-field layout declared in transport.go.
-func encodePollWorkflowReq(req PollWorkflowTaskRequest) []byte {
-	b := zap.NewBuilder(256)
-	obj := b.StartObject(64)
-	obj.SetText(FieldNamespace, req.Namespace)
-	obj.SetText(FieldTaskQueueName, req.TaskQueueName)
-	obj.SetInt8(FieldTaskQueueKind, req.TaskQueueKind)
-	obj.SetText(FieldIdentity, req.Identity)
-	obj.SetText(FieldWorkerBuildID, req.WorkerBuildID)
-	obj.FinishAsRoot()
-	return b.Finish()
-}
-
-// encodePollActivityReq serialises a PollActivityTaskRequest.
-func encodePollActivityReq(req PollActivityTaskRequest) []byte {
-	b := zap.NewBuilder(256)
-	obj := b.StartObject(48)
-	obj.SetText(FieldNamespace, req.Namespace)
-	obj.SetText(FieldTaskQueueName, req.TaskQueueName)
-	obj.SetInt8(FieldTaskQueueKind, req.TaskQueueKind)
-	obj.SetText(FieldIdentity, req.Identity)
-	obj.FinishAsRoot()
-	return b.Finish()
 }
 
 // encodeRespondWorkflowCompleted serialises the commands blob.
@@ -334,43 +487,6 @@ func encodeHeartbeatReq(req RecordActivityTaskHeartbeatRequest) []byte {
 	obj.SetBytes(FieldDetailsBytes, req.Details)
 	obj.FinishAsRoot()
 	return b.Finish()
-}
-
-// decodeWorkflowTask parses a response frame into a WorkflowTask.
-func decodeWorkflowTask(frame []byte) *WorkflowTask {
-	msg, err := zap.Parse(frame)
-	if err != nil {
-		return &WorkflowTask{}
-	}
-	root := msg.Root()
-	return &WorkflowTask{
-		TaskToken:        copyBytes(root.Bytes(FieldTaskToken)),
-		WorkflowID:       root.Text(FieldWorkflowID),
-		RunID:            root.Text(FieldRunID),
-		WorkflowTypeName: root.Text(FieldWorkflowTypeName),
-		History:          copyBytes(root.Bytes(FieldHistoryBytes)),
-		NextPageToken:    copyBytes(root.Bytes(FieldNextPageToken)),
-	}
-}
-
-// decodeActivityTask parses a response frame into an ActivityTask.
-func decodeActivityTask(frame []byte) *ActivityTask {
-	msg, err := zap.Parse(frame)
-	if err != nil {
-		return &ActivityTask{}
-	}
-	root := msg.Root()
-	return &ActivityTask{
-		TaskToken:             copyBytes(root.Bytes(FieldTaskToken)),
-		WorkflowID:            root.Text(FieldActivityWorkflowID),
-		RunID:                 root.Text(FieldActivityRunID),
-		ActivityID:            root.Text(FieldActivityID),
-		ActivityTypeName:      root.Text(FieldActivityTypeName),
-		Input:                 copyBytes(root.Bytes(FieldInputBytes)),
-		ScheduledTimeMs:       root.Int64(FieldScheduledTimeMs),
-		StartToCloseTimeoutMs: root.Int64(FieldStartToCloseTimeoutMs),
-		HeartbeatTimeoutMs:    root.Int64(FieldHeartbeatTimeoutMs),
-	}
 }
 
 // decodeHeartbeatResp reads the cancelRequested flag from the
