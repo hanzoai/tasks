@@ -79,9 +79,10 @@ type ScheduleState struct {
 }
 
 type ScheduleInfo struct {
-	CreateTime  string `json:"createTime"`
-	UpdateTime  string `json:"updateTime,omitempty"`
-	ActionCount int64  `json:"actionCount"`
+	CreateTime     string `json:"createTime"`
+	UpdateTime     string `json:"updateTime,omitempty"`
+	ActionCount    int64  `json:"actionCount"`
+	NextActionTime string `json:"nextActionTime,omitempty"`
 }
 
 // BatchOperation — bulk terminate/cancel/signal across many executions.
