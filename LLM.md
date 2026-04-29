@@ -156,8 +156,33 @@ Pure stdlib utilities that survive the rip: `aggregate`, `auth`, `build`,
 `tasktoken`, `timer`, `util`, `versioninfo`. These are candidates for
 further pruning once the native engine settles.
 
-### Auth: IAM only
-JWT validation against hanzo.id (`https://hanzo.id/.well-known/jwks`).
-Identity headers (`X-User-Id`, `X-Org-Id`, `X-User-Email`) are populated
-by `hanzoai/gateway` after JWT verify; tasksd trusts them as the canonical
-caller identity (vendor-free X-* convention per global CLAUDE.md).
+### Auth: IAM only (v3.5.0+, 2026-04-29)
+
+tasksd validates `Authorization: Bearer <jwt>` directly against IAM
+JWKS — no gateway dependency required. The strip+mint pattern is the
+trust boundary:
+
+- Inbound `X-Org-Id` / `X-User-Id` / `X-User-Email` are unconditionally
+  deleted on every request (`auth.stripIdentityHeaders`).
+- If a Bearer JWT is present, the token is parsed (RS256/ES256/...) and
+  verified against keys fetched from `TASKSD_JWKS_URL`. Issuer and
+  audience are checked against `TASKSD_JWT_ISSUER` / `TASKSD_JWT_AUDIENCE`.
+- On success, `X-Org-Id` is minted from the `owner` claim, `X-User-Id`
+  from `sub`, `X-User-Email` from `email`. Per-org store scoping uses
+  `engine.WithOrg(auth.OrgID(ctx))`.
+- `TASKSD_REQUIRE_IDENTITY=true` (production) rejects requests without
+  a validated JWT. Default false keeps embedded/dev path functional.
+
+Production env (do-sfo3-hanzo-k8s/hanzo):
+```
+TASKSD_JWKS_URL=http://iam.hanzo.svc/.well-known/jwks
+TASKSD_JWT_ISSUER=https://hanzo.id
+TASKSD_REQUIRE_IDENTITY=true
+```
+
+History — pre-v3.5.0, the middleware trusted client-supplied X-* headers
+under the assumption that hanzoai/gateway sat between ingress and tasksd.
+The actual ingress topology routed direct to the tasks Service, leaving
+`X-Org-Id` spoofable on `tasks-api.hanzo.ai`. v3.5.0 makes tasksd
+self-sufficient: gateway can still front it for rate limiting / billing,
+but it is no longer the sole trust boundary.
