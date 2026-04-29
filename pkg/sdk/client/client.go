@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -224,6 +225,9 @@ var ErrClosed = errors.New("hanzo/tasks/client: closed")
 // when they ask a WorkflowRun for its result but the server has not
 // exposed the history-fetch opcode yet.
 var ErrNotImplementedLocally = errors.New("hanzo/tasks/client: RPC requires pkg/sdk/worker history fetch (not yet wired)")
+
+// dbgWorkerHandle prints to stderr when DISPATCH_TRACE=1.
+var dbgWorkerHandle = os.Getenv("DISPATCH_TRACE") == "1"
 
 // Dial connects to a Hanzo Tasks frontend. Callers must Close() when done.
 func Dial(opts Options) (Client, error) {
@@ -447,12 +451,18 @@ func (t *zapTransport) Handle(opcode uint16, fn func(from string, body []byte)) 
 	if t == nil || t.node == nil || fn == nil {
 		return
 	}
+	if dbgWorkerHandle {
+		fmt.Fprintf(os.Stderr, "WORKER Handle register opcode=0x%04x\n", opcode)
+	}
 	t.node.Handle(opcode, func(ctx context.Context, from string, msg *zap.Message) (*zap.Message, error) {
 		root := msg.Root()
 		body := root.Bytes(envelopeBody)
 		// Copy out — msg is owned by the receive loop.
 		payload := make([]byte, len(body))
 		copy(payload, body)
+		if dbgWorkerHandle {
+			fmt.Fprintf(os.Stderr, "WORKER Handle invoked opcode=0x%04x from=%s body_len=%d\n", opcode, from, len(payload))
+		}
 		fn(from, payload)
 		// Reply with an empty 200 envelope so the server's Send
 		// path observes a clean ack (Call-style server pushes wait on
