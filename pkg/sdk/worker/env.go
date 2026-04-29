@@ -18,9 +18,10 @@ import (
 // workerEnv is the worker-owned CoroutineEnv that drives workflow
 // functions in production (Phase 1). It is a real wire-backed
 // implementation: ExecuteActivity hits the frontend via
-// ScheduleActivity + long-poll WaitActivityResult; NewTimer uses a
-// per-timer goroutine; Select uses a fan-in channel instead of a 1ms
-// spin.
+// ScheduleActivity and waits for the matching server-pushed
+// OpcodeDeliverActivityResult on a per-activityID channel; NewTimer
+// uses a per-timer goroutine; Select uses a fan-in channel instead
+// of a 1ms spin.
 //
 // NOTE on replay (Phase 1 behaviour): workerEnv does NOT event-source
 // the workflow. Each dispatch re-runs the workflow function from the
@@ -81,6 +82,21 @@ type workerEnv struct {
 	// pendingUpserts buffers UpsertSearchAttributes calls that the
 	// dispatcher drains onto the next workflow-task response.
 	pendingUpserts []map[string]any
+
+	// results is the worker's pending-activity-result registry. The
+	// transport's OnActivityResult callback drains into the channel
+	// returned by registerPendingActivity. nil only in unit tests that
+	// do not exercise ExecuteActivity.
+	results pendingResults
+}
+
+// pendingResults is the subset of *workerImpl that workerEnv needs to
+// register and clean up activity-result channels. Defined as an
+// interface so test envs can inject a stub without dragging the full
+// worker in.
+type pendingResults interface {
+	registerPendingActivity(activityID string) chan *activityResultMsg
+	removePendingActivity(activityID string)
 }
 
 // sideEffectRecord is one SideEffect outcome.
@@ -106,8 +122,11 @@ func (s *cancelScope) cancel() {
 	})
 }
 
-// newWorkerEnv constructs a workerEnv for a workflow task.
-func newWorkerEnv(ctx context.Context, transport client.WorkerTransport, info workflow.Info, taskQueue string, logger luxlog.Logger) *workerEnv {
+// newWorkerEnv constructs a workerEnv for a workflow task. results is
+// the worker's pending-activity-result registry; nil only in unit
+// tests that do not exercise ExecuteActivity (ExecuteActivity then
+// settles with a ConfigError).
+func newWorkerEnv(ctx context.Context, results pendingResults, transport client.WorkerTransport, info workflow.Info, taskQueue string, logger luxlog.Logger) *workerEnv {
 	if logger == nil {
 		logger = luxlog.Noop()
 	}
@@ -115,6 +134,7 @@ func newWorkerEnv(ctx context.Context, transport client.WorkerTransport, info wo
 	e := &workerEnv{
 		info:      info,
 		transport: transport,
+		results:   results,
 		logger:    logger,
 		ctx:       ctx,
 		signals:   make(map[string]workflow.Channel),
@@ -186,9 +206,10 @@ func (e *workerEnv) NewTimer(d time.Duration) workflow.Future {
 }
 
 // ExecuteActivity dispatches an activity over the wire via
-// ScheduleActivity + long-poll WaitActivityResult. Returns a Future
-// that settles with the activity's result (JSON-encoded bytes) or a
-// *temporal.Error decoded from the failure envelope.
+// ScheduleActivity and waits for the matching server-pushed
+// OpcodeDeliverActivityResult. Returns a Future that settles with
+// the activity's result (JSON-encoded bytes) or a *temporal.Error
+// decoded from the failure envelope.
 func (e *workerEnv) ExecuteActivity(opts workflow.ActivityOptions, activity any, args []any) workflow.Future {
 	f := workflow.NewFuture()
 
@@ -252,41 +273,32 @@ func (e *workerEnv) ExecuteActivity(opts workflow.ActivityOptions, activity any,
 			return
 		}
 
-		// Long-poll the result. Each WaitActivityResult call caps at
-		// 5s so ctx cancellation propagates within a short window
-		// even when the activity takes longer.
-		for {
-			select {
-			case <-ctx.Done():
-				f.Settle(nil, temporal.NewErrorWithCause("activity deadline", "TimeoutError", ctx.Err(), false))
-				return
-			case <-e.root.done:
-				f.Settle(nil, e.root.err)
-				return
-			default:
-			}
-
-			waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
-			resp, err := e.transport.WaitActivityResult(waitCtx, client.WaitActivityResultRequest{
-				ActivityTaskID: schedResp.ActivityTaskID,
-				WaitMs:         5000,
-			})
-			waitCancel()
-			if err != nil {
-				// Transient errors: back off briefly and retry.
-				time.Sleep(500 * time.Millisecond)
-				continue
-			}
-			if !resp.Ready {
-				// Still pending. Loop; ctx deadline bounds the wait.
-				continue
-			}
-			if len(resp.Failure) > 0 {
-				f.Settle(nil, temporal.Decode(resp.Failure))
-				return
-			}
-			f.Settle(resp.Result, nil)
+		// Wait for the server-pushed activity result. The result
+		// registry was installed by the worker; the transport's
+		// OnActivityResult callback drains into ch when the activity's
+		// completion arrives via OpcodeDeliverActivityResult.
+		if e.results == nil {
+			f.Settle(nil, temporal.NewError("worker: no result registry; cannot wait for activity", "ConfigError", true))
 			return
+		}
+		ch := e.results.registerPendingActivity(schedResp.ActivityTaskID)
+		defer e.results.removePendingActivity(schedResp.ActivityTaskID)
+
+		select {
+		case msg := <-ch:
+			if msg == nil {
+				f.Settle(nil, temporal.NewError("activity result channel closed", "TransportError", false))
+				return
+			}
+			if len(msg.failure) > 0 {
+				f.Settle(nil, temporal.Decode(msg.failure))
+				return
+			}
+			f.Settle(msg.result, nil)
+		case <-ctx.Done():
+			f.Settle(nil, temporal.NewErrorWithCause("activity deadline", "TimeoutError", ctx.Err(), false))
+		case <-e.root.done:
+			f.Settle(nil, e.root.err)
 		}
 	}()
 

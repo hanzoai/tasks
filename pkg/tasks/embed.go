@@ -9,6 +9,7 @@ package tasks
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,8 +18,11 @@ import (
 	"strings"
 
 	"github.com/hanzoai/tasks/pkg/auth"
+	"github.com/hanzoai/tasks/pkg/sdk/client"
 	"github.com/luxfi/zap"
 )
+
+var base64Std = base64.StdEncoding
 
 // EmbedConfig configures the in-process Tasks server.
 type EmbedConfig struct {
@@ -71,6 +75,15 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		NoDiscovery: true,
 	})
 
+	// Wire dispatcher → node.Send for server-push delivery.
+	en.disp.send = func(peerID string, opcode uint16, body []byte) error {
+		msg, err := wireSend(opcode, body)
+		if err != nil {
+			return err
+		}
+		return node.Send(context.Background(), peerID, msg)
+	}
+
 	for op, h := range zapHandlers(en, cfg.Namespace) {
 		node.Handle(op, h)
 	}
@@ -83,6 +96,21 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	go en.runScheduler(stop)
 
 	return &Embedded{cfg: cfg, node: node, engine: en, stop: stop}, nil
+}
+
+// wireSend builds a ZAP message for server-initiated push: the body is
+// wrapped in the same single-field envelope used by request/response
+// (status=0, error=""), with the opcode stamped in the frame's flag
+// high byte so the receiver dispatches on it.
+func wireSend(opcode uint16, body []byte) (*zap.Message, error) {
+	b := zap.NewBuilder(envelopeObjectSize + len(body) + 32)
+	obj := b.StartObject(envelopeObjectSize)
+	obj.SetBytes(envelopeBody, body)
+	obj.SetUint32(envelopeStatus, 200)
+	obj.FinishAsRoot()
+	flags := uint16(opcode) << 8
+	frame := b.FinishWithFlags(flags)
+	return zap.Parse(frame)
 }
 
 // ZAPPort returns the bound ZAP port.
@@ -600,6 +628,24 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			return envelope(body, status, errMsg)
 		}
 	}
+	// wrapPeer exposes the caller's peerID to the handler so subscription
+	// state can be keyed off it. Used by Subscribe / Schedule / Respond.
+	wrapPeer := func(fn func(from string, req map[string]any) (any, uint32, string)) zap.Handler {
+		return func(_ context.Context, from string, msg *zap.Message) (*zap.Message, error) {
+			req := map[string]any{}
+			if msg != nil {
+				root := msg.Root()
+				if !root.IsNull() {
+					if rb := root.Bytes(envelopeBody); len(rb) > 0 {
+						_ = json.Unmarshal(rb, &req)
+					}
+				}
+			}
+			out, status, errMsg := fn(from, req)
+			body, _ := envBody(out)
+			return envelope(body, status, errMsg)
+		}
+	}
 	str := func(req map[string]any, k string) string {
 		if v, ok := req[k].(string); ok {
 			return v
@@ -861,7 +907,211 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]string{"status": "running"}, 200, ""
 		}),
+
+		// ── subscribe / deliver task plumbing ─────────────────────
+		OpcodeSubscribeWorkflowTasks: wrapPeer(func(from string, req map[string]any) (any, uint32, string) {
+			ns := strOr(req, "namespace", defaultNS)
+			q := strOr(req, "task_queue", str(req, "taskQueue"))
+			id, err := en.disp.Subscribe(from, ns, q, kindWorkflow)
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return map[string]string{"subscription_id": id}, 200, ""
+		}),
+		OpcodeSubscribeActivityTasks: wrapPeer(func(from string, req map[string]any) (any, uint32, string) {
+			ns := strOr(req, "namespace", defaultNS)
+			q := strOr(req, "task_queue", str(req, "taskQueue"))
+			id, err := en.disp.Subscribe(from, ns, q, kindActivity)
+			if err != nil {
+				return nil, 400, err.Error()
+			}
+			return map[string]string{"subscription_id": id}, 200, ""
+		}),
+		OpcodeUnsubscribeTasks: wrap(func(req map[string]any) (any, uint32, string) {
+			id := strOr(req, "subscription_id", str(req, "subscriptionId"))
+			en.disp.Unsubscribe(id)
+			return map[string]bool{"ok": true}, 200, ""
+		}),
+
+		// ── responses (object-field frames, see client/worker_transport.go) ──
+		client.OpcodeRespondWorkflowTaskCompleted: respondWorkflowHandler(en),
+		client.OpcodeRespondActivityTaskCompleted: respondActivityCompletedHandler(en),
+		client.OpcodeRespondActivityTaskFailed:    respondActivityFailedHandler(en),
+		client.OpcodeRecordActivityTaskHeartbeat:  heartbeatHandler(),
+
+		// ── activity scheduling (envelope + JSON) ─────────────────
+		client.OpcodeScheduleActivity: wrapPeer(func(from string, req map[string]any) (any, uint32, string) {
+			ns := strOr(req, "namespace", defaultNS)
+			q := strOr(req, "task_queue", "")
+			wfID := strOr(req, "workflow_id", "")
+			runID := strOr(req, "run_id", "")
+			actType := strOr(req, "activity_type", "")
+			if actType == "" {
+				return nil, 400, "activity_type required"
+			}
+			input, _ := decodeBytesField(req, "input")
+			startMs := int64Field(req, "start_to_close_ms")
+			hbMs := int64Field(req, "heartbeat_ms")
+			actID, token := en.disp.ScheduleActivity(from, ns, q, wfID, runID, actType, input, startMs, hbMs)
+			return map[string]any{
+				"activity_task_id": actID,
+				"task_token":       string(token),
+			}, 200, ""
+		}),
+		// 0x006D — child workflows ship in a follow-up.
+		client.OpcodeStartChildWorkflow: wrap(func(_ map[string]any) (any, uint32, string) {
+			return nil, 501, "start_child_workflow: not yet implemented"
+		}),
 	}
+}
+
+// ── object-field handlers for worker Respond / Heartbeat ──────────────
+
+// respondWorkflowHandler decodes the object-field frame the worker
+// produces in encodeRespondWorkflowCompleted, completes the workflow
+// task, and applies the worker's command list to the engine state.
+func respondWorkflowHandler(en *engine) zap.Handler {
+	return func(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+		token, commands := decodeRespondFrame(msg, client.FieldCommandsBytes)
+		t, ok := en.disp.CompleteWorkflowTask(token)
+		if !ok {
+			return objectAck(0, "task token not found", 404)
+		}
+		// Apply commands.
+		var env struct {
+			Version  int8 `json:"v"`
+			Commands []struct {
+				Kind           int8   `json:"kind"`
+				Result         []byte `json:"result,omitempty"`
+				Failure        []byte `json:"failure,omitempty"`
+				ActivityTaskID string `json:"activityTaskId,omitempty"`
+			} `json:"cmds"`
+		}
+		if len(commands) > 0 {
+			_ = json.Unmarshal(commands, &env)
+		}
+		for _, c := range env.Commands {
+			switch c.Kind {
+			case 0: // complete
+				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_COMPLETED", "workflow.completed")
+			case 1: // fail
+				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_FAILED", "workflow.failed")
+			case 2: // schedule_activity (already scheduled by 0x006B; no-op)
+			}
+		}
+		return objectAck(0, "", 200)
+	}
+}
+
+func respondActivityCompletedHandler(en *engine) zap.Handler {
+	return func(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+		token, result := decodeRespondFrame(msg, client.FieldResultBytes)
+		if _, ok := en.disp.CompleteActivityTask(token, result, nil); !ok {
+			return objectAck(0, "task token not found", 404)
+		}
+		return objectAck(0, "", 200)
+	}
+}
+
+func respondActivityFailedHandler(en *engine) zap.Handler {
+	return func(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+		token, failure := decodeRespondFrame(msg, client.FieldFailureBytes)
+		if _, ok := en.disp.CompleteActivityTask(token, nil, failure); !ok {
+			return objectAck(0, "task token not found", 404)
+		}
+		return objectAck(0, "", 200)
+	}
+}
+
+func heartbeatHandler() zap.Handler {
+	return func(_ context.Context, _ string, _ *zap.Message) (*zap.Message, error) {
+		// v1: never request cancel.
+		return objectAck(0, "", 200)
+	}
+}
+
+// decodeRespondFrame extracts the task_token and the secondary bytes
+// field (commands / result / failure / details) from a worker-encoded
+// object frame.
+func decodeRespondFrame(msg *zap.Message, secondaryField int) (token, secondary []byte) {
+	if msg == nil {
+		return nil, nil
+	}
+	root := msg.Root()
+	if root.IsNull() {
+		return nil, nil
+	}
+	t := root.Bytes(client.FieldTaskToken)
+	s := root.Bytes(secondaryField)
+	out1 := make([]byte, len(t))
+	copy(out1, t)
+	out2 := make([]byte, len(s))
+	copy(out2, s)
+	return out1, out2
+}
+
+// objectAck builds a minimal object-field response for worker Respond
+// ops. cancelRequested defaults to 0 (false). status/error are folded
+// into a tiny envelope-compatible shape so callers that decode either
+// the heartbeat object form or the envelope shape both succeed.
+func objectAck(cancelRequested uint8, errMsg string, status uint32) (*zap.Message, error) {
+	b := zap.NewBuilder(64)
+	obj := b.StartObject(envelopeObjectSize)
+	obj.SetUint32(envelopeStatus, status)
+	if cancelRequested != 0 {
+		obj.SetBytes(client.FieldRespCancelRequested, []byte{cancelRequested})
+	}
+	if errMsg != "" {
+		obj.SetBytes(envelopeError, []byte(errMsg))
+	}
+	obj.FinishAsRoot()
+	return zap.Parse(b.Finish())
+}
+
+// decodeBytesField pulls a base64-encoded []byte field out of the
+// generic map[string]any decode. Go's default JSON unmarshal yields a
+// string for []byte fields; we round-trip via base64 to recover the
+// original bytes. Empty / missing → nil, nil.
+func decodeBytesField(req map[string]any, key string) ([]byte, error) {
+	v, ok := req[key]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		// Numbers / objects come through as the marshaled form — re-encode.
+		return json.Marshal(v)
+	}
+	if s == "" {
+		return nil, nil
+	}
+	// Encoded as base64 (Go json default for []byte).
+	dec, err := base64DecodeStd(s)
+	if err == nil {
+		return dec, nil
+	}
+	// Some callers pass the raw string; fall back to its bytes.
+	return []byte(s), nil
+}
+
+func base64DecodeStd(s string) ([]byte, error) {
+	return base64Std.DecodeString(s)
+}
+
+func int64Field(req map[string]any, key string) int64 {
+	v, ok := req[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch x := v.(type) {
+	case float64:
+		return int64(x)
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	}
+	return 0
 }
 
 // ── envelope (ZAP single-field JSON shape) ─────────────────────────
