@@ -16,10 +16,13 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+
+	"github.com/hanzoai/tasks/pkg/auth"
 )
 
 type Event struct {
 	Kind       string `json:"kind"`        // workflow.started|workflow.canceled|workflow.terminated|workflow.signaled|schedule.created|schedule.paused|schedule.resumed|schedule.deleted|namespace.registered|batch.started
+	OrgID      string `json:"org_id,omitempty"` // tenant scope; "" = unscoped (embedded/dev)
 	Namespace  string `json:"namespace,omitempty"`
 	WorkflowID string `json:"workflow_id,omitempty"`
 	RunID      string `json:"run_id,omitempty"`
@@ -106,6 +109,11 @@ func (e *Embedded) sseHandler() http.Handler {
 		id, ch := e.engine.broker.subscribe()
 		defer e.engine.broker.unsubscribe(id)
 
+		// Per-tenant filter: when the caller authenticated, only deliver
+		// events tagged with their org. Empty caller-org (embedded/dev)
+		// sees the full unscoped firehose — same surface as today.
+		callerOrg := auth.OrgID(r.Context())
+
 		ctx := r.Context()
 		for {
 			select {
@@ -114,6 +122,9 @@ func (e *Embedded) sseHandler() http.Handler {
 			case ev, ok := <-ch:
 				if !ok {
 					return
+				}
+				if callerOrg != "" && ev.OrgID != callerOrg {
+					continue
 				}
 				body, err := json.Marshal(ev)
 				if err != nil {

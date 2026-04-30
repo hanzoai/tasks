@@ -575,7 +575,19 @@ type queryDeliveryJSON struct {
 
 type pendingQuery struct {
 	resCh chan queryResponse
+	at    time.Time
 }
+
+// maxPendingQueries caps the in-flight query map. Past this point a new
+// PushQuery evicts the oldest (FIFO) so a misbehaving worker that never
+// answers cannot grow the map without bound.
+const maxPendingQueries = 4096
+
+// pendingQueryTTL is the hard age cap for a pending query record. Both
+// the per-call timeout (default 5s in QueryWorkflowCtx) and this sweep
+// must trigger before the entry is reclaimed; the sweep is the safety
+// net for callers that go away without canceling.
+const pendingQueryTTL = 5 * time.Minute
 
 type queryResponse struct {
 	result []byte
@@ -596,8 +608,12 @@ func (d *dispatcher) PushQuery(ns, queue, workflowID, runID, queryType string, a
 	if d.queries == nil {
 		d.queries = make(map[string]*pendingQuery)
 	}
+	d.evictExpiredQueriesLocked()
+	if len(d.queries) >= maxPendingQueries {
+		d.evictOldestQueryLocked()
+	}
 	token := newRandID()
-	pq := &pendingQuery{resCh: make(chan queryResponse, 1)}
+	pq := &pendingQuery{resCh: make(chan queryResponse, 1), at: time.Now()}
 	d.queries[token] = pq
 	send := d.send
 	peer := sub.peerID
@@ -647,4 +663,34 @@ func (d *dispatcher) CancelQuery(token string) {
 	d.mu.Lock()
 	delete(d.queries, token)
 	d.mu.Unlock()
+}
+
+// evictExpiredQueriesLocked drops queries older than pendingQueryTTL.
+// Caller holds d.mu.
+func (d *dispatcher) evictExpiredQueriesLocked() {
+	cutoff := time.Now().Add(-pendingQueryTTL)
+	for tok, pq := range d.queries {
+		if pq.at.Before(cutoff) {
+			delete(d.queries, tok)
+		}
+	}
+}
+
+// evictOldestQueryLocked drops the single oldest pending query.
+// Bounded-overflow safety net for the maxPendingQueries cap. O(n).
+// Caller holds d.mu.
+func (d *dispatcher) evictOldestQueryLocked() {
+	var (
+		oldestTok string
+		oldestAt  time.Time
+	)
+	for tok, pq := range d.queries {
+		if oldestTok == "" || pq.at.Before(oldestAt) {
+			oldestTok = tok
+			oldestAt = pq.at
+		}
+	}
+	if oldestTok != "" {
+		delete(d.queries, oldestTok)
+	}
 }

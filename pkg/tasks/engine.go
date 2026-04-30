@@ -71,10 +71,12 @@ type engine struct {
 	broker     *broker
 	disp       *dispatcher
 	cancelling *cancelTracker
+	workers    *workerRegistry
+	orgID      string // "" = unscoped (embedded/dev). Stamped on every emitted Event.
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker()}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry()}
 }
 
 // WithOrg returns an engine view scoped to orgID. Reads and writes go
@@ -84,7 +86,14 @@ func (e *engine) WithOrg(orgID string) *engine {
 	if orgID == "" {
 		return e
 	}
-	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling}
+	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, orgID: orgID}
+}
+
+// emit publishes an event tagged with the engine's org so per-org SSE
+// filtering can trust OrgID. Use everywhere instead of e.broker.publish.
+func (e *engine) emit(ev Event) {
+	ev.OrgID = e.orgID
+	e.broker.publish(ev)
 }
 
 // ── ids ─────────────────────────────────────────────────────────────
@@ -120,7 +129,7 @@ func (e *engine) RegisterNamespace(ns Namespace) error {
 	if err := e.store.put("ns/"+ns.NamespaceInfo.Name, ns); err != nil {
 		return err
 	}
-	e.broker.publish(Event{Kind: "namespace.registered", Namespace: ns.NamespaceInfo.Name, Data: ns})
+	e.emit(Event{Kind: "namespace.registered", Namespace: ns.NamespaceInfo.Name, Data: ns})
 	return nil
 }
 
@@ -207,7 +216,7 @@ func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ Ty
 		}
 		e.disp.EnqueueWorkflowTask(ns, taskQueue, workflowId, runId, typ.Name, inputBytes)
 	}
-	e.broker.publish(Event{
+	e.emit(Event{
 		Kind:       "workflow.started",
 		Namespace:  ns,
 		WorkflowID: workflowId,
@@ -273,7 +282,7 @@ func (e *engine) terminalTransition(ns, workflowId, runId, status, evKind, event
 	}
 	// Reload to capture the bumped HistoryLen.
 	wf, _, _ = e.DescribeWorkflow(ns, wf.Execution.WorkflowId, wf.Execution.RunId)
-	e.broker.publish(Event{
+	e.emit(Event{
 		Kind:       evKind,
 		Namespace:  ns,
 		WorkflowID: wf.Execution.WorkflowId,
@@ -349,7 +358,7 @@ func (e *engine) CancelWorkflowWithReason(ns, workflowId, runId, reason, identit
 		e.cancelling.mark(ns, wf.Execution.WorkflowId, wf.Execution.RunId)
 	}
 	e.disp.PushCancelRequest(ns, wf.TaskQueue, wf.Execution.WorkflowId, wf.Execution.RunId, reason, identity)
-	e.broker.publish(Event{
+	e.emit(Event{
 		Kind:       "workflow.cancel_requested",
 		Namespace:  ns,
 		WorkflowID: wf.Execution.WorkflowId,
@@ -421,7 +430,7 @@ func (e *engine) signalWorkflow(ns, workflowId, runId, name string, payload any,
 		return err
 	}
 	wf, _, _ = e.DescribeWorkflow(ns, wf.Execution.WorkflowId, wf.Execution.RunId)
-	e.broker.publish(Event{
+	e.emit(Event{
 		Kind:       "workflow.signaled",
 		Namespace:  ns,
 		WorkflowID: wf.Execution.WorkflowId,
@@ -665,7 +674,7 @@ func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reas
 		e.disp.EnqueueWorkflowTask(ns, newWf.TaskQueue, newWf.Execution.WorkflowId, newWf.Execution.RunId, newWf.Type.Name, inputBytes)
 	}
 	out, _, _ := e.DescribeWorkflow(ns, newWf.Execution.WorkflowId, newWf.Execution.RunId)
-	e.broker.publish(Event{
+	e.emit(Event{
 		Kind:       "workflow.reset",
 		Namespace:  ns,
 		WorkflowID: out.Execution.WorkflowId,
@@ -1137,7 +1146,7 @@ func (e *engine) CreateSchedule(s Schedule) error {
 	if err := e.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s); err != nil {
 		return err
 	}
-	e.broker.publish(Event{Kind: "schedule.created", Namespace: s.Namespace, ScheduleID: s.ScheduleId, Data: s})
+	e.emit(Event{Kind: "schedule.created", Namespace: s.Namespace, ScheduleID: s.ScheduleId, Data: s})
 	return nil
 }
 
@@ -1176,12 +1185,26 @@ var validSearchAttrTypes = map[string]bool{
 	"Bool": true, "Datetime": true, "KeywordList": true,
 }
 
+// reservedSearchAttrNames are the system fields the visibility evaluator
+// interprets directly. Allowing user code to register a custom attribute
+// with one of these names would let it shadow the real workflow field
+// (e.g. ExecutionStatus="*") and silently widen list results. Names
+// starting with "Temporal" are reserved for upstream-compat fields.
+var reservedSearchAttrNames = map[string]bool{
+	"WorkflowType": true, "WorkflowId": true, "RunId": true,
+	"ExecutionStatus": true, "StartTime": true, "CloseTime": true,
+	"TaskQueue": true,
+}
+
 func (e *engine) AddSearchAttribute(ns string, sa SearchAttribute) error {
 	if _, ok, _ := e.DescribeNamespace(ns); !ok {
 		return fmt.Errorf("namespace %q not registered", ns)
 	}
 	if sa.Name == "" {
 		return fmt.Errorf("search attribute name required")
+	}
+	if reservedSearchAttrNames[sa.Name] || strings.HasPrefix(sa.Name, "Temporal") {
+		return fmt.Errorf("search attribute %q is reserved", sa.Name)
 	}
 	if !validSearchAttrTypes[sa.Type] {
 		return fmt.Errorf("invalid search attribute type %q", sa.Type)
@@ -1327,7 +1350,7 @@ func (e *engine) TerminateBatch(ns, batchID, reason, identity string) (*BatchOpe
 	if err := e.store.put(fmt.Sprintf("bt/%s/%s", ns, b.BatchId), b); err != nil {
 		return nil, err
 	}
-	e.broker.publish(Event{
+	e.emit(Event{
 		Kind:      "batch.terminated",
 		Namespace: ns,
 		BatchID:   b.BatchId,

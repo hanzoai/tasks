@@ -15,7 +15,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/hanzoai/tasks/pkg/auth"
 	"github.com/hanzoai/tasks/pkg/sdk/client"
@@ -30,6 +32,13 @@ type EmbedConfig struct {
 	ZAPPort   int          // 0 → 9999
 	Namespace string       // "" → "default"
 	Logger    *slog.Logger // nil → slog.Default()
+	// JWTValidator validates the auth_token field on every ZAP request.
+	// nil = no ZAP-side validation (dev / embedded). When non-nil and
+	// RequireIdentity=true, every ZAP request must carry an auth_token
+	// that validates against IAM; per-request engine is WithOrg-scoped
+	// to claims.Owner. This mirrors the HTTP middleware trust boundary.
+	JWTValidator     *auth.Validator
+	RequireIdentity  bool
 }
 
 // Embedded is the handle to a running in-process Tasks server.
@@ -52,7 +61,10 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		cfg.Logger = slog.Default()
 	}
 
-	st := newStore()
+	st, err := newStoreFromEnv(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("tasks.Embed: store: %w", err)
+	}
 	en := newEngine(st)
 
 	// Bootstrap default namespace so the UI has something to render
@@ -84,7 +96,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		return node.Send(context.Background(), peerID, msg)
 	}
 
-	for op, h := range zapHandlers(en, cfg.Namespace) {
+	for op, h := range zapHandlers(en, cfg.Namespace, cfg.JWTValidator, cfg.RequireIdentity) {
 		node.Handle(op, h)
 	}
 
@@ -144,6 +156,16 @@ func (e *Embedded) Stop(ctx context.Context) error {
 // MCPHandler returns the JSON-RPC 2.0 MCP endpoint.
 func (e *Embedded) MCPHandler() http.Handler { return e.mcpHandler() }
 
+// RegisterWorker upserts a worker into the in-memory registry. Workers
+// self-register on first poll/heartbeat. Real wiring will move to the
+// dispatcher Subscribe path; this is the public surface the UI reads.
+func (e *Embedded) RegisterWorker(w Worker) {
+	if e == nil || e.engine == nil {
+		return
+	}
+	e.engine.workers.Register(w)
+}
+
 // EventsHandler returns the SSE realtime stream of engine events.
 func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 
@@ -154,6 +176,15 @@ func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 // legacy unscoped store (embedded/dev path only).
 func (e *Embedded) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
+
+	// /v1/tasks/settings — UI bootstrap. Unauthenticated.
+	mux.HandleFunc("/v1/tasks/settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		writeOK(w, nil, settingsResponse())
+	})
 
 	// /v1/tasks/namespaces
 	mux.HandleFunc("/v1/tasks/namespaces", func(w http.ResponseWriter, r *http.Request) {
@@ -198,17 +229,40 @@ func (e *Embedded) HTTPHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		if !validIdent(ns) {
+			writeErr(w, 400, "invalid namespace")
+			return
+		}
+		// Reject any path-traversal sentinels in the resource id slot too.
+		for _, p := range parts[1:] {
+			if !validPathSegment(p) {
+				writeErr(w, 400, "invalid path segment")
+				return
+			}
+		}
 		if len(parts) == 1 {
-			n, ok, err := en.DescribeNamespace(ns)
-			if err != nil {
-				writeErr(w, 500, err.Error())
-				return
+			switch r.Method {
+			case http.MethodGet:
+				n, ok, err := en.DescribeNamespace(ns)
+				if err != nil {
+					writeErr(w, 500, err.Error())
+					return
+				}
+				if !ok {
+					writeErr(w, 404, "namespace not found")
+					return
+				}
+				writeOK(w, nil, n)
+			case http.MethodDelete:
+				n, err := en.DeprecateNamespace(ns)
+				if err != nil {
+					writeErr(w, 404, err.Error())
+					return
+				}
+				writeOK(w, nil, n)
+			default:
+				http.NotFound(w, r)
 			}
-			if !ok {
-				writeErr(w, 404, "namespace not found")
-				return
-			}
-			writeOK(w, nil, n)
 			return
 		}
 		switch parts[1] {
@@ -227,11 +281,13 @@ func (e *Embedded) HTTPHandler() http.Handler {
 		case "task-queues":
 			handleTaskQueues(w, r, en, ns, parts[2:])
 		case "workers":
-			handleWorkers(w, r, ns, parts[2:])
+			handleWorkers(w, r, en, ns, parts[2:])
 		case "search-attributes":
 			handleSearchAttributes(w, r, en, ns, parts[2:])
 		case "metadata":
 			handleNamespaceMetadata(w, r, en, ns, parts[2:])
+		case "archival":
+			handleArchival(w, r, en, ns, parts[2:])
 		default:
 			http.NotFound(w, r)
 		}
@@ -373,6 +429,9 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 			return
 		}
 		writeOK(w, nil, wf)
+	case len(sub) == 2 && sub[1] == "executions" && r.Method == http.MethodGet:
+		rows, err := en.ListWorkflowChain(ns, sub[0])
+		writeOK(w, err, map[string]any{"executions": rows})
 	case len(sub) == 2 && sub[1] == "reset" && r.Method == http.MethodPost:
 		var req struct {
 			RunId    string `json:"runId"`
@@ -389,6 +448,44 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// validIdent enforces the namespace / id grammar for path-injected
+// values. Rejects empty, length > 64, and anything outside
+// [A-Za-z0-9_.-]. Used as the path-traversal trust boundary so
+// constructed store keys (e.g. "wf/<ns>/<wfid>/<runid>") cannot escape
+// their key family. Reserved sentinels ("." / "..") are rejected.
+func validIdent(s string) bool {
+	if s == "" || len(s) > 64 || s == "." || s == ".." {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		if c == '_' || c == '-' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// validPathSegment is a permissive segment check that still bars the
+// classic traversal characters (NUL, '/', '..'). Used for non-leading
+// path slots whose grammar isn't strictly an ident (signal names etc).
+func validPathSegment(s string) bool {
+	if s == "." || s == ".." {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == 0 || c == '/' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseInt64(s string) int64 {
@@ -426,22 +523,119 @@ func handleTaskQueues(w http.ResponseWriter, r *http.Request, en *engine, ns str
 		}
 		writeOK(w, nil, taskQueueDetail(rows, sub[0]))
 	case len(sub) == 2 && sub[1] == "workers" && r.Method == http.MethodGet:
-		// Worker registration is part of the worker SDK runtime that
-		// hasn't shipped. Always return an empty list — no fake data.
-		writeOK(w, nil, map[string]any{"workers": []any{}})
+		// Filter the registry by task queue name (sub[0]).
+		all := en.workers.List(ns)
+		out := make([]Worker, 0, len(all))
+		for _, w := range all {
+			if w.TaskQueue == sub[0] {
+				out = append(out, w)
+			}
+		}
+		writeOK(w, nil, map[string]any{"workers": out})
+	case len(sub) == 2 && sub[1] == "partitions" && r.Method == http.MethodGet:
+		// Placeholder for the real partition manager. The engine does
+		// not shard task queues yet, so every queue reports as a single
+		// partition with zero backlog.
+		writeOK(w, nil, map[string]any{
+			"partitions": []map[string]any{{
+				"key":         0,
+				"backlogAge":  "0s",
+				"backlogSize": 0,
+			}},
+		})
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-// handleWorkers — namespace-wide worker listing. Same honesty story.
-func handleWorkers(w http.ResponseWriter, r *http.Request, ns string, sub []string) {
-	_ = ns
-	if len(sub) == 0 && r.Method == http.MethodGet {
-		writeOK(w, nil, map[string]any{"workers": []any{}})
+// handleWorkers — namespace-wide worker listing. Stub registry: workers
+// self-register via Embedded.RegisterWorker on first poll/heartbeat.
+func handleWorkers(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		writeOK(w, nil, map[string]any{"workers": en.workers.List(ns)})
+	case len(sub) == 1 && r.Method == http.MethodGet:
+		wk, ok := en.workers.Get(ns, sub[0])
+		if !ok {
+			writeErr(w, 404, "worker not found")
+			return
+		}
+		writeOK(w, nil, wk)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// handleArchival — archival is disabled. UI renders the documented
+// "disabled" body. When archival lands, switch to engine.QueryArchival
+// with cursor pagination.
+func handleArchival(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	if len(sub) != 0 || r.Method != http.MethodGet {
+		http.NotFound(w, r)
 		return
 	}
-	http.NotFound(w, r)
+	body, err := en.QueryArchival(ns, r.URL.Query().Get("query"), r.URL.Query().Get("nextPageToken"))
+	writeOK(w, err, body)
+}
+
+// settingsResponse builds the UI bootstrap response.
+func settingsResponse() map[string]any {
+	return map[string]any{
+		"version":                   tasksVersion(),
+		"namespaceWriteDisabled":    envBool("TASKSD_NAMESPACE_WRITE_DISABLED", false),
+		"archivalEnabled":           envBool("TASKSD_ARCHIVAL_ENABLED", false),
+		"visibilityArchivalEnabled": envBool("TASKSD_VISIBILITY_ARCHIVAL_ENABLED", false),
+		"advancedVisibilityEnabled": envBool("TASKSD_ADVANCED_VISIBILITY_ENABLED", true),
+		"workerHeartbeatsEnabled":   envBool("TASKSD_WORKER_HEARTBEATS_ENABLED", true),
+		"codecEndpointsEnabled":     envBool("TASKSD_CODEC_ENDPOINTS_ENABLED", false),
+		"multiClusterEnabled":       envBool("TASKSD_MULTI_CLUSTER_ENABLED", false),
+		"capabilities": map[string]any{
+			"signalAndQueryHeader":    true,
+			"internalErrorDifferentiation": true,
+			"activityFailureIncludeHeartbeat": true,
+			"supportsSchedules":              true,
+			"encodedFailureAttributes":       true,
+			"upsertMemo":                     true,
+			"eagerWorkflowStart":             false,
+			"sdkMetadata":                    true,
+			"countGroupByExecutionStatus":    true,
+		},
+	}
+}
+
+func tasksVersion() string {
+	if v := os.Getenv("TASKSD_VERSION"); v != "" {
+		return v
+	}
+	return "v3.5.0"
+}
+
+func envBool(k string, def bool) bool {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	return def
+}
+
+// parseTimeParam returns the first non-empty RFC3339 value, falling back
+// to def. Empty / unparseable inputs return def.
+func parseTimeParam(a, b string, def time.Time) time.Time {
+	for _, s := range []string{a, b} {
+		if s == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t
+		}
+	}
+	return def
 }
 
 type taskQueueSummary struct {
@@ -529,9 +723,46 @@ func handleSchedules(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 			return
 		}
 		writeOK(w, nil, s)
+	case len(sub) == 1 && r.Method == http.MethodPost:
+		var req Schedule
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		out, err := en.UpdateSchedule(ns, sub[0], req)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, out)
 	case len(sub) == 1 && r.Method == http.MethodDelete:
 		err := en.DeleteSchedule(ns, sub[0])
 		writeOK(w, err, map[string]string{"status": "deleted"})
+	case len(sub) == 2 && sub[1] == "trigger" && r.Method == http.MethodPost:
+		var req struct {
+			RequestId     string `json:"requestId"`
+			OverlapPolicy string `json:"overlapPolicy"`
+		}
+		_ = decode(r, &req)
+		wf, err := en.TriggerSchedule(ns, sub[0], req.RequestId)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, map[string]any{"status": "triggered", "execution": wf})
+	case len(sub) == 2 && sub[1] == "matching-times" && r.Method == http.MethodGet:
+		from := parseTimeParam(r.URL.Query().Get("from"), r.URL.Query().Get("start"), time.Now().UTC())
+		to := parseTimeParam(r.URL.Query().Get("to"), r.URL.Query().Get("end"), from.Add(24*time.Hour))
+		times, err := en.ScheduleMatchingTimes(ns, sub[0], from, to)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		out := make([]string, len(times))
+		for i, t := range times {
+			out[i] = t.UTC().Format(time.RFC3339)
+		}
+		writeOK(w, nil, map[string]any{"matchingTimes": out})
 	case len(sub) == 2 && sub[1] == "pause" && r.Method == http.MethodPost:
 		var req struct {
 			Note string `json:"note"`
@@ -589,8 +820,20 @@ func handleBatches(w http.ResponseWriter, r *http.Request, en *engine, ns string
 	}
 }
 
-// handleSearchAttributes — POST adds, GET lists.
+// handleSearchAttributes — POST adds, GET lists, DELETE removes by name.
 func handleSearchAttributes(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	if len(sub) == 1 && r.Method == http.MethodDelete {
+		if err := en.RemoveSearchAttribute(ns, sub[0]); err != nil {
+			if strings.Contains(err.Error(), "not registered") {
+				writeErr(w, 404, err.Error())
+				return
+			}
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeOK(w, nil, map[string]string{"status": "removed"})
+		return
+	}
 	if len(sub) != 0 {
 		http.NotFound(w, r)
 		return
@@ -660,6 +903,31 @@ func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns st
 		req.Namespace = ns
 		err := en.CreateDeployment(req)
 		writeOK(w, err, req)
+	case len(sub) == 2 && sub[1] == "set-current" && r.Method == http.MethodPost:
+		var req struct {
+			BuildId string `json:"buildId"`
+		}
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		d, err := en.SetCurrentDeploymentVersion(ns, sub[0], req.BuildId)
+		if err != nil {
+			if strings.Contains(err.Error(), "not in deployment") {
+				writeErr(w, 400, err.Error())
+				return
+			}
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, d)
+	case len(sub) == 3 && sub[1] == "versions" && r.Method == http.MethodDelete:
+		d, err := en.DeleteDeploymentVersion(ns, sub[0], sub[2])
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, d)
 	default:
 		http.NotFound(w, r)
 	}
@@ -679,6 +947,9 @@ func handleNexus(w http.ResponseWriter, r *http.Request, en *engine, ns string, 
 		req.Namespace = ns
 		err := en.CreateNexusEndpoint(req)
 		writeOK(w, err, req)
+	case len(sub) == 1 && r.Method == http.MethodDelete:
+		err := en.DeleteNexusEndpoint(ns, sub[0])
+		writeOK(w, err, map[string]string{"status": "deleted"})
 	default:
 		http.NotFound(w, r)
 	}
@@ -698,6 +969,9 @@ func handleIdentities(w http.ResponseWriter, r *http.Request, en *engine, ns str
 		req.Namespace = ns
 		err := en.GrantIdentity(req)
 		writeOK(w, err, req)
+	case len(sub) == 1 && r.Method == http.MethodDelete:
+		err := en.RevokeIdentity(ns, sub[0])
+		writeOK(w, err, map[string]string{"status": "revoked"})
 	default:
 		http.NotFound(w, r)
 	}
@@ -728,10 +1002,34 @@ const (
 	opHealth                  uint16 = 0x0090
 )
 
-func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
+func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, requireID bool) map[uint16]zap.Handler {
 	envBody := func(v any) ([]byte, error) { return json.Marshal(v) }
-	wrap := func(fn func(req map[string]any) (any, uint32, string)) zap.Handler {
-		return func(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
+	// scope validates the request's auth_token and returns the
+	// org-scoped engine view. orgErr non-empty → caller authoritatively
+	// failed auth and wrap should return a 401 envelope without dispatching.
+	scope := func(ctx context.Context, req map[string]any) (en *engine, status uint32, errMsg string) {
+		if validator == nil {
+			// Dev / embedded path. No ZAP-side validation.
+			return rootEn, 0, ""
+		}
+		tok, _ := req["auth_token"].(string)
+		if tok == "" {
+			if requireID {
+				return nil, 401, "auth_token required"
+			}
+			return rootEn, 0, ""
+		}
+		claims, err := validator.Validate(ctx, tok)
+		if err != nil || claims == nil || claims.Owner == "" {
+			if requireID {
+				return nil, 401, "invalid auth_token"
+			}
+			return rootEn, 0, ""
+		}
+		return rootEn.WithOrg(claims.Owner), 0, ""
+	}
+	wrap := func(fn func(en *engine, req map[string]any) (any, uint32, string)) zap.Handler {
+		return func(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
 			req := map[string]any{}
 			if msg != nil {
 				root := msg.Root()
@@ -741,15 +1039,19 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 					}
 				}
 			}
-			out, status, errMsg := fn(req)
+			en, st, em := scope(ctx, req)
+			if em != "" {
+				return envelope(nil, st, em)
+			}
+			out, status, errMsg := fn(en, req)
 			body, _ := envBody(out)
 			return envelope(body, status, errMsg)
 		}
 	}
 	// wrapPeer exposes the caller's peerID to the handler so subscription
 	// state can be keyed off it. Used by Subscribe / Schedule / Respond.
-	wrapPeer := func(fn func(from string, req map[string]any) (any, uint32, string)) zap.Handler {
-		return func(_ context.Context, from string, msg *zap.Message) (*zap.Message, error) {
+	wrapPeer := func(fn func(en *engine, from string, req map[string]any) (any, uint32, string)) zap.Handler {
+		return func(ctx context.Context, from string, msg *zap.Message) (*zap.Message, error) {
 			req := map[string]any{}
 			if msg != nil {
 				root := msg.Root()
@@ -759,7 +1061,11 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 					}
 				}
 			}
-			out, status, errMsg := fn(from, req)
+			en, st, em := scope(ctx, req)
+			if em != "" {
+				return envelope(nil, st, em)
+			}
+			out, status, errMsg := fn(en, from, req)
 			body, _ := envBody(out)
 			return envelope(body, status, errMsg)
 		}
@@ -828,17 +1134,17 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 		return out
 	}
 	return map[uint16]zap.Handler{
-		opHealth: wrap(func(_ map[string]any) (any, uint32, string) {
+		opHealth: wrap(func(_ *engine, _ map[string]any) (any, uint32, string) {
 			return map[string]any{"service": "tasks", "status": "ok", "namespace": defaultNS}, 200, ""
 		}),
-		opListNamespaces: wrap(func(_ map[string]any) (any, uint32, string) {
+		opListNamespaces: wrap(func(en *engine, _ map[string]any) (any, uint32, string) {
 			rows, err := en.ListNamespaces()
 			if err != nil {
 				return nil, 500, err.Error()
 			}
 			return map[string]any{"namespaces": rows}, 200, ""
 		}),
-		opDescribeNamespace: wrap(func(req map[string]any) (any, uint32, string) {
+		opDescribeNamespace: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			n, ok, err := en.DescribeNamespace(str(req, "namespace"))
 			if err != nil {
 				return nil, 500, err.Error()
@@ -848,7 +1154,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return n, 200, ""
 		}),
-		opRegisterNamespace: wrap(func(req map[string]any) (any, uint32, string) {
+		opRegisterNamespace: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			var ns Namespace
 			if b, _ := json.Marshal(req); b != nil {
 				_ = json.Unmarshal(b, &ns)
@@ -858,7 +1164,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return ns, 200, ""
 		}),
-		opStartWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opStartWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			typeName := strOr(req, "workflow_type", "")
 			if typeName == "" {
@@ -881,7 +1187,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			// SDK expects {run_id} response shape.
 			return map[string]any{"run_id": wf.Execution.RunId, "workflow_id": wf.Execution.WorkflowId}, 200, ""
 		}),
-		opListWorkflows: wrap(func(req map[string]any) (any, uint32, string) {
+		opListWorkflows: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			rows, err := en.ListWorkflows(ns)
 			if err != nil {
@@ -893,7 +1199,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]any{"executions": out}, 200, ""
 		}),
-		opDescribeWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opDescribeWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
@@ -906,7 +1212,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]any{"info": wfInfoSDK(wf)}, 200, ""
 		}),
-		opSignalWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opSignalWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
@@ -917,7 +1223,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]string{"status": "signaled"}, 200, ""
 		}),
-		opCancelWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opCancelWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
@@ -927,7 +1233,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return wfInfoSDK(wf), 200, ""
 		}),
-		opTerminateWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opTerminateWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
@@ -939,7 +1245,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return wfInfoSDK(wf), 200, ""
 		}),
-		opGetWorkflowHistory: wrap(func(req map[string]any) (any, uint32, string) {
+		opGetWorkflowHistory: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
@@ -955,7 +1261,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]any{"events": events, "next_cursor": next}, 200, ""
 		}),
-		opQueryWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opQueryWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
@@ -966,7 +1272,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]any{"query_result": out}, 200, ""
 		}),
-		opResetWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opResetWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
@@ -979,7 +1285,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return wfInfoSDK(wf), 200, ""
 		}),
-		opSignalWithStartWorkflow: wrap(func(req map[string]any) (any, uint32, string) {
+		opSignalWithStartWorkflow: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			typeName := strOr(req, "workflow_type", "")
 			tq := strOr(req, "task_queue", "")
@@ -996,7 +1302,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]any{"workflow_id": wf.Execution.WorkflowId, "run_id": wf.Execution.RunId}, 200, ""
 		}),
-		opListSchedules: wrap(func(req map[string]any) (any, uint32, string) {
+		opListSchedules: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			rows, err := en.ListSchedules(ns)
 			if err != nil {
@@ -1008,7 +1314,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]any{"schedules": out}, 200, ""
 		}),
-		opCreateSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+		opCreateSchedule: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			id := strOr(req, "schedule_id", str(req, "scheduleId"))
 			s := Schedule{ScheduleId: id, Namespace: ns}
@@ -1040,7 +1346,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return scheduleSDK(&s), 200, ""
 		}),
-		opDescribeSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+		opDescribeSchedule: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			id := strOr(req, "schedule_id", str(req, "scheduleId"))
 			s, ok, err := en.DescribeSchedule(ns, id)
@@ -1052,7 +1358,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return scheduleSDK(s), 200, ""
 		}),
-		opDeleteSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+		opDeleteSchedule: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			id := strOr(req, "schedule_id", str(req, "scheduleId"))
 			if err := en.DeleteSchedule(ns, id); err != nil {
@@ -1060,7 +1366,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]string{"status": "deleted"}, 200, ""
 		}),
-		opPauseSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+		opPauseSchedule: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			id := strOr(req, "schedule_id", str(req, "scheduleId"))
 			paused := true
@@ -1076,7 +1382,7 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}
 			return map[string]string{"status": out}, 200, ""
 		}),
-		opUnpauseSchedule: wrap(func(req map[string]any) (any, uint32, string) {
+		opUnpauseSchedule: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			id := strOr(req, "schedule_id", str(req, "scheduleId"))
 			if err := en.PauseSchedule(ns, id, false, ""); err != nil {
@@ -1086,38 +1392,50 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 		}),
 
 		// ── subscribe / deliver task plumbing ─────────────────────
-		OpcodeSubscribeWorkflowTasks: wrapPeer(func(from string, req map[string]any) (any, uint32, string) {
+		OpcodeSubscribeWorkflowTasks: wrapPeer(func(en *engine, from string, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			q := strOr(req, "task_queue", str(req, "taskQueue"))
 			id, err := en.disp.Subscribe(from, ns, q, kindWorkflow)
 			if err != nil {
 				return nil, 400, err.Error()
 			}
+			en.workers.Register(Worker{
+				Identity: strOr(req, "identity", from), Namespace: ns, TaskQueue: q,
+				SDKName: str(req, "sdk_name"), SDKVersion: str(req, "sdk_version"),
+			})
 			return map[string]string{"subscription_id": id}, 200, ""
 		}),
-		OpcodeSubscribeActivityTasks: wrapPeer(func(from string, req map[string]any) (any, uint32, string) {
+		OpcodeSubscribeActivityTasks: wrapPeer(func(en *engine, from string, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			q := strOr(req, "task_queue", str(req, "taskQueue"))
 			id, err := en.disp.Subscribe(from, ns, q, kindActivity)
 			if err != nil {
 				return nil, 400, err.Error()
 			}
+			en.workers.Register(Worker{
+				Identity: strOr(req, "identity", from), Namespace: ns, TaskQueue: q,
+				SDKName: str(req, "sdk_name"), SDKVersion: str(req, "sdk_version"),
+			})
 			return map[string]string{"subscription_id": id}, 200, ""
 		}),
-		OpcodeUnsubscribeTasks: wrap(func(req map[string]any) (any, uint32, string) {
+		OpcodeUnsubscribeTasks: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			id := strOr(req, "subscription_id", str(req, "subscriptionId"))
 			en.disp.Unsubscribe(id)
 			return map[string]bool{"ok": true}, 200, ""
 		}),
 
 		// ── responses (object-field frames, see client/worker_transport.go) ──
-		client.OpcodeRespondWorkflowTaskCompleted: respondWorkflowHandler(en),
-		client.OpcodeRespondActivityTaskCompleted: respondActivityCompletedHandler(en),
-		client.OpcodeRespondActivityTaskFailed:    respondActivityFailedHandler(en),
+		// respondWorkflow / respondActivity bypass scope — the caller's
+		// task_token is HMAC-signed by the dispatcher and only resolves
+		// for tasks we issued in-process. Token integrity is the trust
+		// boundary here, not the auth_token.
+		client.OpcodeRespondWorkflowTaskCompleted: respondWorkflowHandler(rootEn),
+		client.OpcodeRespondActivityTaskCompleted: respondActivityCompletedHandler(rootEn),
+		client.OpcodeRespondActivityTaskFailed:    respondActivityFailedHandler(rootEn),
 		client.OpcodeRecordActivityTaskHeartbeat:  heartbeatHandler(),
 
 		// ── activity scheduling (envelope + JSON) ─────────────────
-		client.OpcodeScheduleActivity: wrapPeer(func(from string, req map[string]any) (any, uint32, string) {
+		client.OpcodeScheduleActivity: wrapPeer(func(en *engine, from string, req map[string]any) (any, uint32, string) {
 			ns := strOr(req, "namespace", defaultNS)
 			q := strOr(req, "task_queue", "")
 			wfID := strOr(req, "workflow_id", "")
@@ -1136,12 +1454,12 @@ func zapHandlers(en *engine, defaultNS string) map[uint16]zap.Handler {
 			}, 200, ""
 		}),
 		// 0x006D — child workflows ship in a follow-up.
-		client.OpcodeStartChildWorkflow: wrap(func(_ map[string]any) (any, uint32, string) {
+		client.OpcodeStartChildWorkflow: wrap(func(_ *engine, _ map[string]any) (any, uint32, string) {
 			return nil, 501, "start_child_workflow: not yet implemented"
 		}),
 
 		// 0x00C4 — worker → server query response.
-		OpcodeRespondQuery: wrap(func(req map[string]any) (any, uint32, string) {
+		OpcodeRespondQuery: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
 			token := strOr(req, "token", "")
 			if token == "" {
 				return nil, 400, "token required"

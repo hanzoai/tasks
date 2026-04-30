@@ -39,11 +39,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	requireID := envBool("TASKSD_REQUIRE_IDENTITY", false)
+	validator := auth.NewValidator(auth.JWTConfig{
+		JWKSURL:  envStr("TASKSD_JWKS_URL", ""),
+		Issuer:   envStr("TASKSD_JWT_ISSUER", ""),
+		Audience: envStr("TASKSD_JWT_AUDIENCE", ""),
+	})
+
 	srv, err := tasks.Embed(ctx, tasks.EmbedConfig{
-		DataDir:   *dataDir,
-		ZAPPort:   *zapPort,
-		Namespace: *ns,
-		Logger:    logger,
+		DataDir:         *dataDir,
+		ZAPPort:         *zapPort,
+		Namespace:       *ns,
+		Logger:          logger,
+		JWTValidator:    validator,
+		RequireIdentity: requireID,
 	})
 	if err != nil {
 		logger.Error("tasks.Embed", "err", err)
@@ -54,7 +63,7 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:              *httpAddr,
-		Handler:           buildHTTP(*ns, srv),
+		Handler:           buildHTTP(*ns, srv, validator, requireID),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -84,7 +93,7 @@ func main() {
 // /healthz, /v1/tasks/health, and /_/tasks/* are intentionally
 // unauthenticated: probes and the SPA shell run before any session
 // exists.
-func buildHTTP(ns string, srv *tasks.Embedded) http.Handler {
+func buildHTTP(ns string, srv *tasks.Embedded, validator *auth.Validator, requireID bool) http.Handler {
 	mux := http.NewServeMux()
 
 	probe := func(w http.ResponseWriter, r *http.Request) {
@@ -98,12 +107,6 @@ func buildHTTP(ns string, srv *tasks.Embedded) http.Handler {
 	mux.HandleFunc("/healthz", probe)
 	mux.HandleFunc("/v1/tasks/health", probe)
 
-	requireID := envBool("TASKSD_REQUIRE_IDENTITY", false)
-	validator := auth.NewValidator(auth.JWTConfig{
-		JWKSURL:  envStr("TASKSD_JWKS_URL", ""),
-		Issuer:   envStr("TASKSD_JWT_ISSUER", ""),
-		Audience: envStr("TASKSD_JWT_AUDIENCE", ""),
-	})
 	identity := auth.RequireIdentity(validator, requireID)
 
 	mux.Handle("/v1/tasks/", identity(srv.HTTPHandler()))
