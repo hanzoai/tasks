@@ -288,6 +288,8 @@ func (e *Embedded) HTTPHandler() http.Handler {
 			handleNamespaceMetadata(w, r, en, ns, parts[2:])
 		case "archival":
 			handleArchival(w, r, en, ns, parts[2:])
+		case "activities":
+			handleActivities(w, r, en, ns, parts[2:])
 		default:
 			http.NotFound(w, r)
 		}
@@ -895,14 +897,61 @@ func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns st
 		rows, err := en.ListDeployments(ns)
 		writeOK(w, err, map[string]any{"deployments": rows})
 	case len(sub) == 0 && r.Method == http.MethodPost:
-		var req Deployment
+		var req struct {
+			Name           string `json:"name"`
+			Description    string `json:"description"`
+			OwnerEmail     string `json:"ownerEmail"`
+			DefaultCompute string `json:"defaultCompute"`
+		}
 		if err := decode(r, &req); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		req.Namespace = ns
-		err := en.CreateDeployment(req)
-		writeOK(w, err, req)
+		d, err := en.CreateDeployment(ns, req.Name, req.Description, req.OwnerEmail, req.DefaultCompute)
+		if err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				writeErr(w, 409, err.Error())
+				return
+			}
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeOK(w, nil, d)
+	case len(sub) == 1 && r.Method == http.MethodGet:
+		d, ok, err := en.DescribeDeployment(ns, sub[0])
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if !ok {
+			writeErr(w, 404, "deployment not found")
+			return
+		}
+		writeOK(w, nil, d)
+	case len(sub) == 1 && r.Method == http.MethodPost:
+		var req DeploymentPatch
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		d, err := en.UpdateDeployment(ns, sub[0], req)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, d)
+	case len(sub) == 1 && r.Method == http.MethodDelete:
+		force := r.URL.Query().Get("force") == "true"
+		err := en.DeleteDeployment(ns, sub[0], force)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeErr(w, 404, err.Error())
+				return
+			}
+			writeErr(w, 409, err.Error())
+			return
+		}
+		writeOK(w, nil, map[string]string{"status": "deleted"})
 	case len(sub) == 2 && sub[1] == "set-current" && r.Method == http.MethodPost:
 		var req struct {
 			BuildId string `json:"buildId"`
@@ -921,6 +970,44 @@ func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns st
 			return
 		}
 		writeOK(w, nil, d)
+	case len(sub) == 2 && sub[1] == "versions" && r.Method == http.MethodPost:
+		var req struct {
+			BuildId     string            `json:"buildId"`
+			Description string            `json:"description"`
+			Compute     string            `json:"compute"`
+			Image       string            `json:"image"`
+			Env         map[string]string `json:"env"`
+		}
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		v, err := en.CreateVersion(ns, sub[0], req.BuildId, req.Description, req.Compute, req.Image, req.Env)
+		if err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				writeErr(w, 409, err.Error())
+				return
+			}
+			if strings.Contains(err.Error(), "not found") {
+				writeErr(w, 404, err.Error())
+				return
+			}
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeOK(w, nil, v)
+	case len(sub) == 3 && sub[1] == "versions" && r.Method == http.MethodPost:
+		var req DeploymentVersionPatch
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		v, err := en.UpdateVersion(ns, sub[0], sub[2], req)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, v)
 	case len(sub) == 3 && sub[1] == "versions" && r.Method == http.MethodDelete:
 		d, err := en.DeleteDeploymentVersion(ns, sub[0], sub[2])
 		if err != nil {
@@ -928,9 +1015,131 @@ func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns st
 			return
 		}
 		writeOK(w, nil, d)
+	case len(sub) == 4 && sub[1] == "versions" && sub[3] == "validate" && r.Method == http.MethodPost:
+		res, err := en.ValidateVersion(ns, sub[0], sub[2])
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, res)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleActivities — standalone activities engine.
+func handleActivities(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+	for _, s := range sub {
+		if s == "" {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	switch {
+	case len(sub) == 0 && r.Method == http.MethodGet:
+		cursor := r.URL.Query().Get("cursor")
+		pageSize := int(parseInt64(r.URL.Query().Get("pageSize")))
+		rows, next, err := en.ListActivities(ns, cursor, pageSize)
+		writeOK(w, err, map[string]any{"activities": rows, "nextCursor": next})
+	case len(sub) == 0 && r.Method == http.MethodPost:
+		var req struct {
+			ActivityId             string            `json:"activityId"`
+			RunId                  string            `json:"runId"`
+			ActivityType           TypeRef           `json:"activityType"`
+			TaskQueue              string            `json:"taskQueue"`
+			Input                  any               `json:"input"`
+			RetryPolicy            *RetryPolicy      `json:"retryPolicy"`
+			ScheduleToCloseTimeout string            `json:"scheduleToCloseTimeout"`
+			ScheduleToStartTimeout string            `json:"scheduleToStartTimeout"`
+			StartToCloseTimeout    string            `json:"startToCloseTimeout"`
+			HeartbeatTimeout       string            `json:"heartbeatTimeout"`
+			Identity               string            `json:"identity"`
+			RequestId              string            `json:"requestId"`
+		}
+		if err := decode(r, &req); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		a, err := en.StartActivity(ns, req.ActivityId, req.RunId, req.ActivityType, req.TaskQueue, req.Input, req.RetryPolicy, req.ScheduleToCloseTimeout, req.ScheduleToStartTimeout, req.StartToCloseTimeout, req.HeartbeatTimeout, req.Identity, req.RequestId)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		writeOK(w, nil, a)
+	case len(sub) == 2 && r.Method == http.MethodGet:
+		a, ok, err := en.DescribeActivity(ns, sub[0], sub[1])
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if !ok {
+			writeErr(w, 404, "activity not found")
+			return
+		}
+		writeOK(w, nil, a)
+	case len(sub) == 3 && sub[2] == "cancel" && r.Method == http.MethodPost:
+		var req struct {
+			Reason   string `json:"reason"`
+			Identity string `json:"identity"`
+		}
+		_ = decode(r, &req)
+		err := en.CancelActivity(ns, sub[0], sub[1], req.Reason, req.Identity)
+		writeActivityResult(w, en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "complete" && r.Method == http.MethodPost:
+		var req struct {
+			Result   any    `json:"result"`
+			Identity string `json:"identity"`
+		}
+		_ = decode(r, &req)
+		err := en.CompleteActivity(ns, sub[0], sub[1], req.Result, req.Identity)
+		writeActivityResult(w, en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "fail" && r.Method == http.MethodPost:
+		var req struct {
+			Cause    string `json:"cause"`
+			Identity string `json:"identity"`
+		}
+		_ = decode(r, &req)
+		err := en.FailActivity(ns, sub[0], sub[1], req.Cause, req.Identity)
+		writeActivityResult(w, en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "heartbeat" && r.Method == http.MethodPost:
+		var req struct {
+			Details any `json:"details"`
+		}
+		_ = decode(r, &req)
+		err := en.HeartbeatActivity(ns, sub[0], sub[1], req.Details)
+		writeActivityResult(w, en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "history" && r.Method == http.MethodGet:
+		afterID := parseInt64(r.URL.Query().Get("after"))
+		pageSize := int(parseInt64(r.URL.Query().Get("pageSize")))
+		reverse := r.URL.Query().Get("reverse") == "true"
+		events, next, err := en.GetActivityHistory(ns, sub[0], sub[1], afterID, pageSize, reverse)
+		if err != nil {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		writeOK(w, nil, map[string]any{"events": events, "nextCursor": next})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+// writeActivityResult maps engine errors to HTTP codes for the
+// activity lifecycle handlers and writes the refreshed activity body.
+func writeActivityResult(w http.ResponseWriter, en *engine, ns, activityID, runID string, err error) {
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeErr(w, 404, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "terminal") {
+			writeErr(w, 409, err.Error())
+			return
+		}
+		writeErr(w, 400, err.Error())
+		return
+	}
+	a, _, _ := en.DescribeActivity(ns, activityID, runID)
+	writeOK(w, nil, a)
 }
 
 func handleNexus(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {

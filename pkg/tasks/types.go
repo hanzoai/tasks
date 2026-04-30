@@ -122,17 +122,61 @@ type BatchOperation struct {
 // Deployment — a worker version series. Workers register a buildId; the
 // engine routes workflow tasks based on default + ramping rules.
 type Deployment struct {
-	SeriesName  string             `json:"seriesName"`
-	Namespace   string             `json:"namespace"`
-	BuildIDs    []DeploymentBuild  `json:"buildIds"`
-	DefaultBuildId string          `json:"defaultBuildId"`
-	CreateTime  string             `json:"createTime"`
+	Name           string              `json:"name"`
+	Namespace      string              `json:"namespace"`
+	Description    string              `json:"description,omitempty"`
+	OwnerEmail     string              `json:"ownerEmail,omitempty"`
+	DefaultCompute string              `json:"defaultCompute,omitempty"`
+	Versions       []DeploymentVersion `json:"versions"`
+	DefaultBuildId string              `json:"defaultBuildId"`
+	CreateTime     string              `json:"createTime"`
+	UpdateTime     string              `json:"updateTime,omitempty"`
 }
 
-type DeploymentBuild struct {
-	BuildId    string `json:"buildId"`
-	State      string `json:"state"` // DEPLOYMENT_STATE_DRAFT|CURRENT|RAMPING|RETIRED
-	CreateTime string `json:"createTime"`
+type DeploymentVersion struct {
+	BuildId     string            `json:"buildId"`
+	State       string            `json:"state"` // DEPLOYMENT_STATE_DRAFT|CURRENT|RAMPING|RETIRED
+	Description string            `json:"description,omitempty"`
+	Compute     string            `json:"compute,omitempty"`
+	Image       string            `json:"image,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	CreateTime  string            `json:"createTime"`
+	UpdateTime  string            `json:"updateTime,omitempty"`
+}
+
+// StandaloneActivity — a first-class activity record keyed by
+// (ns, activityId, runId), independent of any workflow. Workers
+// schedule, heartbeat, and complete activities that the engine tracks
+// without an enclosing workflow execution.
+type StandaloneActivity struct {
+	Execution              ExecutionRef `json:"execution"`
+	Type                   TypeRef      `json:"type"`
+	TaskQueue              string       `json:"taskQueue,omitempty"`
+	Status                 string       `json:"status"` // ACTIVITY_TASK_STATE_*
+	StartTime              string       `json:"startTime,omitempty"`
+	CloseTime              string       `json:"closeTime,omitempty"`
+	RetryPolicy            *RetryPolicy `json:"retryPolicy,omitempty"`
+	Input                  any          `json:"input,omitempty"`
+	Result                 any          `json:"result,omitempty"`
+	FailureCause           string       `json:"failureCause,omitempty"`
+	Identity               string       `json:"identity,omitempty"`
+	Attempt                int          `json:"attempt"`
+	MaximumAttempts        int          `json:"maximumAttempts,omitempty"`
+	ScheduleToCloseTimeout string       `json:"scheduleToCloseTimeout,omitempty"`
+	ScheduleToStartTimeout string       `json:"scheduleToStartTimeout,omitempty"`
+	StartToCloseTimeout    string       `json:"startToCloseTimeout,omitempty"`
+	HeartbeatTimeout       string       `json:"heartbeatTimeout,omitempty"`
+	LastHeartbeatTime      string       `json:"lastHeartbeatTime,omitempty"`
+	HistoryLength          int64        `json:"historyLength,omitempty"`
+}
+
+// RetryPolicy — schedule retry knobs for an activity.
+type RetryPolicy struct {
+	InitialInterval        string   `json:"initialInterval,omitempty"`
+	BackoffCoefficient     float64  `json:"backoffCoefficient,omitempty"`
+	MaximumInterval        string   `json:"maximumInterval,omitempty"`
+	MaximumAttempts        int      `json:"maximumAttempts,omitempty"`
+	NonRetryableErrorTypes []string `json:"nonRetryableErrorTypes,omitempty"`
 }
 
 // NexusEndpoint — cross-namespace operation bridge.

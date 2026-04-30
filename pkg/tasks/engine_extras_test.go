@@ -140,14 +140,9 @@ func TestEngine_ScheduleMatchingTimes(t *testing.T) {
 
 func TestEngine_SetCurrentDeploymentVersion(t *testing.T) {
 	en, ns := engineFixture(t)
-	_ = en.CreateDeployment(Deployment{
-		Namespace: ns, SeriesName: "svc-a",
-		BuildIDs: []DeploymentBuild{
-			{BuildId: "b1", State: "DEPLOYMENT_STATE_CURRENT"},
-			{BuildId: "b2", State: "DEPLOYMENT_STATE_DRAFT"},
-		},
-		DefaultBuildId: "b1",
-	})
+	_, _ = en.CreateDeployment(ns, "svc-a", "", "", "")
+	_, _ = en.CreateVersion(ns, "svc-a", "b1", "", "", "", nil)
+	_, _ = en.CreateVersion(ns, "svc-a", "b2", "", "", "", nil)
 	d, err := en.SetCurrentDeploymentVersion(ns, "svc-a", "b2")
 	if err != nil {
 		t.Fatalf("set-current: %v", err)
@@ -356,11 +351,9 @@ func TestHTTP_ScheduleMatchingTimes(t *testing.T) {
 
 func TestHTTP_DeploymentSetCurrent(t *testing.T) {
 	en, h := httpFixture(t)
-	_ = en.CreateDeployment(Deployment{
-		Namespace: "default", SeriesName: "svc-x",
-		BuildIDs:       []DeploymentBuild{{BuildId: "v1"}, {BuildId: "v2"}},
-		DefaultBuildId: "v1",
-	})
+	_, _ = en.CreateDeployment("default", "svc-x", "", "", "")
+	_, _ = en.CreateVersion("default", "svc-x", "v1", "", "", "", nil)
+	_, _ = en.CreateVersion("default", "svc-x", "v2", "", "", "", nil)
 	cases := []struct {
 		name string
 		body map[string]any
@@ -474,11 +467,9 @@ func TestHTTP_NamespaceDelete(t *testing.T) {
 
 func TestHTTP_DeploymentVersionDelete(t *testing.T) {
 	en, h := httpFixture(t)
-	_ = en.CreateDeployment(Deployment{
-		Namespace: "default", SeriesName: "svc-y",
-		BuildIDs:       []DeploymentBuild{{BuildId: "v1"}, {BuildId: "v2"}},
-		DefaultBuildId: "v1",
-	})
+	_, _ = en.CreateDeployment("default", "svc-y", "", "", "")
+	_, _ = en.CreateVersion("default", "svc-y", "v1", "", "", "", nil)
+	_, _ = en.CreateVersion("default", "svc-y", "v2", "", "", "", nil)
 	// can't delete current
 	code, _ := httpDo(t, h, http.MethodDelete, "/v1/tasks/namespaces/default/deployments/svc-y/versions/v1", nil)
 	if code != 404 {

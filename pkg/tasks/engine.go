@@ -1364,16 +1364,45 @@ func (e *engine) TerminateBatch(ns, batchID, reason, identity string) (*BatchOpe
 
 // ── deployments ─────────────────────────────────────────────────────
 
-func (e *engine) CreateDeployment(d Deployment) error {
-	if d.SeriesName == "" {
-		return fmt.Errorf("seriesName required")
+// CreateDeployment registers a new deployment series. Returns 409-style
+// error if the name already exists in the namespace. Caller must check
+// for "already exists" substring to map to HTTP 409.
+func (e *engine) CreateDeployment(ns, name, description, ownerEmail, defaultCompute string) (*Deployment, error) {
+	if name == "" {
+		return nil, fmt.Errorf("name required")
 	}
-	d.CreateTime = nowRFC3339()
-	return e.store.put(fmt.Sprintf("dp/%s/%s", d.Namespace, d.SeriesName), d)
+	key := fmt.Sprintf("dp/%s/%s", ns, name)
+	var existing Deployment
+	if ok, _ := e.store.get(key, &existing); ok {
+		return nil, fmt.Errorf("deployment %q already exists", name)
+	}
+	d := Deployment{
+		Name:           name,
+		Namespace:      ns,
+		Description:    description,
+		OwnerEmail:     ownerEmail,
+		DefaultCompute: defaultCompute,
+		Versions:       []DeploymentVersion{},
+		CreateTime:     nowRFC3339(),
+	}
+	if err := e.store.put(key, d); err != nil {
+		return nil, err
+	}
+	return &d, nil
 }
 
 func (e *engine) ListDeployments(ns string) ([]Deployment, error) {
 	return listInto[Deployment](e.store, fmt.Sprintf("dp/%s/", ns))
+}
+
+// DescribeDeployment returns a single deployment by name.
+func (e *engine) DescribeDeployment(ns, name string) (*Deployment, bool, error) {
+	var d Deployment
+	ok, err := e.store.get(fmt.Sprintf("dp/%s/%s", ns, name), &d)
+	if !ok {
+		return nil, false, err
+	}
+	return &d, true, err
 }
 
 // ── nexus ───────────────────────────────────────────────────────────
