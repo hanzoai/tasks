@@ -121,18 +121,19 @@ func (e *engine) SetCurrentDeploymentVersion(ns, name, buildId string) (*Deploym
 		return &d, nil
 	}
 	found := false
-	for i := range d.BuildIDs {
-		if d.BuildIDs[i].BuildId == buildId {
+	for i := range d.Versions {
+		if d.Versions[i].BuildId == buildId {
 			found = true
-			d.BuildIDs[i].State = "DEPLOYMENT_STATE_CURRENT"
-		} else if d.BuildIDs[i].State == "DEPLOYMENT_STATE_CURRENT" {
-			d.BuildIDs[i].State = "DEPLOYMENT_STATE_RETIRED"
+			d.Versions[i].State = "DEPLOYMENT_STATE_CURRENT"
+		} else if d.Versions[i].State == "DEPLOYMENT_STATE_CURRENT" {
+			d.Versions[i].State = "DEPLOYMENT_STATE_RETIRED"
 		}
 	}
 	if !found {
 		return nil, fmt.Errorf("buildId %q not in deployment", buildId)
 	}
 	d.DefaultBuildId = buildId
+	d.UpdateTime = nowRFC3339()
 	if err := e.store.put(fmt.Sprintf("dp/%s/%s", ns, name), d); err != nil {
 		return nil, err
 	}
@@ -153,9 +154,9 @@ func (e *engine) DeleteDeploymentVersion(ns, name, buildId string) (*Deployment,
 	if d.DefaultBuildId == buildId {
 		return nil, fmt.Errorf("cannot delete current buildId; set-current to another first")
 	}
-	out := d.BuildIDs[:0]
+	out := d.Versions[:0]
 	removed := false
-	for _, b := range d.BuildIDs {
+	for _, b := range d.Versions {
 		if b.BuildId == buildId {
 			removed = true
 			continue
@@ -165,7 +166,8 @@ func (e *engine) DeleteDeploymentVersion(ns, name, buildId string) (*Deployment,
 	if !removed {
 		return nil, fmt.Errorf("buildId %q not found", buildId)
 	}
-	d.BuildIDs = out
+	d.Versions = out
+	d.UpdateTime = nowRFC3339()
 	if err := e.store.put(fmt.Sprintf("dp/%s/%s", ns, name), d); err != nil {
 		return nil, err
 	}
