@@ -109,6 +109,11 @@ func buildHTTP(ns string, srv *tasks.Embedded, validator *auth.Validator, requir
 
 	identity := auth.RequireIdentity(validator, requireID)
 
+	// /v1/tasks/settings is the SPA bootstrap — capability flags only,
+	// no per-org data, intentionally unauthenticated so the login page
+	// itself can render.
+	mux.Handle("/v1/tasks/settings", srv.HTTPHandler())
+
 	mux.Handle("/v1/tasks/", identity(srv.HTTPHandler()))
 	mux.Handle("/v1/tasks/mcp", identity(srv.MCPHandler()))
 	mux.Handle("/v1/tasks/events", identity(srv.EventsHandler()))
