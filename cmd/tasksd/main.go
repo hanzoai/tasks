@@ -19,17 +19,43 @@ import (
 	"syscall"
 	"time"
 
+	"strings"
+
 	"github.com/hanzoai/tasks/pkg/auth"
 	"github.com/hanzoai/tasks/pkg/tasks"
+	"github.com/hanzoai/tasks/pkg/tasks/migration"
+	"github.com/hanzoai/tasks/pkg/tasks/replication"
+	"github.com/hanzoai/tasks/pkg/tasks/routing"
+	"github.com/hanzoai/tasks/pkg/tasks/store"
 	tasksui "github.com/hanzoai/tasks/ui"
 )
 
+// storeNew is a thin alias used by runMigrate so the rest of main.go
+// doesn't import the store package directly.
+func storeNew(dir string) (*store.Manager, error) { return store.New(dir) }
+
+// newCoordinator is a thin closure-bound migration runner used by runMigrate.
+func newCoordinator(mgr *store.Manager, rep replication.Replicator) func(ctx context.Context, org, ns, from, to string) (*migration.Job, error) {
+	c := migration.NewCoordinator(mgr, rep)
+	return func(ctx context.Context, org, ns, from, to string) (*migration.Job, error) {
+		return c.Migrate(ctx, migration.Job{OrgID: org, Namespace: ns, From: from, To: to})
+	}
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrate(os.Args[2:])
+		return
+	}
 	var (
-		zapPort  = flag.Int("zap-port", envInt("TASKS_ZAP_PORT", 9999), "ZAP listener port")
-		httpAddr = flag.String("http", envStr("TASKS_HTTP_ADDR", ":7243"), "HTTP listen address (UI + healthz)")
-		dataDir  = flag.String("data", envStr("TASKS_DATA_DIR", "./tasks-data"), "Tasks persistence directory")
-		ns       = flag.String("namespace", envStr("TASKS_NAMESPACE", "default"), "Default namespace")
+		zapPort    = flag.Int("zap-port", envInt("TASKS_ZAP_PORT", 9999), "ZAP listener port")
+		httpAddr   = flag.String("http", envStr("TASKS_HTTP_ADDR", ":7243"), "HTTP listen address (UI + healthz)")
+		dataDir    = flag.String("data", envStr("TASKSD_DATA_DIR", envStr("TASKS_DATA_DIR", "./tasks-data")), "Tasks persistence directory")
+		ns         = flag.String("namespace", envStr("TASKS_NAMESPACE", "default"), "Default namespace")
+		replKind   = flag.String("replicator", envStr("TASKSD_REPLICATOR", "local"), "Replicator driver (local | quasar)")
+		nodeID     = flag.String("node-id", envStr("TASKSD_NODE_ID", ""), "Stable node identifier (required for quasar)")
+		validators = flag.String("validators", envStr("TASKSD_VALIDATORS", ""), "Comma-separated validator host:port (required for quasar)")
+		_          = flag.String("validator-key", envStr("TASKSD_VALIDATOR_KEY", ""), "Path to PQ validator key (reserved)")
 	)
 	flag.Parse()
 
@@ -46,6 +72,11 @@ func main() {
 		Audience: envStr("TASKSD_JWT_AUDIENCE", ""),
 	})
 
+	repl, router, err := buildReplicator(ctx, *replKind, *nodeID, *validators)
+	if err != nil {
+		logger.Error("replicator", "err", err)
+		os.Exit(1)
+	}
 	srv, err := tasks.Embed(ctx, tasks.EmbedConfig{
 		DataDir:         *dataDir,
 		ZAPPort:         *zapPort,
@@ -53,6 +84,9 @@ func main() {
 		Logger:          logger,
 		JWTValidator:    validator,
 		RequireIdentity: requireID,
+		Replicator:      repl,
+		Router:          router,
+		NodeID:          *nodeID,
 	})
 	if err != nil {
 		logger.Error("tasks.Embed", "err", err)
@@ -114,6 +148,8 @@ func buildHTTP(ns string, srv *tasks.Embedded, validator *auth.Validator, requir
 	// itself can render.
 	mux.Handle("/v1/tasks/settings", srv.HTTPHandler())
 
+	mux.Handle("/v1/tasks/cluster", srv.ClusterHandler())
+	mux.Handle("/v1/tasks/cluster/health", srv.ClusterHandler())
 	mux.Handle("/v1/tasks/", identity(srv.HTTPHandler()))
 	mux.Handle("/v1/tasks/mcp", identity(srv.MCPHandler()))
 	mux.Handle("/v1/tasks/events", identity(srv.EventsHandler()))
@@ -147,6 +183,92 @@ func envStr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// runMigrate is the `tasksd migrate ...` subcommand. Quiesces the
+// (org, namespace) shard via the consensus barrier, copies the
+// SQLite file under <dataDir>/_migrations/<id>/, and releases the
+// barrier. Idempotent.
+func runMigrate(args []string) {
+	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
+	dataDir := fs.String("data", envStr("TASKSD_DATA_DIR", "./tasks-data"), "Tasks persistence directory")
+	org := fs.String("org", "", "Org id (empty = sentinel)")
+	ns := fs.String("namespace", "", "Namespace to migrate")
+	to := fs.String("to", "", "Destination node id")
+	from := fs.String("from", "", "Source node id (annotation only)")
+	_ = fs.Parse(args)
+	if *ns == "" || *to == "" {
+		fmt.Fprintln(os.Stderr, "usage: tasksd migrate --org <id> --namespace <name> --to <node> [--from <node>]")
+		os.Exit(2)
+	}
+	mgr, err := storeNew(*dataDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "migrate:", err)
+		os.Exit(1)
+	}
+	defer mgr.Close()
+	rep := replication.NewLocal()
+	mgr.WithReplicator(rep)
+	c := newCoordinator(mgr, rep)
+	job, err := c(context.Background(), *org, *ns, *from, *to)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "migrate:", err)
+		os.Exit(1)
+	}
+	out, _ := json.MarshalIndent(job, "", "  ")
+	fmt.Println(string(out))
+}
+
+// buildReplicator wires the requested driver. local → passthrough,
+// quasar → consensus.NewPQ over the in-process MemoryHub (single-pod
+// boot path); when validators are non-empty the hub is replaced with a
+// real network transport at the next deploy phase.
+func buildReplicator(ctx context.Context, kind, node, validatorsCSV string) (replication.Replicator, routing.Router, error) {
+	router := routing.NewHash([]byte("tasks"))
+	switch strings.ToLower(kind) {
+	case "", "local":
+		router.SetMembership(routing.NodeID(stringOr(node, "tasks-embed")), []routing.NodeID{routing.NodeID(stringOr(node, "tasks-embed"))})
+		return replication.NewLocal(), router, nil
+	case "quasar":
+		if node == "" {
+			return nil, nil, fmt.Errorf("quasar replicator requires --node-id")
+		}
+		hub := replication.NewMemoryHub()
+		t := hub.Connect(node)
+		var vs []routing.NodeID
+		for _, v := range strings.Split(validatorsCSV, ",") {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				vs = append(vs, routing.NodeID(v))
+			}
+		}
+		if len(vs) == 0 {
+			vs = []routing.NodeID{routing.NodeID(node)}
+		}
+		router.SetMembership(routing.NodeID(node), vs)
+		validators := make([]string, len(vs))
+		for i, v := range vs {
+			validators[i] = string(v)
+		}
+		rep, err := replication.NewQuasar(ctx, replication.QuasarConfig{
+			NodeID:     node,
+			Validators: validators,
+			Transport:  t,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return rep, router, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown replicator: %s (want local | quasar)", kind)
+	}
+}
+
+func stringOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func envInt(k string, def int) int {

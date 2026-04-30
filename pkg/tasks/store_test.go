@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestStore_FactoryDefault — TASKSD_STORE unset → memdb.
+// TestStore_FactoryDefault — TASKSD_STORE unset → sqlite shards.
 func TestStore_FactoryDefault(t *testing.T) {
 	t.Setenv("TASKSD_STORE", "")
 	s, err := newStoreFromEnv(t.TempDir())
@@ -15,19 +15,17 @@ func TestStore_FactoryDefault(t *testing.T) {
 		t.Fatalf("factory: %v", err)
 	}
 	defer s.close()
-	if err := s.put("k", "v"); err != nil {
+	// Routing requires a namespaced key.
+	if err := s.put("ns/probe", map[string]any{"k": "v"}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 }
 
-// TestStore_ZapdbPersistsAcrossOpen confirms that zapdb-backed stores
-// survive close+reopen — the workflow-state-after-restart property the
-// audit flagged as P0.
-func TestStore_ZapdbPersistsAcrossOpen(t *testing.T) {
+// TestStore_PersistsAcrossOpen confirms that sqlite-backed shards
+// survive close+reopen — the workflow-state-after-restart property.
+func TestStore_PersistsAcrossOpen(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tasks-persist")
-	t.Setenv("TASKSD_STORE", "zapdb")
 
-	// First engine: register a namespace, start a workflow.
 	s1, err := newStoreFromEnv(dir)
 	if err != nil {
 		t.Fatalf("open 1: %v", err)
@@ -43,7 +41,6 @@ func TestStore_ZapdbPersistsAcrossOpen(t *testing.T) {
 	}
 	_ = s1.close()
 
-	// Second engine on the same dir: namespace + workflow must reappear.
 	s2, err := newStoreFromEnv(dir)
 	if err != nil {
 		t.Fatalf("open 2: %v", err)

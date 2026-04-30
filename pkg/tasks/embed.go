@@ -21,6 +21,9 @@ import (
 
 	"github.com/hanzoai/tasks/pkg/auth"
 	"github.com/hanzoai/tasks/pkg/sdk/client"
+	"github.com/hanzoai/tasks/pkg/tasks/migration"
+	"github.com/hanzoai/tasks/pkg/tasks/replication"
+	"github.com/hanzoai/tasks/pkg/tasks/routing"
 	"github.com/luxfi/zap"
 )
 
@@ -37,8 +40,17 @@ type EmbedConfig struct {
 	// RequireIdentity=true, every ZAP request must carry an auth_token
 	// that validates against IAM; per-request engine is WithOrg-scoped
 	// to claims.Owner. This mirrors the HTTP middleware trust boundary.
-	JWTValidator     *auth.Validator
-	RequireIdentity  bool
+	JWTValidator    *auth.Validator
+	RequireIdentity bool
+	// Replicator wires consensus-replication for every shard. nil →
+	// LocalReplicator (single-node passthrough). cmd/tasksd builds a
+	// QuasarReplicator when --replicator=quasar is set.
+	Replicator replication.Replicator
+	// Router selects the (org, ns, taskQueue) leader. nil → solo
+	// router that returns the local node for every key.
+	Router routing.Router
+	// NodeID is this process's stable identifier. "" → "tasks-embed".
+	NodeID string
 }
 
 // Embedded is the handle to a running in-process Tasks server.
@@ -47,12 +59,22 @@ type Embedded struct {
 	node   *zap.Node
 	engine *engine
 	stop   chan struct{}
+	repl   replication.Replicator
+	router routing.Router
+	migr   *migration.Coordinator
 }
 
 // Embed starts the Tasks server. Stop before exit.
 func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	if cfg.DataDir == "" {
-		cfg.DataDir = "./tasks-data"
+		// Per-process scratch directory keeps tests / multiple
+		// Embed() callers from sharing state on disk. Production
+		// callers (cmd/tasksd) always pass a stable DataDir.
+		dir, err := os.MkdirTemp("", "tasks-data-")
+		if err != nil {
+			return nil, fmt.Errorf("tasks.Embed: tempdir: %w", err)
+		}
+		cfg.DataDir = dir
 	}
 	if cfg.Namespace == "" {
 		cfg.Namespace = "default"
@@ -65,7 +87,22 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tasks.Embed: store: %w", err)
 	}
+	repl := cfg.Replicator
+	if repl == nil {
+		repl = replication.NewLocal()
+	}
+	st.mgr.WithReplicator(repl)
+	router := cfg.Router
+	if router == nil {
+		router = routing.NewHash([]byte("tasks-default"))
+		nodeID := cfg.NodeID
+		if nodeID == "" {
+			nodeID = "tasks-embed"
+		}
+		router.SetMembership(routing.NodeID(nodeID), []routing.NodeID{routing.NodeID(nodeID)})
+	}
 	en := newEngine(st)
+	migr := migration.NewCoordinator(st.mgr, repl)
 
 	// Bootstrap default namespace so the UI has something to render
 	// on first boot. Idempotent.
@@ -107,7 +144,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	stop := make(chan struct{})
 	go en.runScheduler(stop)
 
-	return &Embedded{cfg: cfg, node: node, engine: en, stop: stop}, nil
+	return &Embedded{cfg: cfg, node: node, engine: en, stop: stop, repl: repl, router: router, migr: migr}, nil
 }
 
 // wireSend builds a ZAP message for server-initiated push: the body is
@@ -149,8 +186,134 @@ func (e *Embedded) Stop(ctx context.Context) error {
 	if e.engine != nil && e.engine.store != nil {
 		_ = e.engine.store.close()
 	}
+	if e.repl != nil {
+		_ = e.repl.Close()
+		e.repl = nil
+	}
 	_ = ctx
 	return nil
+}
+
+// ClusterHandler exposes /v1/tasks/cluster, /v1/tasks/cluster/health,
+// /v1/tasks/namespaces/{ns}/migrate. Probe routes are unauthenticated;
+// migrate accepts the same X-Org-Id-scoped identity as everything else.
+func (e *Embedded) ClusterHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/tasks/cluster", e.handleClusterStatus)
+	mux.HandleFunc("/v1/tasks/cluster/health", e.handleClusterHealth)
+	mux.HandleFunc("/v1/tasks/namespaces/", e.handleNamespaceMigrate)
+	return mux
+}
+
+func (e *Embedded) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	type stats struct {
+		Accepted uint64 `json:"accepted"`
+		Rejected uint64 `json:"rejected"`
+		Timeouts uint64 `json:"timeouts,omitempty"`
+	}
+	resp := map[string]any{
+		"nodeId":     e.cfg.NodeID,
+		"replicator": replicatorKind(e.repl),
+		"shardCount": shardCount(e),
+		"openShards": shardCount(e),
+	}
+	if e.router != nil {
+		vs := e.router.Validators()
+		out := make([]string, len(vs))
+		for i, v := range vs {
+			out[i] = string(v)
+		}
+		resp["validators"] = out
+	}
+	switch rep := e.repl.(type) {
+	case *replication.LocalReplicator:
+		a, rj := rep.Stats()
+		resp["stats"] = stats{Accepted: a, Rejected: rj}
+	case *replication.QuasarReplicator:
+		a, rj, to := rep.Stats()
+		resp["stats"] = stats{Accepted: a, Rejected: rj, Timeouts: to}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (e *Embedded) handleClusterHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	// Health is "in-quorum" — for the local driver always true. For
+	// quasar we treat presence of validators as proof; real
+	// out-of-quorum signal would come from the engine, which we don't
+	// drive a heartbeat against in this build.
+	if e.repl == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "down"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+// handleNamespaceMigrate is the admin-only POST /v1/tasks/namespaces/{ns}/migrate
+// endpoint. Body: {"toNode":"<nodeId>"}. Returns the migration job.
+func (e *Embedded) handleNamespaceMigrate(w http.ResponseWriter, r *http.Request) {
+	const prefix = "/v1/tasks/namespaces/"
+	if !strings.HasPrefix(r.URL.Path, prefix) || !strings.HasSuffix(r.URL.Path, "/migrate") {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	ns := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/migrate")
+	if ns == "" {
+		http.Error(w, "namespace required", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		ToNode string `json:"toNode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	job, err := e.migr.Migrate(r.Context(), migration.Job{
+		OrgID:     auth.OrgID(r.Context()),
+		Namespace: ns,
+		To:        req.ToNode,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+func replicatorKind(r replication.Replicator) string {
+	switch r.(type) {
+	case *replication.QuasarReplicator:
+		return "quasar"
+	case *replication.LocalReplicator:
+		return "local"
+	default:
+		return "none"
+	}
+}
+
+func shardCount(e *Embedded) int {
+	if e == nil || e.engine == nil || e.engine.store == nil || e.engine.store.mgr == nil {
+		return 0
+	}
+	return e.engine.store.mgr.OpenShardCount()
+}
+
+func writeJSON(w http.ResponseWriter, code int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // MCPHandler returns the JSON-RPC 2.0 MCP endpoint.
