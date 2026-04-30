@@ -5,11 +5,14 @@ package tasks
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/luxfi/database"
 	"github.com/luxfi/database/memdb"
+	"github.com/luxfi/database/zapdb"
+	"github.com/luxfi/metric"
 )
 
 // store is a tiny key-value layer over luxfi/database. The current
@@ -36,6 +39,29 @@ type store struct {
 
 func newStore() *store {
 	return &store{mu: &sync.RWMutex{}, db: memdb.New()}
+}
+
+// newStoreFromEnv selects the backend by TASKSD_STORE env var.
+// "memory" (default) → in-memory, lost on restart.
+// "zapdb"            → durable, rooted at dataDir.
+// dataDir is only used by durable backends; ignored for memory.
+func newStoreFromEnv(dataDir string) (*store, error) {
+	switch os.Getenv("TASKSD_STORE") {
+	case "zapdb":
+		if dataDir == "" {
+			return nil, fmt.Errorf("TASKSD_STORE=zapdb requires non-empty data dir")
+		}
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return nil, fmt.Errorf("store: mkdir %q: %w", dataDir, err)
+		}
+		db, err := zapdb.New(dataDir, nil, "tasks", metric.NewNoOpRegistry())
+		if err != nil {
+			return nil, fmt.Errorf("store: zapdb open: %w", err)
+		}
+		return &store{mu: &sync.RWMutex{}, db: db}, nil
+	default:
+		return newStore(), nil
+	}
 }
 
 // withOrg returns a view of s that prefixes every key with "org:<id>:".
