@@ -3,107 +3,129 @@
 package tasks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/luxfi/database"
-	"github.com/luxfi/database/memdb"
-	"github.com/luxfi/database/zapdb"
-	"github.com/luxfi/metric"
+	storepkg "github.com/hanzoai/tasks/pkg/tasks/store"
 )
 
-// store is a tiny key-value layer over luxfi/database. The current
-// backend is memdb (volatile); swap to zapdb via factory.New for
-// disk persistence without changing this surface.
+// store is the engine-facing facade. Each operation routes through a
+// per-(org, namespace) SQLite shard managed by storepkg.Manager. Keys
+// are parsed to determine routing — the canonical layout encodes the
+// namespace as the second segment for every kind except `ns/<name>`
+// (which is the namespace's own registry row, stored in that
+// namespace's shard) and bare cross-namespace scans.
 //
-// Key layout (everything ASCII so prefix-iteration just works):
-//
-//   ns/<name>                   → Namespace
-//   wf/<ns>/<workflowId>/<runId>→ WorkflowExecution
-//   sc/<ns>/<scheduleId>        → Schedule
-//   bt/<ns>/<batchId>           → BatchOperation
-//   dp/<ns>/<seriesName>        → Deployment
-//   nx/<ns>/<endpointName>      → NexusEndpoint
-//   id/<ns>/<email>             → Identity
-//
-// When orgPrefix is non-empty, every key is transparently prefixed with
-// "org:<id>:". Empty prefix preserves legacy embedded-use behavior.
+// orgID == "" preserves the embedded/dev path: shards live under
+// <root>/_/ (sentinel directory).
 type store struct {
-	mu        *sync.RWMutex
-	db        database.Database
-	orgPrefix string
+	mgr    *storepkg.Manager
+	orgID  string
+	mu     sync.RWMutex
+	bootNS map[string]struct{}
 }
 
+// newStore returns a sqlite-backed single-shard store rooted at a temp dir.
+// Used by tests that previously called newStore() against memdb.
 func newStore() *store {
-	return &store{mu: &sync.RWMutex{}, db: memdb.New()}
+	dir, err := os.MkdirTemp("", "tasks-store-")
+	if err != nil {
+		panic(fmt.Errorf("newStore: tempdir: %w", err))
+	}
+	mgr, err := storepkg.New(dir)
+	if err != nil {
+		panic(fmt.Errorf("newStore: %w", err))
+	}
+	return &store{mgr: mgr, bootNS: map[string]struct{}{}}
 }
 
-// newStoreFromEnv selects the backend by TASKSD_STORE env var.
-// "memory" (default) → in-memory, lost on restart.
-// "zapdb"            → durable, rooted at dataDir.
-// dataDir is only used by durable backends; ignored for memory.
+// newStoreFromEnv selects the backend by TASKSD_STORE.
+//
+//	(unset) | "sqlite"  → per-namespace SQLite shards under dataDir
+//	"memory"            → temp directory under os.TempDir() (volatile)
+//	any other value     → error
 func newStoreFromEnv(dataDir string) (*store, error) {
-	switch os.Getenv("TASKSD_STORE") {
-	case "zapdb":
+	mode := os.Getenv("TASKSD_STORE")
+	switch mode {
+	case "", "sqlite":
 		if dataDir == "" {
-			return nil, fmt.Errorf("TASKSD_STORE=zapdb requires non-empty data dir")
+			return nil, fmt.Errorf("TASKSD_STORE=sqlite requires non-empty data dir")
 		}
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
-			return nil, fmt.Errorf("store: mkdir %q: %w", dataDir, err)
-		}
-		db, err := zapdb.New(dataDir, nil, "tasks", metric.NewNoOpRegistry())
+		mgr, err := storepkg.New(dataDir)
 		if err != nil {
-			return nil, fmt.Errorf("store: zapdb open: %w", err)
+			return nil, err
 		}
-		return &store{mu: &sync.RWMutex{}, db: db}, nil
-	default:
+		return &store{mgr: mgr, bootNS: map[string]struct{}{}}, nil
+	case "memory":
 		return newStore(), nil
+	default:
+		return nil, fmt.Errorf("TASKSD_STORE=%q: unsupported (sqlite | memory)", mode)
 	}
 }
 
-// withOrg returns a view of s that prefixes every key with "org:<id>:".
-// The view shares the underlying db + mutex; concurrent use is safe.
-// orgID == "" returns s unchanged.
+// Manager exposes the underlying shard manager (for migration / cluster diagnostics).
+func (s *store) Manager() *storepkg.Manager { return s.mgr }
+
+// withOrg returns a store view scoped to orgID; it shares the manager.
 func (s *store) withOrg(orgID string) *store {
-	if orgID == "" {
+	if orgID == s.orgID {
 		return s
 	}
-	return &store{mu: s.mu, db: s.db, orgPrefix: "org:" + orgID + ":"}
+	return &store{mgr: s.mgr, orgID: orgID, bootNS: s.bootNS}
 }
-
-func (s *store) k(key string) string { return s.orgPrefix + key }
 
 func (s *store) close() error {
-	if s == nil || s.db == nil {
+	if s == nil || s.mgr == nil {
 		return nil
 	}
-	return s.db.Close()
+	return s.mgr.Close()
 }
 
-// put serializes v to JSON and stores at key.
+// shardFor resolves the shard for a key. ns/<name> writes the
+// namespace registry row into that namespace's own shard.
+func (s *store) shardFor(ctx context.Context, key string) (*storepkg.Shard, error) {
+	_, ns, _, ok := storepkg.NsFromKey(key)
+	if !ok {
+		return nil, fmt.Errorf("store: cannot route key %q", key)
+	}
+	sh, err := s.mgr.Get(ctx, s.orgID, ns)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.bootNS[ns] = struct{}{}
+	s.mu.Unlock()
+	return sh, nil
+}
+
+// put serializes v and writes to the resolved shard.
 func (s *store) put(key string, v any) error {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("store.put: marshal: %w", err)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.db.Put([]byte(s.k(key)), body)
+	ctx := context.Background()
+	sh, err := s.shardFor(ctx, key)
+	if err != nil {
+		return err
+	}
+	return sh.Put(ctx, key, body)
 }
 
 // get loads JSON at key into v. Returns false if missing.
 func (s *store) get(key string, v any) (bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	body, err := s.db.Get([]byte(s.k(key)))
-	if err == database.ErrNotFound {
-		return false, nil
-	}
+	ctx := context.Background()
+	sh, err := s.shardFor(ctx, key)
 	if err != nil {
-		return false, fmt.Errorf("store.get: %w", err)
+		return false, err
+	}
+	body, ok, err := sh.Get(ctx, key)
+	if err != nil || !ok {
+		return false, err
 	}
 	if err := json.Unmarshal(body, v); err != nil {
 		return false, fmt.Errorf("store.get: unmarshal: %w", err)
@@ -111,52 +133,45 @@ func (s *store) get(key string, v any) (bool, error) {
 	return true, nil
 }
 
-// del removes a key. No-op if missing.
+// del removes a key.
 func (s *store) del(key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.db.Delete([]byte(s.k(key))); err != nil && err != database.ErrNotFound {
+	ctx := context.Background()
+	sh, err := s.shardFor(ctx, key)
+	if err != nil {
 		return err
 	}
-	return nil
+	return sh.Del(ctx, key)
 }
 
-// list iterates entries with the given prefix and yields (key, body) pairs
-// in lexicographic order. The iteration snapshots under the read lock
-// and releases before calling fn, so the callback is free to put/del
-// against the same store without deadlocking the RWMutex.
-//
-// Keys yielded to fn have the org prefix stripped — callers see the
-// canonical "ns/", "wf/<ns>/…" layout regardless of org scoping.
+// list iterates entries with the given prefix in lexicographic order.
+// Cross-namespace scans (ns/, nx/) fan out across every shard the
+// org owns.
 func (s *store) list(prefix string, fn func(key string, body []byte) error) error {
-	type kv struct{ k, v []byte }
-	var snap []kv
-	scanPrefix := s.k(prefix)
-	if err := func() error {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		it := s.db.NewIteratorWithPrefix([]byte(scanPrefix))
-		defer it.Release()
-		for it.Next() {
-			k := append([]byte(nil), it.Key()...)
-			v := append([]byte(nil), it.Value()...)
-			snap = append(snap, kv{k, v})
-		}
-		return it.Error()
-	}(); err != nil {
-		return err
-	}
-	strip := len(s.orgPrefix)
-	for _, e := range snap {
-		if err := fn(string(e.k[strip:]), e.v); err != nil {
+	ctx := context.Background()
+	if storepkg.IsCrossNamespacePrefix(prefix) {
+		shards, err := s.mgr.ListShards(ctx, s.orgID)
+		if err != nil {
 			return err
 		}
+		for _, sh := range shards {
+			if err := sh.List(ctx, prefix, fn); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return nil
+	_, ns, _ := storepkg.SplitPrefix(prefix)
+	if ns == "" {
+		return fmt.Errorf("store.list: missing namespace in prefix %q", prefix)
+	}
+	sh, err := s.mgr.Get(ctx, s.orgID, ns)
+	if err != nil {
+		return err
+	}
+	return sh.List(ctx, prefix, fn)
 }
 
-// listInto loads every record under prefix into a slice via the supplied
-// allocator + setter — the typical pattern for List ops.
+// listInto loads every record under prefix into a typed slice.
 func listInto[T any](s *store, prefix string) ([]T, error) {
 	out := []T{}
 	if err := s.list(prefix, func(_ string, body []byte) error {

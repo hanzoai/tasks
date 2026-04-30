@@ -9,63 +9,63 @@ retract (
 )
 
 require (
-	github.com/luxfi/database v1.18.2
+	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/luxfi/consensus v1.22.85
 	github.com/luxfi/log v1.4.1
 	github.com/robfig/cron/v3 v3.0.1
-	golang.org/x/time v0.10.0
+	golang.org/x/time v0.14.0
+	modernc.org/sqlite v1.50.0
 )
 
 require (
-	filippo.io/hpke v0.4.0 // indirect
+	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20260311194731-d5b7577c683d // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/dgraph-io/ristretto/v2 v2.4.0 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/go-ini/ini v1.67.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
-	github.com/go-logr/logr v1.4.3 // indirect
-	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/rpc v1.2.1 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
+	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
-	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
-	github.com/klauspost/crc32 v1.3.0 // indirect
-	github.com/luxfi/age v1.4.0 // indirect
 	github.com/luxfi/cache v1.2.1 // indirect
+	github.com/luxfi/codec v1.1.3 // indirect
 	github.com/luxfi/compress v0.0.5 // indirect
 	github.com/luxfi/concurrent v0.0.3 // indirect
-	github.com/luxfi/crypto v1.17.39 // indirect
+	github.com/luxfi/constants v1.4.3 // indirect
+	github.com/luxfi/container v0.0.4 // indirect
+	github.com/luxfi/crypto v1.17.40 // indirect
+	github.com/luxfi/database v1.18.2 // indirect
+	github.com/luxfi/geth v1.16.73 // indirect
 	github.com/luxfi/ids v1.2.9 // indirect
 	github.com/luxfi/math v1.2.3 // indirect
 	github.com/luxfi/math/big v0.1.0 // indirect
 	github.com/luxfi/mdns v0.1.0 // indirect
 	github.com/luxfi/metric v1.5.0 // indirect
 	github.com/luxfi/mock v0.1.1 // indirect
-	github.com/luxfi/zapdb v1.8.0 // indirect
-	github.com/miekg/dns v1.1.62 // indirect
-	github.com/minio/crc64nvme v1.1.1 // indirect
-	github.com/minio/md5-simd v1.1.2 // indirect
-	github.com/minio/minio-go/v7 v7.0.100 // indirect
+	github.com/luxfi/p2p v1.18.9 // indirect
+	github.com/luxfi/sampler v1.0.0 // indirect
+	github.com/luxfi/validators v1.0.0 // indirect
+	github.com/luxfi/version v1.0.1 // indirect
+	github.com/luxfi/warp v1.18.5 // indirect
+	github.com/miekg/dns v1.1.66 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
-	github.com/philhofer/fwd v1.2.0 // indirect
-	github.com/rs/xid v1.6.0 // indirect
-	github.com/tinylib/msgp v1.6.1 // indirect
-	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel v1.40.0 // indirect
-	go.opentelemetry.io/otel/metric v1.40.0 // indirect
-	go.opentelemetry.io/otel/trace v1.40.0 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/supranational/blst v0.3.16 // indirect
 	go.uber.org/mock v0.6.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
-	golang.org/x/exp v0.0.0-20260212183809-81e46e3db34a // indirect
-	golang.org/x/mod v0.33.0 // indirect
+	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
+	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
-	golang.org/x/tools v0.42.0 // indirect
+	golang.org/x/tools v0.43.0 // indirect
+	gonum.org/v1/gonum v0.17.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+	modernc.org/libc v1.72.0 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
 )
 
 require (
