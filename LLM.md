@@ -5,6 +5,12 @@ Durable workflow execution engine for AI agent orchestration.
 ## Module
 `github.com/hanzoai/tasks`
 
+## Versioning policy (2026-04-30)
+- **Stay on v1.x.x forever.** Per global CLAUDE.md "NEVER bump Go packages above v1.x.x."
+- Major version bump in semver-import-versioning would require module-path suffix (`/v2`, `/v3`); we don't do that.
+- Old v2.x and v3.x tags (transition era) were deleted on 2026-04-30. Old v1.x tags (`v1.0.0`–`v1.42.0`) are upstream-Temporal-era artifacts and remain in git history for blame.
+- New Hanzo-Tasks releases continue from `v1.43.0` and bump minor for features, patch for fixes.
+
 ## Quick Start
 ```bash
 go build ./cmd/tasksd/
