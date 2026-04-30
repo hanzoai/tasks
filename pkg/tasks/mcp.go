@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/hanzoai/tasks/pkg/auth"
 )
 
 // mcpHandler returns a single endpoint that accepts JSON-RPC 2.0 calls
@@ -51,7 +53,7 @@ func (e *Embedded) mcpHandler() http.Handler {
 		case "tools/list":
 			mcpResult(w, req.ID, map[string]any{"tools": mcpTools()})
 		case "tools/call":
-			e.mcpToolCall(w, req)
+			e.mcpToolCall(w, r, req)
 		case "ping":
 			mcpResult(w, req.ID, map[string]any{})
 		default:
@@ -135,8 +137,10 @@ func mcpTools() []map[string]any {
 	}
 }
 
-func (e *Embedded) mcpToolCall(w http.ResponseWriter, req mcpRequest) {
-	en := e.engine
+func (e *Embedded) mcpToolCall(w http.ResponseWriter, r *http.Request, req mcpRequest) {
+	// Scope every tool call to the caller's IAM-validated org. Empty org
+	// (embedded/dev) returns the unscoped engine — same surface as today.
+	en := e.engine.WithOrg(auth.OrgID(r.Context()))
 	var p struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
