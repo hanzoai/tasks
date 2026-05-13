@@ -1,6 +1,6 @@
 module github.com/hanzoai/tasks
 
-go 1.26.1
+go 1.26.3
 
 retract (
 	v1.30.0
@@ -69,7 +69,7 @@ require (
 )
 
 require (
-	github.com/luxfi/zap v0.2.1
+	github.com/zap-proto/go v0.2.1
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	golang.org/x/net v0.52.0 // indirect
