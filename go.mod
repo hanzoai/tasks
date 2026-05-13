@@ -29,13 +29,14 @@ require (
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
+	github.com/luxfi/accel v1.0.7 // indirect
 	github.com/luxfi/cache v1.2.1 // indirect
 	github.com/luxfi/codec v1.1.3 // indirect
 	github.com/luxfi/compress v0.0.5 // indirect
 	github.com/luxfi/concurrent v0.0.3 // indirect
 	github.com/luxfi/constants v1.4.3 // indirect
 	github.com/luxfi/container v0.0.4 // indirect
-	github.com/luxfi/crypto v1.17.40 // indirect
+	github.com/luxfi/crypto v1.19.0 // indirect
 	github.com/luxfi/database v1.18.2 // indirect
 	github.com/luxfi/geth v1.16.73 // indirect
 	github.com/luxfi/ids v1.2.9 // indirect
@@ -69,9 +70,9 @@ require (
 )
 
 require (
-	github.com/zap-proto/go v0.2.1
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/zap-proto/go v0.2.1
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 )
