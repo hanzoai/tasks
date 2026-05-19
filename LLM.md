@@ -2,6 +2,8 @@
 
 Durable workflow execution engine for AI agent orchestration.
 
+**Upstream**: Temporal (MIT). Pre-v3.0 history is the Temporal fork; v3.0+ is native ZAP-only with the upstream gRPC/proto/runtime fully ripped out. Public Go module pinned at v1.x forever (semver-import-versioning policy).
+
 ## Module
 `github.com/hanzoai/tasks`
 
