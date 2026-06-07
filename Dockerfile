@@ -9,7 +9,7 @@
 # resulting dist/ into this build context. ui/embed.go imports the
 # bundle via //go:embed all:dist at compile time.
 
-FROM golang:1.26-alpine AS go-build
+FROM golang:1.26.4-alpine AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
