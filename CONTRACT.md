@@ -1,6 +1,6 @@
 # Hanzo Tasks — Canonical Contract
 
-The single durable async substrate for every Hanzo + Liquidity Go service.
+The single durable async substrate for every Hanzo Go service.
 
 This document is law. If your service needs retries, durability, scheduling,
 cron, or any async work that must survive a process restart, you use
@@ -177,13 +177,12 @@ Namespaces map 1:1 to IAM orgs. This is non-negotiable.
 | SQLite store | `data/mlc.db` |
 
 Workers dial with `Namespace: <orgSlug>`. All schedules, workflows, and
-visibility queries are namespace-scoped at the server. A `liquidity`
-worker cannot see `mlc` workflows even if both share a binary. The strip
-+ mint identity middleware in `tasksd` enforces this on every RPC.
+visibility queries are namespace-scoped at the server. An `org-a`
+worker cannot see `org-b` workflows even if both share a binary. The
+strip + mint identity middleware in `tasksd` enforces this on every RPC.
 
-Multi-tenant services (BD, TA, ATS) hold one client + worker per active
-org. Onboarding a new org allocates the namespace lazily on first
-`ExecuteWorkflow`.
+Multi-tenant services hold one client + worker per active org. Onboarding
+a new org allocates the namespace lazily on first `ExecuteWorkflow`.
 
 Single-tenant services (notify when serving Hanzo only) may run a single
 `default` namespace; the moment they serve a second tenant, switch to
@@ -259,9 +258,9 @@ This contract supersedes:
 - Per-service `pkg/taskqueue/` and `pkg/tasks/` wrappers that wrap a
   fork of the SDK with HTTP fallbacks. The wrappers will be removed
   once direct callers migrate to `github.com/hanzoai/tasks/pkg/sdk`.
-- `go.temporal.io/sdk/*` imports anywhere outside this repo. Every
-  Liquidity service that still imports the legacy SDK gets migrated in
-  the dispatched follow-up work; new code must not import it.
+- `go.temporal.io/sdk/*` imports anywhere outside this repo. Any
+  service that still imports the legacy SDK gets migrated in the
+  dispatched follow-up work; new code must not import it.
 - Ad-hoc `time.NewTicker` + `go func()` for retries, cron, or scheduled
   send. If you wrote one of those, you owe a tasks workflow.
 
