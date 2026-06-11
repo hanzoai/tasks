@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cactus/go-statsd-client/v5/statsd"
-	prom "github.com/prometheus/client_golang/prometheus"
+	metric "github.com/luxfi/metric"
 	"github.com/uber-go/tally/v4"
 	"github.com/uber-go/tally/v4/prometheus"
 	"go.temporal.io/server/common/log"
@@ -110,7 +110,7 @@ type (
 		// LoggerRPS sets the RPS of the logger provided to prometheus. Default of 0 means no limit.
 		LoggerRPS float64 `yaml:"loggerRPS"`
 
-		// Configs below are kept for backwards compatibility with previously exposed tally prometheus.Configuration.
+		// Configs below are kept for backwards compatibility with previously exposed tally metric.Configuration.
 
 		// Deprecated. ListenNetwork if specified will be used instead of using tcp network.
 		// Supported networks: tcp, tcp4, tcp6 and unix.
@@ -323,14 +323,14 @@ func convertSanitizeOptionsToTally(config *PrometheusConfig) (tally.SanitizeOpti
 func convertPrometheusConfigToTally(
 	clientConfig *ClientConfig,
 	config *PrometheusConfig,
-) *prometheus.Configuration {
-	defaultObjectives := make([]prometheus.SummaryObjective, len(config.DefaultSummaryObjectives))
+) *metric.Configuration {
+	defaultObjectives := make([]metric.SummaryObjective, len(config.DefaultSummaryObjectives))
 	for i, item := range config.DefaultSummaryObjectives {
 		defaultObjectives[i].AllowedError = item.AllowedError
 		defaultObjectives[i].Percentile = item.Percentile
 	}
 
-	return &prometheus.Configuration{
+	return &metric.Configuration{
 		HandlerPath:              config.HandlerPath,
 		ListenNetwork:            config.ListenNetwork,
 		ListenAddress:            config.ListenAddress,
@@ -344,9 +344,9 @@ func convertPrometheusConfigToTally(
 func buildTallyTimerHistogramBuckets(
 	clientConfig *ClientConfig,
 	config *PrometheusConfig,
-) []prometheus.HistogramObjective {
+) []metric.HistogramObjective {
 	if len(config.DefaultHistogramBuckets) > 0 {
-		result := make([]prometheus.HistogramObjective, len(config.DefaultHistogramBuckets))
+		result := make([]metric.HistogramObjective, len(config.DefaultHistogramBuckets))
 		for i, item := range config.DefaultHistogramBuckets {
 			result[i].Upper = item.Upper
 		}
@@ -354,9 +354,9 @@ func buildTallyTimerHistogramBuckets(
 	}
 
 	if len(config.DefaultHistogramBoundaries) > 0 {
-		result := make([]prometheus.HistogramObjective, 0, len(config.DefaultHistogramBoundaries))
+		result := make([]metric.HistogramObjective, 0, len(config.DefaultHistogramBoundaries))
 		for _, value := range config.DefaultHistogramBoundaries {
-			result = append(result, prometheus.HistogramObjective{
+			result = append(result, metric.HistogramObjective{
 				Upper: value,
 			})
 		}
@@ -364,9 +364,9 @@ func buildTallyTimerHistogramBuckets(
 	}
 
 	boundaries := clientConfig.PerUnitHistogramBoundaries[Milliseconds]
-	result := make([]prometheus.HistogramObjective, 0, len(boundaries))
+	result := make([]metric.HistogramObjective, 0, len(boundaries))
 	for _, boundary := range boundaries {
-		result = append(result, prometheus.HistogramObjective{
+		result = append(result, metric.HistogramObjective{
 			Upper: boundary / float64(time.Second/time.Millisecond), // convert milliseconds to seconds
 		})
 	}
@@ -432,12 +432,12 @@ func newStatsdScope(logger log.Logger, c *Config) tally.Scope {
 // a default reporting interval of a second
 func newPrometheusScope(
 	logger log.Logger,
-	config *prometheus.Configuration,
+	config *metric.Configuration,
 	sanitizeOptions tally.SanitizeOptions,
 	clientConfig *ClientConfig,
 ) tally.Scope {
 	reporter, err := config.NewReporter(
-		prometheus.ConfigurationOptions{
+		metric.ConfigurationOptions{
 			Registry: prom.NewRegistry(),
 			OnError: func(err error) {
 				logger.Warn("error in prometheus reporter", tag.Error(err))
@@ -450,7 +450,7 @@ func newPrometheusScope(
 	scopeOpts := tally.ScopeOptions{
 		Tags:            clientConfig.Tags,
 		CachedReporter:  reporter,
-		Separator:       prometheus.DefaultSeparator,
+		Separator:       metric.DefaultSeparator,
 		SanitizeOptions: &sanitizeOptions,
 		Prefix:          clientConfig.Prefix,
 	}
