@@ -23,7 +23,7 @@ env:
 
 jobs:
   build-amd64:
-    runs-on: evo
+    runs-on: [self-hosted, linux, amd64]
     steps:
       - uses: actions/checkout@v5
 
@@ -61,7 +61,7 @@ jobs:
     # ARC scale set was uninstalled 2026-04-27. Re-enable when DO
     # ships arm64 instances by flipping `if:` back to true.
     if: false
-    runs-on: spark
+    runs-on: [self-hosted, linux, arm64]
     steps:
       - uses: actions/checkout@v5
 
@@ -92,7 +92,7 @@ jobs:
     # When arm64 returns, add it back to `needs:` and the manifest
     # will pick up both arches automatically via `arches_for()`.
     needs: [build-amd64]
-    runs-on: evo
+    runs-on: [self-hosted, linux, amd64]
     steps:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
