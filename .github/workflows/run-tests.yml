@@ -29,7 +29,7 @@ env:
 jobs:
   test-setup:
     name: Test setup
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     outputs:
       job_matrix: ${{ steps.build_matrix.outputs.job_matrix }}
       full_test_reason: ${{ steps.determine_scope.outputs.full_test_reason }}
@@ -551,7 +551,7 @@ jobs:
       - unit-test
       - integration-test
       - functional-test
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     env:
       RESULTS: ${{ toJSON(needs.*.result) }}
     steps:
@@ -569,7 +569,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.test-status.result == 'failure'
     needs: test-status
-    runs-on: ubuntu-latest
+    runs-on: hanzo-build-linux-amd64
     permissions:
       contents: read
       actions: read
