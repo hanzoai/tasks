@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   lint-actions:
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -25,7 +25,7 @@ jobs:
         shell: bash
 
   lint-protos:
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -47,7 +47,7 @@ jobs:
           make lint-protos
 
   lint-api:
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -69,7 +69,7 @@ jobs:
           make lint-api
 
   lint-workflows:
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -90,7 +90,7 @@ jobs:
         run: make workflowcheck
 
   fmt:
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -116,7 +116,7 @@ jobs:
           fi
 
   parallelize-tests:
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -142,7 +142,7 @@ jobs:
           fi
 
   golangci:
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -176,7 +176,7 @@ jobs:
       - lint-actions
       - golangci
       - parallelize-tests
-    runs-on: ubuntu-24.04-arm
+    runs-on: hanzo-build-linux-amd64
     if: always()
     env:
       RESULTS: ${{ toJSON(needs.*.result) }}
