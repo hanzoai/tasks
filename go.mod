@@ -11,7 +11,7 @@ retract (
 require (
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/luxfi/consensus v1.22.85
-	github.com/luxfi/log v1.4.1
+	github.com/luxfi/log v1.4.3
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/time v0.14.0
 	modernc.org/sqlite v1.50.0
@@ -28,7 +28,7 @@ require (
 	github.com/gorilla/rpc v1.2.1 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
-	github.com/klauspost/compress v1.18.4 // indirect
+	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/luxfi/accel v1.0.7 // indirect
 	github.com/luxfi/cache v1.2.1 // indirect
 	github.com/luxfi/codec v1.1.3 // indirect
@@ -37,13 +37,13 @@ require (
 	github.com/luxfi/constants v1.4.3 // indirect
 	github.com/luxfi/container v0.0.4 // indirect
 	github.com/luxfi/crypto v1.19.0 // indirect
-	github.com/luxfi/database v1.18.2 // indirect
+	github.com/luxfi/database v1.19.3 // indirect
 	github.com/luxfi/geth v1.16.73 // indirect
 	github.com/luxfi/ids v1.2.9 // indirect
-	github.com/luxfi/math v1.2.3 // indirect
+	github.com/luxfi/math v1.4.0 // indirect
 	github.com/luxfi/math/big v0.1.0 // indirect
 	github.com/luxfi/mdns v0.1.0 // indirect
-	github.com/luxfi/metric v1.5.0 // indirect
+	github.com/luxfi/metric v1.5.1 // indirect
 	github.com/luxfi/mock v0.1.1 // indirect
 	github.com/luxfi/p2p v1.18.9 // indirect
 	github.com/luxfi/sampler v1.0.0 // indirect
@@ -56,7 +56,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/supranational/blst v0.3.16 // indirect
 	go.uber.org/mock v0.6.0 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
@@ -75,7 +75,7 @@ require (
 
 require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
-	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	github.com/mattn/go-isatty v0.0.21 // indirect
+	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
 )
