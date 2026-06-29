@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="tasks" width="880"></p>
+
 <div class="title-block" style="text-align: center;" align="center">
 
 # Hanzo Tasks
