@@ -93,17 +93,20 @@ func TestDispatcher_WorkflowAndActivityRoundTrip(t *testing.T) {
 		t.Fatalf("delivery task_token is empty")
 	}
 
-	// Schedule an activity from the workflow's peer.
-	actID, actToken := d.ScheduleActivity("peerA", ns, queue, workflowID, runID, actType,
+	// Dispatch an activity for (wf, run, seq=0). The dispatcher delivers it
+	// to the subscribed activity peer (peerB) and returns a token bound to
+	// (ns, wf, run, seq).
+	const actID = "run-1-act-0"
+	actToken := d.DispatchActivity(ns, queue, workflowID, runID, 0, actID, actType,
 		[]byte(`{"name":"activity-input"}`), 60_000, 5_000)
-	if actID == "" || len(actToken) == 0 {
-		t.Fatalf("ScheduleActivity returned empty id/token: id=%q token=%q", actID, actToken)
+	if len(actToken) == 0 {
+		t.Fatalf("DispatchActivity returned empty token")
 	}
 
 	// One additional push to peerB.
 	calls = cap.snapshot()
 	if len(calls) != 2 {
-		t.Fatalf("expected 2 pushes after ScheduleActivity, got %d", len(calls))
+		t.Fatalf("expected 2 pushes after DispatchActivity, got %d", len(calls))
 	}
 	if calls[1].peerID != "peerB" {
 		t.Fatalf("activity task delivered to %q, want peerB", calls[1].peerID)
@@ -123,31 +126,23 @@ func TestDispatcher_WorkflowAndActivityRoundTrip(t *testing.T) {
 		t.Fatalf("activity type = %q, want %q", actDelivery.ActivityTypeName, actType)
 	}
 
-	// Worker on peerB completes the activity; the dispatcher should push
-	// OpcodeDeliverActivityResult back to the workflow's peer (peerA).
-	if _, ok := d.CompleteActivityTask(actToken, []byte(`"done"`), nil); !ok {
-		t.Fatalf("CompleteActivityTask: token not found")
+	// The worker on peerB responds; the token resolves back to the exact
+	// (ns, wf, run, seq) the engine advances from. Phase-2a activities do
+	// NOT push a result to a workflow peer — the run advances by replay.
+	pt, ok := d.ResolveActivityToken(actToken)
+	if !ok {
+		t.Fatalf("ResolveActivityToken: token not found")
 	}
-	calls = cap.snapshot()
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 pushes after CompleteActivityTask, got %d", len(calls))
+	if pt.ns != ns || pt.workflowID != workflowID || pt.runID != runID || pt.seq != 0 {
+		t.Fatalf("resolved token wrong: ns=%q wf=%q run=%q seq=%d", pt.ns, pt.workflowID, pt.runID, pt.seq)
 	}
-	if calls[2].peerID != "peerA" {
-		t.Fatalf("activity result delivered to %q, want peerA", calls[2].peerID)
+	// Single-use.
+	if _, ok := d.ResolveActivityToken(actToken); ok {
+		t.Fatalf("ResolveActivityToken should be single-use")
 	}
-	if calls[2].opcode != OpcodeDeliverActivityResult {
-		t.Fatalf("opcode = 0x%04x, want OpcodeDeliverActivityResult (0x%04x)",
-			calls[2].opcode, OpcodeDeliverActivityResult)
-	}
-	var resDelivery activityResultDeliveryJSON
-	if err := json.Unmarshal(calls[2].body, &resDelivery); err != nil {
-		t.Fatalf("decode result delivery: %v", err)
-	}
-	if resDelivery.ActivityID != actID {
-		t.Fatalf("result activity id = %q, want %q", resDelivery.ActivityID, actID)
-	}
-	if resDelivery.Result != `"done"` {
-		t.Fatalf("result body = %q, want %q", resDelivery.Result, `"done"`)
+	// No result push on the wire — still exactly 2 sends.
+	if got := len(cap.snapshot()); got != 2 {
+		t.Fatalf("unexpected extra push after resolve: %d (no result push in the replay model)", got)
 	}
 
 	// Workflow task completion drops the inflight record.
