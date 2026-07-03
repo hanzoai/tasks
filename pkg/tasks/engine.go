@@ -72,11 +72,12 @@ type engine struct {
 	disp       *dispatcher
 	cancelling *cancelTracker
 	workers    *workerRegistry
-	orgID      string // "" = unscoped (embedded/dev). Stamped on every emitted Event.
+	runMu      *keyedMutex // serializes advancing a single (org, ns, wf, run)
+	orgID      string      // "" = unscoped (embedded/dev). Stamped on every emitted Event.
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry()}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex()}
 }
 
 // WithOrg returns an engine view scoped to orgID. Reads and writes go
@@ -86,7 +87,7 @@ func (e *engine) WithOrg(orgID string) *engine {
 	if orgID == "" {
 		return e
 	}
-	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, orgID: orgID}
+	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, orgID: orgID}
 }
 
 // emit publishes an event tagged with the engine's org so per-org SSE
@@ -209,12 +210,10 @@ func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ Ty
 	if reloaded, ok, _ := e.DescribeWorkflow(ns, workflowId, runId); ok {
 		wf = *reloaded
 	}
-	if e.disp != nil {
-		var inputBytes []byte
-		if input != nil {
-			inputBytes, _ = json.Marshal(input)
-		}
-		e.disp.EnqueueWorkflowTask(ns, taskQueue, workflowId, runId, typ.Name, inputBytes)
+	// Deliver the first workflow task carrying the run's full history
+	// (WORKFLOW_EXECUTION_STARTED); the worker replays it from event 0.
+	if err := e.scheduleWorkflowTask(ns, workflowId, runId); err != nil {
+		return nil, err
 	}
 	e.emit(Event{
 		Kind:       "workflow.started",
@@ -666,12 +665,10 @@ func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reas
 	src.Status = "WORKFLOW_EXECUTION_STATUS_TERMINATED"
 	src.CloseTime = nowRFC3339()
 	_ = e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, src.Execution.WorkflowId, src.Execution.RunId), src)
-	if e.disp != nil {
-		var inputBytes []byte
-		if newWf.Input != nil {
-			inputBytes, _ = json.Marshal(newWf.Input)
-		}
-		e.disp.EnqueueWorkflowTask(ns, newWf.TaskQueue, newWf.Execution.WorkflowId, newWf.Execution.RunId, newWf.Type.Name, inputBytes)
+	// Deliver the forked run's first workflow task carrying its (truncated
+	// + RESET) history so the worker replays from the fork point.
+	if err := e.scheduleWorkflowTask(ns, newWf.Execution.WorkflowId, newWf.Execution.RunId); err != nil {
+		return nil, err
 	}
 	out, _, _ := e.DescribeWorkflow(ns, newWf.Execution.WorkflowId, newWf.Execution.RunId)
 	e.emit(Event{

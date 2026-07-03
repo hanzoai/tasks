@@ -23,9 +23,6 @@ func (w *workerImpl) startSubscriptions() error {
 	w.transport.OnActivityTask(func(task *client.ActivityTask) {
 		w.dispatchPushedActivityTask(task)
 	})
-	w.transport.OnActivityResult(func(activityID string, result, failure []byte) {
-		w.completeActivity(activityID, result, failure)
-	})
 
 	wfReq := client.PollWorkflowTaskRequest{
 		Namespace:     w.namespace,

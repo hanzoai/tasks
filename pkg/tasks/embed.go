@@ -141,6 +141,16 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		return nil, fmt.Errorf("tasks.Embed: zap start: %w", err)
 	}
 
+	// Crash-recovery: rebuild in-flight dispatch state from the durable
+	// store. Re-dispatched activities and re-enqueued workflow tasks queue
+	// in the dispatcher until workers (re)subscribe, then drain. Recovery
+	// is idempotent — seq-keyed dispatch + replay dedup mean no lost and no
+	// double execution.
+	if err := en.Recover(); err != nil {
+		node.Stop()
+		return nil, fmt.Errorf("tasks.Embed: recover: %w", err)
+	}
+
 	stop := make(chan struct{})
 	go en.runScheduler(stop)
 
@@ -1806,25 +1816,11 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 		client.OpcodeRespondActivityTaskFailed:    respondActivityFailedHandler(rootEn),
 		client.OpcodeRecordActivityTaskHeartbeat:  heartbeatHandler(),
 
-		// ── activity scheduling (envelope + JSON) ─────────────────
-		client.OpcodeScheduleActivity: wrapPeer(func(en *engine, from string, req map[string]any) (any, uint32, string) {
-			ns := strOr(req, "namespace", defaultNS)
-			q := strOr(req, "task_queue", "")
-			wfID := strOr(req, "workflow_id", "")
-			runID := strOr(req, "run_id", "")
-			actType := strOr(req, "activity_type", "")
-			if actType == "" {
-				return nil, 400, "activity_type required"
-			}
-			input, _ := decodeBytesField(req, "input")
-			startMs := int64Field(req, "start_to_close_ms")
-			hbMs := int64Field(req, "heartbeat_ms")
-			actID, token := en.disp.ScheduleActivity(from, ns, q, wfID, runID, actType, input, startMs, hbMs)
-			return map[string]any{
-				"activity_task_id": actID,
-				"task_token":       string(token),
-			}, 200, ""
-		}),
+		// Phase-2a: workflow-driven activities are event-sourced — the
+		// decider emits a ScheduleActivity command on
+		// RespondWorkflowTaskCompleted (applied by respondWorkflowHandler),
+		// so there is no mid-episode ScheduleActivity RPC (0x006B retired).
+		//
 		// 0x006D — child workflows ship in a follow-up.
 		client.OpcodeStartChildWorkflow: wrap(func(_ *engine, _ map[string]any) (any, uint32, string) {
 			return nil, 501, "start_child_workflow: not yet implemented"
@@ -1858,26 +1854,37 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		// Apply commands.
+		// Apply the decider's command batch. kind=2 (scheduleActivity)
+		// carries the deterministic seq + activity spec — this is where a
+		// workflow-driven activity enters the durable, event-sourced path.
 		var env struct {
 			Version  int8 `json:"v"`
 			Commands []struct {
-				Kind           int8   `json:"kind"`
-				Result         []byte `json:"result,omitempty"`
-				Failure        []byte `json:"failure,omitempty"`
-				ActivityTaskID string `json:"activityTaskId,omitempty"`
+				Kind           int8                    `json:"kind"`
+				Result         []byte                  `json:"result,omitempty"`
+				Failure        []byte                  `json:"failure,omitempty"`
+				Seq            int                     `json:"seq,omitempty"`
+				ActivityType   string                  `json:"activityType,omitempty"`
+				Input          []byte                  `json:"input,omitempty"`
+				TaskQueue      string                  `json:"taskQueue,omitempty"`
+				StartToCloseMs int64                   `json:"startToCloseMs,omitempty"`
+				HeartbeatMs    int64                   `json:"heartbeatMs,omitempty"`
+				RetryPolicy    *client.RetryPolicyJSON `json:"retryPolicy,omitempty"`
 			} `json:"cmds"`
 		}
 		if len(commands) > 0 {
 			_ = json.Unmarshal(commands, &env)
 		}
+		unlock := en.lockRun(t.ns, t.workflowID, t.runID)
+		defer unlock()
 		for _, c := range env.Commands {
 			switch c.Kind {
 			case 0: // complete
 				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_COMPLETED", "workflow.completed", "WORKFLOW_EXECUTION_COMPLETED", map[string]any{"result": string(c.Result)})
 			case 1: // fail
 				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_FAILED", "workflow.failed", "WORKFLOW_EXECUTION_FAILED", map[string]any{"failure": string(c.Failure)})
-			case 2: // schedule_activity (already scheduled by 0x006B; no-op)
+			case 2: // scheduleActivity — idempotent per (run, seq)
+				_ = en.applyScheduleActivity(t.ns, t.workflowID, t.runID, c.Seq, c.ActivityType, c.Input, c.TaskQueue, c.StartToCloseMs, c.HeartbeatMs, c.RetryPolicy)
 			case 3: // canceled — worker ack of a CANCELING handshake
 				_, _ = en.AckCanceled(t.ns, t.workflowID, t.runID, string(c.Failure), "")
 			}
@@ -1889,8 +1896,12 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 func respondActivityCompletedHandler(en *engine) zap.Handler {
 	return func(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
 		token, result := decodeRespondFrame(msg, client.FieldResultBytes)
-		if _, ok := en.disp.CompleteActivityTask(token, result, nil); !ok {
+		pt, ok := en.disp.ResolveActivityToken(token)
+		if !ok {
 			return objectAck(0, "task token not found", 404)
+		}
+		if err := en.completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
+			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)
 	}
@@ -1899,8 +1910,12 @@ func respondActivityCompletedHandler(en *engine) zap.Handler {
 func respondActivityFailedHandler(en *engine) zap.Handler {
 	return func(_ context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
 		token, failure := decodeRespondFrame(msg, client.FieldFailureBytes)
-		if _, ok := en.disp.CompleteActivityTask(token, nil, failure); !ok {
+		pt, ok := en.disp.ResolveActivityToken(token)
+		if !ok {
 			return objectAck(0, "task token not found", 404)
+		}
+		if err := en.completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
+			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)
 	}
