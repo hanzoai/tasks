@@ -18,39 +18,20 @@ import (
 	luxlog "github.com/luxfi/log"
 )
 
-// dispatchWorkflowTask runs the registered workflow function for a
-// WorkflowTask and ships the resulting commands back to the frontend.
-//
-// Phase 1 path:
+// dispatchWorkflowTask replays the registered workflow function against the
+// task's event-sourced history for one decision episode and ships the
+// resulting commands back to the server.
 //
 //  1. Look up the fn by task.WorkflowTypeName.
-//  2. Build a workerEnv (satisfies workflow.CoroutineEnv) seeded
-//     with the task's input.
-//  3. Decode input JSON into the fn's arg types.
-//  4. Invoke fn(ctx, args...) synchronously.
-//  5. Serialise the commands the env collected + the fn return into a
-//     CommandsEnvelope (schema/tasks.zap).
-//  6. Call RespondWorkflowTaskCompleted.
+//  2. Parse task.History into events; seed a replay env from them.
+//  3. Decode the workflow input from WORKFLOW_EXECUTION_STARTED.
+//  4. Run the fn: ExecuteActivity resolves from history by seq, or emits a
+//     ScheduleActivity command and blocks the episode.
+//  5. Batch the new commands (schedule* + terminal complete/fail) into a
+//     CommandsEnvelope and RespondWorkflowTaskCompleted.
 //
-// On panic the worker ships a failed-commands response; the server
-// will fail the workflow execution per its retry policy. The panic
-// is logged, not propagated, so one bad workflow does not kill the
-// entire worker goroutine.
-//
-// Phase-1 replay semantics (IMPORTANT — carryover budget):
-//
-//   Event-sourced replay is deferred to Phase 2. Every dispatch
-//   re-runs the workflow function from the top with the same
-//   input, so workflows MUST be pure w.r.t. their inputs:
-//     - no reads from external state,
-//     - no non-deterministic branching on time / rand / env,
-//     - every side-effect goes through an activity.
-//   Activity calls are idempotent by contract; mid-run crashes
-//   restart with the same input. Commands are emitted into
-//   workflow history via the CommandsEnvelope on RespondWorkflow
-//   TaskCompleted — the frontend's handleRespondWorkflowTask
-//   Completed consumes that envelope and mutates history
-//   accordingly.
+// The fn is re-run from the top on every task — it MUST be pure w.r.t. its
+// inputs + history: same arguments and history ⇒ same command sequence.
 func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.WorkflowTask) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -70,9 +51,6 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 			"workflow_type", task.WorkflowTypeName,
 			"workflow_id", task.WorkflowID,
 		)
-		// Phase 1: respond with an empty commands list so the server
-		// can fail the workflow cleanly. Phase 2 will return a proper
-		// failure.
 		_ = w.transport.RespondWorkflowTaskCompleted(ctx,
 			client.RespondWorkflowTaskCompletedRequest{
 				TaskToken: task.TaskToken,
@@ -81,9 +59,14 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 		return
 	}
 
-	// Build the per-task env. workerEnv is the real wire-backed
-	// runtime: ExecuteActivity dispatches over ZAP, NewTimer uses
-	// time.NewTimer, Select uses a fan-in wake channel (no spin).
+	events, histErr := parseHistory(task.History)
+	if histErr != nil {
+		w.logger.Error("workflow history parse failed",
+			"workflow_type", task.WorkflowTypeName, "err", histErr)
+		w.respondWorkflow(ctx, task.TaskToken, []rawCommand{failCommand(histErr)})
+		return
+	}
+
 	info := workflow.Info{
 		WorkflowID:   task.WorkflowID,
 		RunID:        task.RunID,
@@ -92,104 +75,68 @@ func (w *workerImpl) dispatchWorkflowTask(ctx context.Context, task *client.Work
 		Namespace:    w.namespace,
 		Attempt:      1,
 	}
-	env := newWorkerEnv(ctx, w, w.transport, info, w.taskQueue, w.logger)
+	env := newWorkerEnv(ctx, w.transport, info, w.taskQueue, w.logger)
+	env.loadHistory(events)
 	defer env.cancelAll()
 	ctx2 := workflow.NewContextFromEnv(env)
 
-	// Decode input JSON into the fn's arg types. First argument is
-	// always workflow.Context; subsequent arguments come from the
-	// task's input (encoded as a JSON array of arg values).
-	args, decodeErr := decodeWorkflowArgs(fn, ctx2, task.History)
+	// Decode the workflow input (recorded on WORKFLOW_EXECUTION_STARTED)
+	// into the fn's arg types. First argument is always workflow.Context.
+	args, decodeErr := decodeWorkflowArgs(fn, ctx2, workflowInputFromHistory(events))
 	if decodeErr != nil {
 		w.logger.Error("workflow input decode failed",
-			"workflow_type", task.WorkflowTypeName,
-			"err", decodeErr,
-		)
-		_ = w.transport.RespondWorkflowTaskCompleted(ctx,
-			client.RespondWorkflowTaskCompletedRequest{
-				TaskToken: task.TaskToken,
-				Commands:  failureCommandsJSON(decodeErr),
-			})
+			"workflow_type", task.WorkflowTypeName, "err", decodeErr)
+		w.respondWorkflow(ctx, task.TaskToken, []rawCommand{failCommand(decodeErr)})
 		return
 	}
 
-	// Invoke synchronously. Workflow-level errors surface as a
-	// FailureCommand (schema v1) so the frontend can fail the
-	// execution per its retry policy. Phase 2 will move errors into
-	// the history log; the schema shape stays the same.
-	runResult, runErr := invokeFunc(fn, args)
-
-	var commands []byte
-	if runErr != nil {
-		commands = failureCommandsJSON(runErr)
-	} else {
-		// Success → emit a single completeWorkflow command carrying
-		// the workflow fn's non-error return (if any) as JSON.
-		var resultBytes []byte
-		if runResult != nil {
-			if enc, merr := json.Marshal(runResult); merr == nil {
-				resultBytes = enc
-			} else {
-				w.logger.Error("workflow result marshal", "err", merr)
-			}
-		}
-		commands = completeCommandsJSON(resultBytes)
+	result, runErr, blocked := runWorkflowEpisode(fn, args)
+	commands := env.drainCommands() // ScheduleActivity commands emitted this episode
+	switch {
+	case blocked:
+		// Episode incomplete: only the schedule commands. The run advances
+		// when the server delivers the next task with the results appended.
+	case runErr != nil:
+		commands = append(commands, failCommand(runErr))
+	default:
+		commands = append(commands, completeCommand(result))
 	}
+	w.respondWorkflow(ctx, task.TaskToken, commands)
+}
 
+// respondWorkflow ships a command batch back for a workflow task.
+func (w *workerImpl) respondWorkflow(ctx context.Context, token []byte, commands []rawCommand) {
 	if err := w.transport.RespondWorkflowTaskCompleted(ctx,
 		client.RespondWorkflowTaskCompletedRequest{
-			TaskToken: task.TaskToken,
-			Commands:  commands,
+			TaskToken: token,
+			Commands:  marshalCommands(commands),
 		}); err != nil {
-		w.logger.Error("respond workflow completed",
-			"workflow_id", task.WorkflowID,
-			"err", err,
-		)
+		w.logger.Error("respond workflow completed", "err", err)
 	}
 }
 
-// failureCommandsJSON encodes a single FailWorkflow command
-// envelope (kind=1) carrying the workflow's return error.
-// Non-retryable errors are surfaced as-is; generic errors wrap in
-// a *temporal.Error so the frontend sees a typed failure.
-//
-// Red §5.7 fix: previously workflow errors were silently dropped
-// and the task responded with an empty commands list.
-func failureCommandsJSON(err error) []byte {
+// marshalCommands wraps a command batch in the v1 CommandsEnvelope.
+func marshalCommands(cmds []rawCommand) []byte {
+	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: cmds})
+	return out
+}
+
+// failCommand encodes a FailWorkflow command (kind=1) carrying err.
+func failCommand(err error) rawCommand {
 	failureBytes, _ := temporal.Encode(err)
-	cmd := rawCommand{
-		Kind:    commandKindFailWorkflow,
-		Failure: failureBytes,
-	}
-	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: []rawCommand{cmd}})
-	return out
+	return rawCommand{Kind: commandKindFailWorkflow, Failure: failureBytes}
 }
 
-// completeCommandsJSON encodes a single CompleteWorkflow command
-// envelope (kind=0) carrying the workflow fn's JSON-encoded return
-// value (nil if fn returned only an error or nothing).
-func completeCommandsJSON(result []byte) []byte {
-	cmd := rawCommand{
-		Kind:   commandKindCompleteWorkflow,
-		Result: result,
+// completeCommand encodes a CompleteWorkflow command (kind=0) carrying the
+// fn's JSON-encoded return value (nil if it returned only an error).
+func completeCommand(result any) rawCommand {
+	var resultBytes []byte
+	if result != nil {
+		if enc, err := json.Marshal(result); err == nil {
+			resultBytes = enc
+		}
 	}
-	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: []rawCommand{cmd}})
-	return out
-}
-
-// scheduleActivityCommandsJSON encodes a single ScheduleActivity
-// command envelope (kind=2) for an activity that was dispatched
-// over the wire during this task. Phase 1 uses this for parity
-// with the frontend's canonical shape; Phase 2 will collect all
-// scheduled activities in a single envelope with interleaved
-// completeWorkflow / failWorkflow entries.
-func scheduleActivityCommandsJSON(activityTaskID string) []byte {
-	cmd := rawCommand{
-		Kind:           commandKindScheduleActivity,
-		ActivityTaskID: activityTaskID,
-	}
-	out, _ := json.Marshal(commandsEnvelope{Version: 1, Commands: []rawCommand{cmd}})
-	return out
+	return rawCommand{Kind: commandKindCompleteWorkflow, Result: resultBytes}
 }
 
 // dispatchActivityTask runs the registered activity function for an
@@ -383,10 +330,20 @@ type commandsEnvelope struct {
 }
 
 type rawCommand struct {
-	Kind           int8   `json:"kind"`
-	Result         []byte `json:"result,omitempty"`          // kind=0 completeWorkflow
-	Failure        []byte `json:"failure,omitempty"`         // kind=1 failWorkflow (temporal.Encode)
-	ActivityTaskID string `json:"activityTaskId,omitempty"` // kind=2 scheduleActivity
+	Kind    int8   `json:"kind"`
+	Result  []byte `json:"result,omitempty"`  // kind=0 completeWorkflow
+	Failure []byte `json:"failure,omitempty"` // kind=1 failWorkflow (temporal.Encode)
+
+	// kind=2 scheduleActivity — the decider's durable activity spec. seq is
+	// the deterministic per-run command index; the server writes
+	// ACTIVITY_TASK_SCHEDULED{seq} and dispatches idempotently on (run, seq).
+	Seq            int                     `json:"seq,omitempty"`
+	ActivityType   string                  `json:"activityType,omitempty"`
+	Input          []byte                  `json:"input,omitempty"`
+	TaskQueue      string                  `json:"taskQueue,omitempty"`
+	StartToCloseMs int64                   `json:"startToCloseMs,omitempty"`
+	HeartbeatMs    int64                   `json:"heartbeatMs,omitempty"`
+	RetryPolicy    *client.RetryPolicyJSON `json:"retryPolicy,omitempty"`
 }
 
 // Command kind constants mirror the Int8 values in
@@ -427,11 +384,9 @@ func encodeFailure(err error) []byte {
 	return out
 }
 
-// decodeWorkflowArgs decodes task.History as a JSON array of workflow
-// input arguments and prepends the workflow.Context. Phase 1 does not
-// consume a real history log — the "History" field is a direct carry
-// of the user-supplied input payload. Phase 2 will parse an
-// event-sourced history.
+// decodeWorkflowArgs decodes the workflow input (a JSON array of arguments
+// recorded on WORKFLOW_EXECUTION_STARTED and extracted by
+// workflowInputFromHistory) and prepends the workflow.Context.
 func decodeWorkflowArgs(fn any, ctx workflow.Context, input []byte) ([]reflect.Value, error) {
 	fv := reflect.ValueOf(fn)
 	if fv.Kind() != reflect.Func {
