@@ -101,6 +101,23 @@ func RequireIdentity(v *Validator, require bool) func(http.Handler) http.Handler
 	}
 }
 
+// WithIdentity returns a context carrying an ALREADY-VALIDATED identity, for a
+// caller that terminates the IAM trust boundary itself and embeds the Tasks HTTP
+// surface in-process — e.g. the unified hanzoai/cloud binary, where the gateway
+// validates the JWT and mints X-Org-Id / X-User-Id (HIP-0026) before the request
+// ever reaches this handler. It is the in-process twin of RequireIdentity's mint
+// step: the engine reads org/user/email via OrgID/UserID/UserEmail identically,
+// whether the identity was validated by the JWT path here or by a trusted
+// upstream. Passing empty strings yields the unscoped (dev) context, the same as
+// the no-token path — an embedder MUST therefore gate on its own validated
+// principal before calling this, never on a raw client header.
+func WithIdentity(ctx context.Context, org, user, email string) context.Context {
+	ctx = context.WithValue(ctx, ctxKeyOrgID, org)
+	ctx = context.WithValue(ctx, ctxKeyUserID, user)
+	ctx = context.WithValue(ctx, ctxKeyUserEmail, email)
+	return ctx
+}
+
 // OrgID returns the org id minted from a validated JWT, or "".
 func OrgID(ctx context.Context) string { return strFromCtx(ctx, ctxKeyOrgID) }
 
