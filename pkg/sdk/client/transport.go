@@ -141,12 +141,6 @@ type WorkerTransport interface {
 	// pushes OpcodeDeliverActivityTask.
 	OnActivityTask(fn func(*ActivityTask))
 
-	// OnActivityResult installs the callback fired when the server
-	// pushes OpcodeDeliverActivityResult — i.e. an activity scheduled
-	// from this workflow has completed (or failed). The workerEnv
-	// matches activityID to the pending future and settles it.
-	OnActivityResult(fn func(activityID string, result, failure []byte))
-
 	// RespondWorkflowTaskCompleted uploads the worker's commands
 	// (encoded command list) for a workflow task.
 	RespondWorkflowTaskCompleted(ctx context.Context, req RespondWorkflowTaskCompletedRequest) error
@@ -163,13 +157,6 @@ type WorkerTransport interface {
 	// the activity to stop.
 	RecordActivityTaskHeartbeat(ctx context.Context, req RecordActivityTaskHeartbeatRequest) (bool, error)
 
-	// ScheduleActivity asks the frontend to mint an activity task for
-	// the given type + input and return a stable id (schema/tasks.zap
-	// opcode 0x006B). The workerEnv in pkg/sdk/worker uses this from
-	// inside a workflow to dispatch activities; the eventual result
-	// arrives via OpcodeDeliverActivityResult.
-	ScheduleActivity(ctx context.Context, req ScheduleActivityRequest) (*ScheduleActivityResponse, error)
-
 	// StartChildWorkflow asks the server to start a workflow whose
 	// parent is recorded for linkage (opcode 0x006D). Returns the
 	// run id; Phase-1 does not wait for child completion — the
@@ -178,36 +165,15 @@ type WorkerTransport interface {
 	StartChildWorkflow(ctx context.Context, req StartChildWorkflowRequest) (*StartChildWorkflowResponse, error)
 }
 
-// ScheduleActivityRequest mirrors schema/tasks.zap:ScheduleActivityRequest.
-type ScheduleActivityRequest struct {
-	Namespace      string
-	WorkflowID     string
-	RunID          string
-	TaskQueue      string
-	ActivityType   string
-	Input          []byte
-	StartToCloseMs int64
-	HeartbeatMs    int64
-	RetryPolicy    *RetryPolicyJSON
-}
-
-// RetryPolicyJSON is the Go-side retry-policy shape passed to schedule
-// RPCs. Milliseconds on the wire; zero means "SDK default".
+// RetryPolicyJSON is the Go-side retry-policy shape carried on the
+// ScheduleActivity command (worker → server) and StartChildWorkflow RPC.
+// Milliseconds on the wire; zero means "SDK default".
 type RetryPolicyJSON struct {
 	InitialIntervalMs      int64    `json:"initial_interval_ms,omitempty"`
 	BackoffCoefficient     float64  `json:"backoff_coefficient,omitempty"`
 	MaximumIntervalMs      int64    `json:"maximum_interval_ms,omitempty"`
 	MaximumAttempts        int32    `json:"maximum_attempts,omitempty"`
 	NonRetryableErrorTypes []string `json:"non_retryable_error_types,omitempty"`
-}
-
-// ScheduleActivityResponse mirrors schema/tasks.zap:ScheduleActivityResponse.
-type ScheduleActivityResponse struct {
-	ActivityTaskID string
-	// TaskToken is the server-minted, HMAC-signed opaque token the
-	// worker must present on RespondActivityTaskCompleted/Failed. Empty
-	// on error, populated on success.
-	TaskToken []byte
 }
 
 // StartChildWorkflowRequest mirrors schema/tasks.zap StartChildWorkflowRequest.

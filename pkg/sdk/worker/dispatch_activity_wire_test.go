@@ -5,7 +5,6 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,44 +13,16 @@ import (
 	"github.com/hanzoai/tasks/pkg/sdk/workflow"
 )
 
-// recordingTransport embeds fakeTransport and overrides the
-// activity-wire methods so the test can assert they were hit
-// and capture the requests for inspection.
-//
-// Red §5.1 (CRITICAL-1) coverage: prior to the server-push migration
-// ExecuteActivity settled (nil, nil) without touching the wire. Here
-// we assert that (a) ScheduleActivity was called with the correct
-// activity type, (b) the worker is awaiting the activity result via
-// the pending-result registry installed by Subscribe, (c) the activity
-// fn registered locally was NOT invoked (the wire is source of truth),
-// and (d) the workflow Future settles with the wire-returned bytes
-// after the server push lands.
-type recordingTransport struct {
-	fakeTransport
+// Phase-2a replay decider. A workflow task carries the run's event-sourced
+// history; ExecuteActivity resolves from history by seq. These tests assert
+// the decider (a) NEVER runs the activity function in-process (the server
+// dispatches it to an activity worker), (b) emits a ScheduleActivity{seq}
+// command when the activity's result is not yet in history, (c) returns the
+// recorded result without re-dispatch when it is, and (d) is deterministic:
+// same history ⇒ same command sequence.
 
-	mu       sync.Mutex
-	schedReq []client.ScheduleActivityRequest
-
-	// wireResult is what the server pushes via OnActivityResult.
-	wireResult []byte
-}
-
-func (r *recordingTransport) ScheduleActivity(ctx context.Context, req client.ScheduleActivityRequest) (*client.ScheduleActivityResponse, error) {
-	r.mu.Lock()
-	r.schedReq = append(r.schedReq, req)
-	r.mu.Unlock()
-	// Schedule the server push asynchronously so the workflow
-	// goroutine has time to register the pending channel.
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		r.PushActivityResult("wire-act-1", r.wireResult, nil)
-	}()
-	return &client.ScheduleActivityResponse{ActivityTaskID: "wire-act-1"}, nil
-}
-
-// activityLocalCallCount tracks whether the activity fn was
-// invoked in-process. For a wire-backed dispatch this must stay
-// at zero — the activity lives on a different worker.
+// activityLocalCallCount tracks whether an activity fn was invoked
+// in-process. For the replay decider this must stay at zero.
 var activityLocalCallCount atomic.Int32
 
 func wireTargetActivity(ctx context.Context, n int) (int, error) {
@@ -59,15 +30,13 @@ func wireTargetActivity(ctx context.Context, n int) (int, error) {
 	return n * 2, nil
 }
 
-// wireCallingWorkflow calls workflow.ExecuteActivity exactly once
-// and returns whatever the Future settles with.
+// wireCallingWorkflow calls workflow.ExecuteActivity exactly once and
+// returns whatever the Future settles with.
 func wireCallingWorkflow(ctx workflow.Context, n int) (int, error) {
-	opts := workflow.ActivityOptions{
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
 		TaskQueue:           "test-queue",
-	}
-	ctx = workflow.WithActivityOptions(ctx, opts)
-
+	})
 	fut := workflow.ExecuteActivity(ctx, wireTargetActivity, n)
 	var out int
 	if err := fut.Get(ctx, &out); err != nil {
@@ -76,84 +45,188 @@ func wireCallingWorkflow(ctx workflow.Context, n int) (int, error) {
 	return out, nil
 }
 
-func TestDispatch_WorkflowExecuteActivity_HitsWire(t *testing.T) {
-	// Not parallel: mutates activityLocalCallCount.
-	activityLocalCallCount.Store(0)
-
-	rt := &recordingTransport{
-		wireResult: mustJSON(t, 84), // the wire returns 84 (n=42, wire doubles it)
+// evStarted builds a WORKFLOW_EXECUTION_STARTED event carrying the workflow
+// input arguments.
+func evStarted(args ...any) map[string]any {
+	return map[string]any{
+		"eventId":    1,
+		"eventType":  evtWorkflowStarted,
+		"attributes": map[string]any{"input": args},
 	}
-	w := newTestWorker(t, &rt.fakeTransport)
-	w.transport = rt // rebind to the recording transport
-	// Wire the OnActivityResult callback to the worker's
-	// completeActivity router so PushActivityResult drains into the
-	// workflow's pending channel.
-	rt.OnActivityResult(func(activityID string, result, failure []byte) {
-		w.completeActivity(activityID, result, failure)
-	})
-	w.RegisterWorkflow(wireCallingWorkflow)
-	w.RegisterActivity(wireTargetActivity)
+}
 
-	input := mustJSON(t, []any{42})
+// evScheduled builds an ACTIVITY_TASK_SCHEDULED{seq} event.
+func evScheduled(seq int) map[string]any {
+	return map[string]any{
+		"eventType":  evtActivityScheduled,
+		"attributes": map[string]any{"seq": seq},
+	}
+}
+
+// evCompleted builds an ACTIVITY_TASK_COMPLETED{seq,result} event. result is
+// stored as the raw JSON of the activity's return value, matching the engine.
+func evCompleted(t *testing.T, seq int, result any) map[string]any {
+	return map[string]any{
+		"eventType":  evtActivityCompleted,
+		"attributes": map[string]any{"seq": seq, "result": json.RawMessage(mustJSON(t, result))},
+	}
+}
+
+func historyJSON(t *testing.T, events ...map[string]any) []byte {
+	t.Helper()
+	return mustJSON(t, events)
+}
+
+// replayEpisode runs one decision episode for wfName over history against a
+// fresh worker with fns registered by register, and returns the decoded
+// command envelope the worker responded with.
+func replayEpisode(t *testing.T, register func(w *workerImpl), wfName string, history []byte) commandsEnvelope {
+	t.Helper()
+	ft := &fakeTransport{}
+	w := newTestWorker(t, ft)
+	register(w)
 	w.dispatchWorkflowTask(context.Background(), &client.WorkflowTask{
 		TaskToken:        []byte{0x01},
-		WorkflowID:       "wf-wire",
-		RunID:            "run-wire",
-		WorkflowTypeName: "wireCallingWorkflow",
-		History:          input,
+		WorkflowID:       "wf-replay",
+		RunID:            "run-replay",
+		WorkflowTypeName: wfName,
+		History:          history,
 	})
+	if ft.workflowCompleted.Load() != 1 || ft.lastWorkflowResp == nil {
+		t.Fatalf("expected exactly one RespondWorkflowTaskCompleted; got %d", ft.workflowCompleted.Load())
+	}
+	return decodeCommandsEnvelope(t, ft.lastWorkflowResp.Commands)
+}
 
-	// (a) ScheduleActivity was called with the correct activity type.
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	if len(rt.schedReq) != 1 {
-		t.Fatalf("ScheduleActivity called %d times, want 1", len(rt.schedReq))
-	}
-	if rt.schedReq[0].ActivityType != "wireTargetActivity" {
-		t.Errorf("ScheduleActivity.ActivityType = %q, want %q",
-			rt.schedReq[0].ActivityType, "wireTargetActivity")
-	}
-	if rt.schedReq[0].WorkflowID != "wf-wire" {
-		t.Errorf("ScheduleActivity.WorkflowID = %q, want %q",
-			rt.schedReq[0].WorkflowID, "wf-wire")
-	}
+// TestReplay_UnresolvedActivity_SchedulesAndBlocks: with no activity result
+// in history the decider emits ScheduleActivity{seq=0} and does NOT complete
+// the workflow or run the activity in-process.
+func TestReplay_UnresolvedActivity_SchedulesAndBlocks(t *testing.T) {
+	activityLocalCallCount.Store(0)
 
-	// (b) The in-process activity fn MUST NOT have been called.
-	// The wire is the source of truth.
-	if got := activityLocalCallCount.Load(); got != 0 {
-		t.Fatalf("activity fn invoked locally %d times; wire dispatch "+
-			"must route through transport, not call the fn in-proc", got)
-	}
+	env := replayEpisode(t, func(w *workerImpl) {
+		w.RegisterWorkflow(wireCallingWorkflow)
+		w.RegisterActivity(wireTargetActivity)
+	}, "wireCallingWorkflow", historyJSON(t, evStarted(42)))
 
-	// (d) The workflow completed successfully with the wire result.
-	// The dispatch.go path emits a completeWorkflow command on success
-	// and a failWorkflow command on error; assert we got success.
-	if rt.workflowCompleted.Load() != 1 {
-		t.Fatalf("RespondWorkflowTaskCompleted called %d times, want 1",
-			rt.workflowCompleted.Load())
-	}
-	if rt.lastWorkflowResp == nil {
-		t.Fatal("no commands response captured")
-	}
-	env := decodeCommandsEnvelope(t, rt.lastWorkflowResp.Commands)
-	if env.Version != 1 {
-		t.Errorf("envelope version = %d, want 1", env.Version)
-	}
 	if len(env.Commands) != 1 {
-		t.Fatalf("envelope commands = %d, want 1", len(env.Commands))
+		t.Fatalf("commands = %d, want 1 (scheduleActivity)", len(env.Commands))
 	}
-	cmd := env.Commands[0]
-	if cmd.Kind != commandKindCompleteWorkflow {
-		t.Fatalf("command kind = %d, want %d (completeWorkflow); "+
-			"failure=%q", cmd.Kind, commandKindCompleteWorkflow, cmd.Failure)
+	c := env.Commands[0]
+	if c.Kind != commandKindScheduleActivity {
+		t.Fatalf("command kind = %d, want %d (scheduleActivity)", c.Kind, commandKindScheduleActivity)
 	}
-	// result bytes should be JSON-encoded 84 (wire doubled).
+	if c.Seq != 0 {
+		t.Errorf("seq = %d, want 0", c.Seq)
+	}
+	if c.ActivityType != "wireTargetActivity" {
+		t.Errorf("activityType = %q, want wireTargetActivity", c.ActivityType)
+	}
+	// input must be the JSON array of args, [42].
+	var args []int
+	if err := json.Unmarshal(c.Input, &args); err != nil || len(args) != 1 || args[0] != 42 {
+		t.Errorf("scheduled input = %q, want [42]", c.Input)
+	}
+	if got := activityLocalCallCount.Load(); got != 0 {
+		t.Fatalf("activity fn invoked in-process %d times; the decider must not run it", got)
+	}
+}
+
+// TestReplay_ResolvedActivity_ReturnsRecordedResult: with the activity's
+// result in history the decider returns it WITHOUT re-dispatch and the
+// workflow completes carrying the wire-recorded value.
+func TestReplay_ResolvedActivity_ReturnsRecordedResult(t *testing.T) {
+	activityLocalCallCount.Store(0)
+
+	env := replayEpisode(t, func(w *workerImpl) {
+		w.RegisterWorkflow(wireCallingWorkflow)
+		w.RegisterActivity(wireTargetActivity)
+	}, "wireCallingWorkflow", historyJSON(t,
+		evStarted(42),
+		evScheduled(0),
+		evCompleted(t, 0, 84), // the activity worker (elsewhere) doubled n=42
+	))
+
+	if len(env.Commands) != 1 {
+		t.Fatalf("commands = %d, want 1 (completeWorkflow)", len(env.Commands))
+	}
+	c := env.Commands[0]
+	if c.Kind != commandKindCompleteWorkflow {
+		t.Fatalf("command kind = %d, want %d (completeWorkflow); failure=%q", c.Kind, commandKindCompleteWorkflow, c.Failure)
+	}
 	var got int
-	if err := json.Unmarshal(cmd.Result, &got); err != nil {
+	if err := json.Unmarshal(c.Result, &got); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if got != 84 {
-		t.Errorf("workflow result = %d, want 84 (wire-returned)", got)
+		t.Errorf("workflow result = %d, want 84 (recorded, not recomputed)", got)
+	}
+	if n := activityLocalCallCount.Load(); n != 0 {
+		t.Fatalf("activity fn invoked in-process %d times; recorded result must be reused", n)
+	}
+}
+
+// -------- 2-activity determinism ------------------------------------------
+
+var stepCalls atomic.Int32
+
+func stepAActivity(ctx context.Context) (string, error) { stepCalls.Add(1); return "A", nil }
+func stepBActivity(ctx context.Context) (string, error) { stepCalls.Add(1); return "B", nil }
+
+func twoStepWorkflow(ctx workflow.Context) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Second})
+	var a string
+	if err := workflow.ExecuteActivity(ctx, stepAActivity).Get(ctx, &a); err != nil {
+		return "", err
+	}
+	var b string
+	if err := workflow.ExecuteActivity(ctx, stepBActivity).Get(ctx, &b); err != nil {
+		return "", err
+	}
+	return a + b, nil
+}
+
+// TestReplay_Determinism_TwoActivities: with only activity 0 resolved in
+// history, replay schedules ONLY activity 1 (activity 0 returns its recorded
+// result, no re-dispatch); and the same history yields an identical command
+// sequence across repeated replays.
+func TestReplay_Determinism_TwoActivities(t *testing.T) {
+	stepCalls.Store(0)
+
+	history := historyJSON(t,
+		evStarted(),
+		evScheduled(0),
+		evCompleted(t, 0, "A"),
+	)
+	reg := func(w *workerImpl) {
+		w.RegisterWorkflow(twoStepWorkflow)
+		w.RegisterActivity(stepAActivity)
+		w.RegisterActivity(stepBActivity)
+	}
+
+	first := replayEpisode(t, reg, "twoStepWorkflow", history)
+	if len(first.Commands) != 1 {
+		t.Fatalf("commands = %d, want 1 (only activity 1 scheduled)", len(first.Commands))
+	}
+	c := first.Commands[0]
+	if c.Kind != commandKindScheduleActivity || c.Seq != 1 || c.ActivityType != "stepBActivity" {
+		t.Fatalf("first replay command = %+v; want scheduleActivity seq=1 stepBActivity", c)
+	}
+
+	// Determinism: replay the identical history again → identical command seq.
+	second := replayEpisode(t, reg, "twoStepWorkflow", history)
+	if len(second.Commands) != len(first.Commands) {
+		t.Fatalf("non-deterministic: first %d commands, second %d", len(first.Commands), len(second.Commands))
+	}
+	for i := range first.Commands {
+		if first.Commands[i].Kind != second.Commands[i].Kind || first.Commands[i].Seq != second.Commands[i].Seq ||
+			first.Commands[i].ActivityType != second.Commands[i].ActivityType {
+			t.Fatalf("non-deterministic command %d: %+v vs %+v", i, first.Commands[i], second.Commands[i])
+		}
+	}
+
+	if stepCalls.Load() != 0 {
+		t.Fatalf("activity fns invoked in-process %d times; the decider must not run them", stepCalls.Load())
 	}
 }
 
@@ -168,7 +241,7 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 // decodeCommandsEnvelope parses the producer-side wire shape for
-// assertion. Shared with the error-path test.
+// assertion. Shared across the worker dispatch tests.
 func decodeCommandsEnvelope(t *testing.T, b []byte) commandsEnvelope {
 	t.Helper()
 	var e commandsEnvelope
