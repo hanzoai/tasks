@@ -10,6 +10,7 @@ retract (
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/hanzoai/sqlite v0.1.4
 	github.com/luxfi/consensus v1.22.85
 	github.com/luxfi/log v1.4.3
 	github.com/luxfi/zap v0.2.0
@@ -19,7 +20,6 @@ require (
 	go.temporal.io/api v1.62.13
 	go.temporal.io/server v1.32.0-157.0
 	golang.org/x/time v0.15.0
-	modernc.org/sqlite v1.51.0
 )
 
 require (
@@ -79,6 +79,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect
+	github.com/mattn/go-sqlite3 v1.14.47 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
@@ -89,4 +90,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260622175928-b703f567277d // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	modernc.org/sqlite v1.51.0 // indirect
 )

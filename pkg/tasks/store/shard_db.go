@@ -11,6 +11,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	// hanzosqlite is the ONE sqlite driver across the Hanzo stack: it registers
+	// the "sqlite" database/sql driver exactly once — pure-Go modernc under !cgo,
+	// mattn+SQLCipher under cgo — and builds the backend-correct DSN. Every store
+	// opens through it (never modernc directly) so a store embedded in the unified
+	// cloud binary shares that single registration instead of double-registering
+	// "sqlite" and panicking at init.
+	hanzosqlite "github.com/hanzoai/sqlite"
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
 )
 
@@ -63,8 +70,10 @@ CREATE TABLE IF NOT EXISTS meta (
 `
 
 func openShard(path, org, ns string) (*Shard, error) {
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)&_pragma=journal_mode(wal)&_pragma=synchronous(normal)"
-	conn, err := sql.Open("sqlite", dsn)
+	// WAL + busy_timeout + synchronous=NORMAL + foreign_keys are set by schemaSQL
+	// below (explicit PRAGMA statements), so they apply on both backends rather
+	// than relying on driver-specific DSN params.
+	conn, err := hanzosqlite.OpenDB(path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store.openShard: open %s: %w", path, err)
 	}
