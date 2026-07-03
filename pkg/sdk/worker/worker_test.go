@@ -31,7 +31,6 @@ type fakeTransport struct {
 
 	onWFTask  func(*client.WorkflowTask)
 	onActTask func(*client.ActivityTask)
-	onActRes  func(activityID string, result, failure []byte)
 
 	subWF, subAct atomic.Int32
 	unsubCount    atomic.Int32
@@ -75,12 +74,6 @@ func (f *fakeTransport) OnActivityTask(fn func(*client.ActivityTask)) {
 	f.onActTask = fn
 }
 
-func (f *fakeTransport) OnActivityResult(fn func(activityID string, result, failure []byte)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.onActRes = fn
-}
-
 // PushWorkflowTask simulates a server-pushed workflow task delivery.
 func (f *fakeTransport) PushWorkflowTask(t *client.WorkflowTask) {
 	f.mu.Lock()
@@ -98,16 +91,6 @@ func (f *fakeTransport) PushActivityTask(t *client.ActivityTask) {
 	f.mu.Unlock()
 	if cb != nil {
 		cb(t)
-	}
-}
-
-// PushActivityResult simulates a server-pushed activity-result delivery.
-func (f *fakeTransport) PushActivityResult(activityID string, result, failure []byte) {
-	f.mu.Lock()
-	cb := f.onActRes
-	f.mu.Unlock()
-	if cb != nil {
-		cb(activityID, result, failure)
 	}
 }
 
@@ -138,13 +121,6 @@ func (f *fakeTransport) RespondActivityTaskFailed(ctx context.Context, req clien
 func (f *fakeTransport) RecordActivityTaskHeartbeat(ctx context.Context, req client.RecordActivityTaskHeartbeatRequest) (bool, error) {
 	f.heartbeatCount.Add(1)
 	return false, nil
-}
-
-// ScheduleActivity satisfies WorkerTransport. The default
-// implementation is a no-op; tests that exercise wire-backed
-// activity dispatch embed fakeTransport and override.
-func (f *fakeTransport) ScheduleActivity(ctx context.Context, req client.ScheduleActivityRequest) (*client.ScheduleActivityResponse, error) {
-	return &client.ScheduleActivityResponse{ActivityTaskID: "stub-id"}, nil
 }
 
 // StartChildWorkflow satisfies WorkerTransport.
@@ -246,6 +222,14 @@ func sampleActivity(ctx context.Context, greeting string) (string, error) {
 	return "handled:" + greeting, nil
 }
 
+// startedHistory builds a minimal event-sourced history consisting of a
+// single WORKFLOW_EXECUTION_STARTED event carrying args as the workflow
+// input — the shape a fresh run's first workflow task delivers.
+func startedHistory(t *testing.T, args ...any) []byte {
+	t.Helper()
+	return mustJSON(t, []any{evStarted(args...)})
+}
+
 func TestWorker_DispatchWorkflowTask(t *testing.T) {
 	// NOT parallel: asserts on global workflowRan counter.
 	workflowRan.Store(0)
@@ -255,15 +239,13 @@ func TestWorker_DispatchWorkflowTask(t *testing.T) {
 	w := newTestWorker(t, ft)
 	w.RegisterWorkflow(sampleWorkflow)
 
-	input, _ := json.Marshal([]any{"tester"})
-
-	// One poll cycle: dispatch the task directly.
+	// One decision episode: replay the started history and complete.
 	w.dispatchWorkflowTask(context.Background(), &client.WorkflowTask{
 		TaskToken:        []byte{0x01, 0x02, 0x03},
 		WorkflowID:       "wf-1",
 		RunID:            "run-1",
 		WorkflowTypeName: "sampleWorkflow",
-		History:          input,
+		History:          startedHistory(t, "tester"),
 	})
 
 	if got := workflowRan.Load(); got != 1 {
@@ -401,12 +383,11 @@ func TestWorker_WorkflowPush_OneCycle(t *testing.T) {
 		t.Fatalf("subscribe counts wf=%d act=%d, want 1/1", ft.subWF.Load(), ft.subAct.Load())
 	}
 
-	input, _ := json.Marshal([]any{"loop"})
 	ft.PushWorkflowTask(&client.WorkflowTask{
 		TaskToken:        []byte{0x01},
 		WorkflowID:       "wf-loop",
 		WorkflowTypeName: "sampleWorkflow",
-		History:          input,
+		History:          startedHistory(t, "loop"),
 	})
 
 	deadline := time.Now().Add(2 * time.Second)

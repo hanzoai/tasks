@@ -35,7 +35,6 @@ type workerTransport struct {
 	mu        sync.RWMutex
 	onWFTask  func(*WorkflowTask)
 	onActTask func(*ActivityTask)
-	onActRes  func(activityID string, result, failure []byte)
 
 	// installed tracks which delivery opcodes already have a Transport
 	// Handle registered. We register lazily on the first On* call so a
@@ -195,40 +194,17 @@ func (w *workerTransport) OnActivityTask(fn func(*ActivityTask)) {
 	})
 }
 
-// OnActivityResult installs fn as the activity-result delivery callback.
-func (w *workerTransport) OnActivityResult(fn func(activityID string, result, failure []byte)) {
-	w.mu.Lock()
-	w.onActRes = fn
-	already := w.installed[OpcodeDeliverActivityResult]
-	if w.installed == nil {
-		w.installed = make(map[uint16]bool)
-	}
-	w.installed[OpcodeDeliverActivityResult] = true
-	w.mu.Unlock()
-	if already || w.t == nil {
-		return
-	}
-	w.t.Handle(OpcodeDeliverActivityResult, func(_ string, body []byte) {
-		id, result, failure := decodeActivityResultDelivery(body)
-		w.mu.RLock()
-		cb := w.onActRes
-		w.mu.RUnlock()
-		if cb != nil {
-			cb(id, result, failure)
-		}
-	})
-}
-
 // decodeWorkflowDelivery parses the JSON shape from
-// pkg/tasks/dispatch.go workflowTaskDeliveryJSON. task_token and input
-// arrive as plain strings on the wire (no base64); we cast to []byte.
+// pkg/tasks/dispatch.go workflowTaskDeliveryJSON. task_token and history
+// arrive as plain strings on the wire (no base64); we cast to []byte. The
+// history is the run's full event-sourced log the worker replays.
 func decodeWorkflowDelivery(body []byte) *WorkflowTask {
 	var msg struct {
 		TaskToken        string `json:"task_token"`
 		WorkflowID       string `json:"workflow_id"`
 		RunID            string `json:"run_id"`
 		WorkflowTypeName string `json:"workflow_type_name"`
-		Input            string `json:"input,omitempty"`
+		History          string `json:"history,omitempty"`
 	}
 	if err := json.Unmarshal(body, &msg); err != nil || msg.TaskToken == "" {
 		return nil
@@ -238,7 +214,7 @@ func decodeWorkflowDelivery(body []byte) *WorkflowTask {
 		WorkflowID:       msg.WorkflowID,
 		RunID:            msg.RunID,
 		WorkflowTypeName: msg.WorkflowTypeName,
-		History:          []byte(msg.Input),
+		History:          []byte(msg.History),
 	}
 }
 
@@ -270,20 +246,6 @@ func decodeActivityDelivery(body []byte) *ActivityTask {
 		StartToCloseTimeoutMs: msg.StartToCloseTimeoutMs,
 		HeartbeatTimeoutMs:    msg.HeartbeatTimeoutMs,
 	}
-}
-
-// decodeActivityResultDelivery parses the JSON shape from
-// pkg/tasks/dispatch.go activityResultDeliveryJSON.
-func decodeActivityResultDelivery(body []byte) (string, []byte, []byte) {
-	var msg struct {
-		ActivityID string `json:"activity_id"`
-		Result     string `json:"result,omitempty"`
-		Failure    string `json:"failure,omitempty"`
-	}
-	if err := json.Unmarshal(body, &msg); err != nil {
-		return "", nil, nil
-	}
-	return msg.ActivityID, []byte(msg.Result), []byte(msg.Failure)
 }
 
 // ── responses ──────────────────────────────────────────────────────────
@@ -328,61 +290,6 @@ func (w *workerTransport) RecordActivityTaskHeartbeat(ctx context.Context, req R
 		return false, fmt.Errorf("worker heartbeat: %w", err)
 	}
 	return decodeHeartbeatResp(respBytes), nil
-}
-
-// ScheduleActivity issues opcode 0x006B. The body is a JSON document
-// matching the v1 envelope used for user-facing RPCs; the frontend
-// decodes it into its native schedule-activity request.
-func (w *workerTransport) ScheduleActivity(ctx context.Context, req ScheduleActivityRequest) (*ScheduleActivityResponse, error) {
-	bodyJSON := struct {
-		Namespace      string           `json:"namespace"`
-		WorkflowID     string           `json:"workflow_id"`
-		RunID          string           `json:"run_id,omitempty"`
-		TaskQueue      string           `json:"task_queue"`
-		ActivityType   string           `json:"activity_type"`
-		Input          []byte           `json:"input,omitempty"`
-		StartToCloseMs int64            `json:"start_to_close_ms,omitempty"`
-		HeartbeatMs    int64            `json:"heartbeat_ms,omitempty"`
-		RetryPolicy    *RetryPolicyJSON `json:"retry_policy,omitempty"`
-	}{
-		Namespace:      req.Namespace,
-		WorkflowID:     req.WorkflowID,
-		RunID:          req.RunID,
-		TaskQueue:      req.TaskQueue,
-		ActivityType:   req.ActivityType,
-		Input:          req.Input,
-		StartToCloseMs: req.StartToCloseMs,
-		HeartbeatMs:    req.HeartbeatMs,
-		RetryPolicy:    req.RetryPolicy,
-	}
-	body, err := json.Marshal(bodyJSON)
-	if err != nil {
-		return nil, fmt.Errorf("schedule activity: marshal: %w", err)
-	}
-	respFrame, err := w.t.Call(ctx, OpcodeScheduleActivity, body)
-	if err != nil {
-		return nil, fmt.Errorf("schedule activity: %w", err)
-	}
-	status, detail, payload, perr := parseEnvelope(respFrame)
-	if perr != nil {
-		return nil, fmt.Errorf("schedule activity decode: %w", perr)
-	}
-	if status != 0 && status != 200 {
-		return nil, fmt.Errorf("schedule activity: status %d: %s", status, detail)
-	}
-	var resp struct {
-		ActivityTaskID string `json:"activity_task_id"`
-		TaskToken      string `json:"task_token,omitempty"`
-	}
-	if len(payload) > 0 {
-		if err := json.Unmarshal(payload, &resp); err != nil {
-			return nil, fmt.Errorf("schedule activity body: %w", err)
-		}
-	}
-	return &ScheduleActivityResponse{
-		ActivityTaskID: resp.ActivityTaskID,
-		TaskToken:      []byte(resp.TaskToken),
-	}, nil
 }
 
 // StartChildWorkflow issues opcode 0x006D.
