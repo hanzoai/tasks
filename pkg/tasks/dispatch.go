@@ -22,9 +22,11 @@ import (
 // subscribed peer. Workers Subscribe once per (namespace, taskQueue,
 // kind); the server pushes work as it arrives. There is no polling.
 //
-// Activity results are also pushed: when an activity completes, the
-// dispatcher Sends OpcodeDeliverActivityResult to the peer that is
-// running the parent workflow, unblocking the ExecuteActivity call.
+// Phase-2a: activities are event-sourced. An activity task is dispatched
+// with a token bound to (ns, wf, run, seq); when the worker responds the
+// token resolves back to that seq and the engine appends the terminal
+// event to the workflow's history and schedules a new workflow task. There
+// is no result push back to a "workflow peer" — the run advances by replay.
 type dispatcher struct {
 	mu sync.Mutex
 
@@ -52,15 +54,6 @@ type dispatcher struct {
 	// inflight tasks indexed by token (for Respond*).
 	wfByToken  map[string]*pendingWorkflowTask
 	actByToken map[string]*pendingActivityTask
-
-	// activities[activityID] → ledger entry. Populated by
-	// ScheduleActivity, completed by RespondActivity{Completed,Failed}.
-	activities map[string]*pendingActivity
-
-	// workflowPeer[ns|wfID|runID] = peerID of the worker currently
-	// running the workflow execution. Activity results are pushed
-	// back to this peer.
-	workflowPeer map[string]string
 
 	// queries[token] → pending query awaiting a worker response.
 	queries map[string]*pendingQuery
@@ -108,36 +101,23 @@ type pendingActivityTask struct {
 	input            []byte
 	workflowID       string
 	runID            string
-	workerPeer       string // peer that scheduled it (parent workflow)
+	seq              int // workflow command sequence number of this activity
 	startToCloseMs   int64
 	heartbeatMs      int64
 	scheduledAt      time.Time
-	dispatchedToPeer string // worker handling the activity (may differ from workerPeer)
-}
-
-type pendingActivity struct {
-	activityID   string
-	ns           string
-	workflowID   string
-	runID        string
-	workflowPeer string // workflow's worker — receives the result push
-	completed    bool
-	result       []byte
-	failure      []byte
+	dispatchedToPeer string // worker handling the activity
 }
 
 func newDispatcher() *dispatcher {
 	d := &dispatcher{
-		subs:         make(map[subKey][]*subscription),
-		byPeer:       make(map[string][]*subscription),
-		rrIdx:        make(map[subKey]int),
-		pendingWF:    make(map[subKey][]*pendingWorkflowTask),
-		pendingAct:   make(map[subKey][]*pendingActivityTask),
-		wfByToken:    make(map[string]*pendingWorkflowTask),
-		actByToken:   make(map[string]*pendingActivityTask),
-		activities:   make(map[string]*pendingActivity),
-		workflowPeer: make(map[string]string),
-		queries:      make(map[string]*pendingQuery),
+		subs:       make(map[subKey][]*subscription),
+		byPeer:     make(map[string][]*subscription),
+		rrIdx:      make(map[subKey]int),
+		pendingWF:  make(map[subKey][]*pendingWorkflowTask),
+		pendingAct: make(map[subKey][]*pendingActivityTask),
+		wfByToken:  make(map[string]*pendingWorkflowTask),
+		actByToken: make(map[string]*pendingActivityTask),
+		queries:    make(map[string]*pendingQuery),
 	}
 	if _, err := rand.Read(d.secret[:]); err != nil {
 		// /dev/urandom never fails on supported platforms; if it does,
@@ -262,7 +242,6 @@ func (d *dispatcher) drainLocked(sub *subscription) {
 		t := queue[0]
 		d.pendingWF[sub.key] = queue[1:]
 		t.workerPeer = sub.peerID
-		d.workflowPeer[wfKey(t.ns, t.workflowID, t.runID)] = sub.peerID
 		body := encodeWorkflowTaskDelivery(t)
 		if d.send != nil {
 			_ = d.send(sub.peerID, OpcodeDeliverWorkflowTask, body)
@@ -309,7 +288,6 @@ func (d *dispatcher) EnqueueWorkflowTask(ns, queue, workflowID, runID, workflowT
 	}
 	if sub := d.pickLocked(key); sub != nil {
 		t.workerPeer = sub.peerID
-		d.workflowPeer[wfKey(ns, workflowID, runID)] = sub.peerID
 		body := encodeWorkflowTaskDelivery(t)
 		if d.send != nil {
 			err := d.send(sub.peerID, OpcodeDeliverWorkflowTask, body)
@@ -322,16 +300,16 @@ func (d *dispatcher) EnqueueWorkflowTask(ns, queue, workflowID, runID, workflowT
 	d.pendingWF[key] = append(d.pendingWF[key], t)
 }
 
-// ScheduleActivity records an activity for the running workflow on
-// peerID, mints an activityID + token, and delivers the activity task
-// to a subscribed activity peer (or queues it). The activityID is
-// returned to the workflow so the worker can match the eventual
-// DeliverActivityResult push.
-func (d *dispatcher) ScheduleActivity(workflowPeer, ns, queue, workflowID, runID, activityType string, input []byte, startToCloseMs, heartbeatMs int64) (activityID string, token []byte) {
+// DispatchActivity delivers the activity task for (ns, wf, run, seq) to a
+// subscribed activity worker (or queues it until one arrives). It mints a
+// fresh token bound to the task so the worker's Respond resolves back to
+// (ns, wf, run, seq) via ResolveActivityToken. activityID is deterministic
+// for (run, seq); the token is unique per dispatch so a re-dispatch (retry
+// / recovery) does not collide with a stale token.
+func (d *dispatcher) DispatchActivity(ns, queue, workflowID, runID string, seq int, activityID, activityType string, input []byte, startToCloseMs, heartbeatMs int64) []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	activityID = "act-" + newRandID()
 	t := &pendingActivityTask{
 		ns:             ns,
 		queue:          queue,
@@ -340,34 +318,25 @@ func (d *dispatcher) ScheduleActivity(workflowPeer, ns, queue, workflowID, runID
 		input:          input,
 		workflowID:     workflowID,
 		runID:          runID,
-		workerPeer:     workflowPeer,
+		seq:            seq,
 		startToCloseMs: startToCloseMs,
 		heartbeatMs:    heartbeatMs,
 		scheduledAt:    time.Now(),
 	}
-	t.token = d.mintToken("act", activityID)
+	t.token = d.mintToken("act", activityID+"|"+newRandID())
 	t.tokenStr = string(t.token)
 	d.actByToken[t.tokenStr] = t
-
-	d.activities[activityID] = &pendingActivity{
-		activityID:   activityID,
-		ns:           ns,
-		workflowID:   workflowID,
-		runID:        runID,
-		workflowPeer: workflowPeer,
-	}
 
 	key := subKey{ns, queue, kindActivity}
 	if sub := d.pickLocked(key); sub != nil {
 		t.dispatchedToPeer = sub.peerID
-		body := encodeActivityTaskDelivery(t)
 		if d.send != nil {
-			_ = d.send(sub.peerID, OpcodeDeliverActivityTask, body)
+			_ = d.send(sub.peerID, OpcodeDeliverActivityTask, encodeActivityTaskDelivery(t))
 		}
 	} else {
 		d.pendingAct[key] = append(d.pendingAct[key], t)
 	}
-	return activityID, t.token
+	return t.token
 }
 
 // ── responses ───────────────────────────────────────────────────────
@@ -385,14 +354,14 @@ func (d *dispatcher) CompleteWorkflowTask(token []byte) (*pendingWorkflowTask, b
 		return nil, false
 	}
 	delete(d.wfByToken, string(token))
-	delete(d.workflowPeer, wfKey(t.ns, t.workflowID, t.runID))
 	return t, true
 }
 
-// CompleteActivityTask consumes an activity-task token, records the
-// result on the activity ledger, and pushes DeliverActivityResult to
-// the peer running the parent workflow.
-func (d *dispatcher) CompleteActivityTask(token []byte, result, failure []byte) (*pendingActivityTask, bool) {
+// ResolveActivityToken consumes an activity-task token and returns the
+// task it was minted for, carrying (ns, wf, run, seq). The engine advances
+// the run from there (append terminal event → schedule a workflow task);
+// there is no result push back to a workflow peer.
+func (d *dispatcher) ResolveActivityToken(token []byte) (*pendingActivityTask, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	t, ok := d.actByToken[string(token)]
@@ -400,21 +369,6 @@ func (d *dispatcher) CompleteActivityTask(token []byte, result, failure []byte) 
 		return nil, false
 	}
 	delete(d.actByToken, string(token))
-
-	a, exists := d.activities[t.activityID]
-	if exists {
-		a.completed = true
-		a.result = result
-		a.failure = failure
-	}
-	wfPeer := ""
-	if exists {
-		wfPeer = a.workflowPeer
-	}
-	if wfPeer != "" && d.send != nil {
-		body := encodeActivityResultDelivery(t.activityID, result, failure)
-		_ = d.send(wfPeer, OpcodeDeliverActivityResult, body)
-	}
 	return t, true
 }
 
@@ -437,7 +391,10 @@ type workflowTaskDeliveryJSON struct {
 	WorkflowID       string `json:"workflow_id"`
 	RunID            string `json:"run_id"`
 	WorkflowTypeName string `json:"workflow_type_name"`
-	Input            string `json:"input,omitempty"`
+	// History is the run's full event-sourced history (JSON array of
+	// HistoryEvent) that the worker replays. The dispatcher ships whatever
+	// bytes the engine enqueued; the engine builds it from the wfh/ log.
+	History string `json:"history,omitempty"`
 }
 
 type activityTaskDeliveryJSON struct {
@@ -452,19 +409,13 @@ type activityTaskDeliveryJSON struct {
 	HeartbeatTimeoutMs    int64  `json:"heartbeat_timeout_ms,omitempty"`
 }
 
-type activityResultDeliveryJSON struct {
-	ActivityID string `json:"activity_id"`
-	Result     string `json:"result,omitempty"`
-	Failure    string `json:"failure,omitempty"`
-}
-
 func encodeWorkflowTaskDelivery(t *pendingWorkflowTask) []byte {
 	b, _ := json.Marshal(workflowTaskDeliveryJSON{
 		TaskToken:        string(t.token),
 		WorkflowID:       t.workflowID,
 		RunID:            t.runID,
 		WorkflowTypeName: t.workflowType,
-		Input:            string(t.input),
+		History:          string(t.input),
 	})
 	return b
 }
@@ -484,15 +435,6 @@ func encodeActivityTaskDelivery(t *pendingActivityTask) []byte {
 	return b
 }
 
-func encodeActivityResultDelivery(activityID string, result, failure []byte) []byte {
-	b, _ := json.Marshal(activityResultDeliveryJSON{
-		ActivityID: activityID,
-		Result:     string(result),
-		Failure:    string(failure),
-	})
-	return b
-}
-
 // ── server-push opcodes (declared here so engine + embed agree) ─────
 
 const (
@@ -502,12 +444,12 @@ const (
 	OpcodeSubscribeActivityTasks uint16 = 0x00A1
 	OpcodeUnsubscribeTasks       uint16 = 0x00A6
 
-	// Server → worker (Send).
-	OpcodeDeliverWorkflowTask   uint16 = 0x00B0
-	OpcodeDeliverActivityTask   uint16 = 0x00B1
-	OpcodeDeliverActivityResult uint16 = 0x00B2
-	OpcodeDeliverCancelRequest  uint16 = 0x00B3
-	OpcodeDeliverQuery          uint16 = 0x00B4
+	// Server → worker (Send). 0x00B2 (DeliverActivityResult) is retired:
+	// Phase-2a activities advance the run by replay, not a result push.
+	OpcodeDeliverWorkflowTask  uint16 = 0x00B0
+	OpcodeDeliverActivityTask  uint16 = 0x00B1
+	OpcodeDeliverCancelRequest uint16 = 0x00B3
+	OpcodeDeliverQuery         uint16 = 0x00B4
 
 	// Worker → server (Call). Query response.
 	OpcodeRespondQuery uint16 = 0x00C4

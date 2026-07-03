@@ -68,10 +68,6 @@ func TestDispatch_WorkflowError_EmitsFailCommand(t *testing.T) {
 		t.Errorf("result bytes should be empty on failWorkflow; got %q",
 			cmd.Result)
 	}
-	if cmd.ActivityTaskID != "" {
-		t.Errorf("activityTaskId should be empty on failWorkflow; got %q",
-			cmd.ActivityTaskID)
-	}
 
 	// The failure bytes must round-trip via temporal.Decode into an
 	// error whose Error() text surfaces the workflow's return.

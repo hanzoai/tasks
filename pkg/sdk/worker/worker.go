@@ -16,25 +16,26 @@
 // Zero go.temporal.io/* imports. Zero google.golang.org/grpc
 // imports. Transport is luxfi/zap; logging is github.com/luxfi/log.
 //
-// Determinism (Phase 1)
+// Determinism (Phase-2a: event-sourced replay)
 //
-// This worker re-runs the registered workflow function from its
-// start on every workflow-task dispatch. The function must be pure
-// with respect to its inputs: same arguments => same sequence of
-// workflow primitives. Activities are expected to be idempotent,
-// which is the same contract Temporal imposes. Phase 2 will land
-// event-sourced replay (a history log and replay decider) without
-// changing this package's public surface.
+// A workflow task carries the run's full history. The worker replays the
+// registered function from event 0, resolving each ExecuteActivity from
+// history by a deterministic per-run command sequence number (seq). When
+// the function awaits an activity whose result is not yet in history it
+// emits a ScheduleActivity command and the decision episode ends; the
+// server dispatches the activity and, when it completes, delivers a fresh
+// task with the result appended so the worker replays and advances. The
+// worker is stateless between episodes. The function must be pure w.r.t.
+// its inputs + history: same history ⇒ same command sequence.
 //
 // # Server-push delivery
 //
-// On Start the worker installs OnWorkflowTask / OnActivityTask /
-// OnActivityResult callbacks on the transport and issues one
-// SubscribeWorkflowTasks + one SubscribeActivityTasks. The server
-// pushes work as it arrives via OpcodeDeliverWorkflowTask /
-// OpcodeDeliverActivityTask; the worker dispatches each delivery
-// in a goroutine bounded by the configured concurrency caps
-// (workflowExecSem, activityLimiter, taskQueueLimiter).
+// On Start the worker installs OnWorkflowTask / OnActivityTask callbacks on
+// the transport and issues one SubscribeWorkflowTasks + one
+// SubscribeActivityTasks. The server pushes work as it arrives via
+// OpcodeDeliverWorkflowTask / OpcodeDeliverActivityTask; the worker
+// dispatches each delivery in a goroutine bounded by the configured
+// concurrency caps (workflowExecSem, activityLimiter, taskQueueLimiter).
 // Options.MaxConcurrentWorkflowTaskPollers /
 // MaxConcurrentActivityExecutionSize remain on Options for API
 // compatibility but no longer drive long-poll loops; they cap
@@ -263,69 +264,12 @@ type workerImpl struct {
 	workflowSubID string
 	activitySubID string
 
-	// pendingActivities holds the chan into which OnActivityResult
-	// pushes the result for an activityID previously scheduled by
-	// a workflow's ExecuteActivity call. The chan is buffered (cap=1)
-	// so the transport delivery goroutine never blocks — the workflow
-	// goroutine drains on its own pace via select.
-	actMu             sync.Mutex
-	pendingActivities map[string]chan *activityResultMsg
-
 	startOnce sync.Once
 	stopOnce  sync.Once
 	startErr  error
 
 	stopCh chan struct{}
 	wg     sync.WaitGroup
-}
-
-// activityResultMsg is the payload OnActivityResult delivers to a
-// pending ExecuteActivity future.
-type activityResultMsg struct {
-	result  []byte
-	failure []byte
-}
-
-// registerPendingActivity returns a chan the workflow goroutine can
-// receive on; completeActivity will deliver into it when the server
-// pushes OpcodeDeliverActivityResult for activityID. Caller must
-// removePendingActivity once it has received the result (or the
-// surrounding ctx is done) to avoid leaking the entry.
-func (w *workerImpl) registerPendingActivity(activityID string) chan *activityResultMsg {
-	w.actMu.Lock()
-	defer w.actMu.Unlock()
-	if w.pendingActivities == nil {
-		w.pendingActivities = make(map[string]chan *activityResultMsg)
-	}
-	ch := make(chan *activityResultMsg, 1)
-	w.pendingActivities[activityID] = ch
-	return ch
-}
-
-// removePendingActivity drops the entry for activityID. Idempotent.
-func (w *workerImpl) removePendingActivity(activityID string) {
-	w.actMu.Lock()
-	defer w.actMu.Unlock()
-	delete(w.pendingActivities, activityID)
-}
-
-// completeActivity is the OnActivityResult callback. It looks up the
-// pending channel and delivers the result. If no entry exists (the
-// workflow already gave up, or the activityID is unknown), the
-// delivery is dropped silently — the server is single-source-of-truth
-// and does not retry result pushes for unsubscribed ids.
-func (w *workerImpl) completeActivity(activityID string, result, failure []byte) {
-	w.actMu.Lock()
-	ch, ok := w.pendingActivities[activityID]
-	w.actMu.Unlock()
-	if !ok || ch == nil {
-		return
-	}
-	// chan is buffered cap=1; if a duplicate delivery arrives, drop it.
-	select {
-	case ch <- &activityResultMsg{result: result, failure: failure}:
-	default:
-	}
 }
 
 // sessionTracker is the Phase-1 no-op session worker. Retained as a

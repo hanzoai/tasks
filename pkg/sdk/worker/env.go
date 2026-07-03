@@ -16,32 +16,43 @@ import (
 )
 
 // workerEnv is the worker-owned CoroutineEnv that drives workflow
-// functions in production (Phase 1). It is a real wire-backed
-// implementation: ExecuteActivity hits the frontend via
-// ScheduleActivity and waits for the matching server-pushed
-// OpcodeDeliverActivityResult on a per-activityID channel; NewTimer
-// uses a per-timer goroutine; Select uses a fan-in channel instead
-// of a 1ms spin.
+// functions (Phase-2a). It is an event-sourced replay decider: on each
+// workflow task it is seeded with the run's history; ExecuteActivity
+// resolves its result from history by a deterministic per-run command
+// sequence number (seq). If the activity is not yet terminal in history it
+// emits a ScheduleActivity command and returns a future whose Get ends the
+// decision episode (the worker cannot make further progress until the
+// server delivers the next task with the activity's result appended).
 //
-// NOTE on replay (Phase 1 behaviour): workerEnv does NOT event-source
-// the workflow. Each dispatch re-runs the workflow function from the
-// top with the same input; activity calls are idempotent by contract.
-// Mid-run crashes restart with the same input — in-flight activity
-// progress is lost but activities are expected to tolerate that.
-// Phase 2 introduces a history log; the public surface stays the same.
+// Determinism invariant: same history ⇒ same command sequence. The workflow
+// function must be pure w.r.t. its inputs + history — every non-deterministic
+// value (activity result, ...) is sourced from a history event keyed by seq.
 type workerEnv struct {
 	mu   sync.Mutex
 	info workflow.Info
 
-	// transport dispatches activities and waits for results.
+	// transport is used for the remaining wire calls (child workflows,
+	// 0x006D). Activities no longer dispatch over the wire from here — the
+	// decider emits commands the server applies on RespondWorkflowTask.
 	transport client.WorkerTransport
 
 	// logger is the per-workflow logger Logger() returns.
 	logger luxlog.Logger
 
-	// ctx bounds the run's wall-clock lifetime. All ExecuteActivity
-	// long-polls inherit this so Stop() propagates cleanly.
+	// ctx bounds the run's wall-clock lifetime.
 	ctx context.Context
+
+	// ── replay state (Phase-2a) ──
+	// activityResults maps seq → recorded terminal outcome from history.
+	activityResults map[int]activityOutcome
+	// scheduledSeqs is the set of seqs already ACTIVITY_TASK_SCHEDULED in
+	// history — the decider does not re-emit a schedule for them.
+	scheduledSeqs map[int]bool
+	// nextSeq is the program-order command index assigned to the next
+	// ExecuteActivity call (0,1,2,…). Stable across replays.
+	nextSeq int
+	// newCommands are the ScheduleActivity commands emitted this episode.
+	newCommands []rawCommand
 
 	// signals is a per-name rendezvous of inbound signals delivered
 	// during this task. Phase-1 the server does not push signals to
@@ -82,21 +93,14 @@ type workerEnv struct {
 	// pendingUpserts buffers UpsertSearchAttributes calls that the
 	// dispatcher drains onto the next workflow-task response.
 	pendingUpserts []map[string]any
-
-	// results is the worker's pending-activity-result registry. The
-	// transport's OnActivityResult callback drains into the channel
-	// returned by registerPendingActivity. nil only in unit tests that
-	// do not exercise ExecuteActivity.
-	results pendingResults
 }
 
-// pendingResults is the subset of *workerImpl that workerEnv needs to
-// register and clean up activity-result channels. Defined as an
-// interface so test envs can inject a stub without dragging the full
-// worker in.
-type pendingResults interface {
-	registerPendingActivity(activityID string) chan *activityResultMsg
-	removePendingActivity(activityID string)
+// activityOutcome is one activity's recorded terminal result, extracted
+// from a run's history and returned by the decider without re-dispatch.
+type activityOutcome struct {
+	failed  bool
+	result  []byte // ACTIVITY_TASK_COMPLETED payload (raw JSON of the result)
+	failure []byte // ACTIVITY_TASK_FAILED payload (temporal failure envelope)
 }
 
 // sideEffectRecord is one SideEffect outcome.
@@ -122,30 +126,58 @@ func (s *cancelScope) cancel() {
 	})
 }
 
-// newWorkerEnv constructs a workerEnv for a workflow task. results is
-// the worker's pending-activity-result registry; nil only in unit
-// tests that do not exercise ExecuteActivity (ExecuteActivity then
-// settles with a ConfigError).
-func newWorkerEnv(ctx context.Context, results pendingResults, transport client.WorkerTransport, info workflow.Info, taskQueue string, logger luxlog.Logger) *workerEnv {
+// newWorkerEnv constructs a replay env for a workflow task. Call
+// loadHistory before running the workflow function to seed the decider
+// with the run's recorded activity outcomes.
+func newWorkerEnv(ctx context.Context, transport client.WorkerTransport, info workflow.Info, taskQueue string, logger luxlog.Logger) *workerEnv {
 	if logger == nil {
 		logger = luxlog.Noop()
 	}
 	root := newCancelScope()
 	e := &workerEnv{
-		info:      info,
-		transport: transport,
-		results:   results,
-		logger:    logger,
-		ctx:       ctx,
-		signals:   make(map[string]workflow.Channel),
-		scopes:    make(map[*cancelScope]struct{}),
-		root:      root,
-		taskQueue: taskQueue,
-		versions:  make(map[string]workflow.Version),
-		mutables:  make(map[string][]byte),
+		info:            info,
+		transport:       transport,
+		logger:          logger,
+		ctx:             ctx,
+		activityResults: make(map[int]activityOutcome),
+		scheduledSeqs:   make(map[int]bool),
+		signals:         make(map[string]workflow.Channel),
+		scopes:          make(map[*cancelScope]struct{}),
+		root:            root,
+		taskQueue:       taskQueue,
+		versions:        make(map[string]workflow.Version),
+		mutables:        make(map[string][]byte),
 	}
 	e.scopes[root] = struct{}{}
 	return e
+}
+
+// loadHistory seeds the decider from the run's event-sourced history:
+// which seqs are already scheduled, and each seq's terminal outcome.
+func (e *workerEnv) loadHistory(events []histEvent) {
+	for _, ev := range events {
+		seq, ok := ev.seq()
+		if !ok {
+			continue
+		}
+		switch ev.EventType {
+		case evtActivityScheduled:
+			e.scheduledSeqs[seq] = true
+		case evtActivityCompleted:
+			e.activityResults[seq] = activityOutcome{result: ev.rawAttr("result")}
+		case evtActivityFailed:
+			e.activityResults[seq] = activityOutcome{failed: true, failure: ev.rawAttr("failure")}
+		}
+	}
+}
+
+// drainCommands returns the ScheduleActivity commands emitted this episode.
+func (e *workerEnv) drainCommands() []rawCommand {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := e.newCommands
+	e.newCommands = nil
+	return out
 }
 
 // Now returns wall-clock time. Phase-1 does NOT attempt deterministic
@@ -205,104 +237,68 @@ func (e *workerEnv) NewTimer(d time.Duration) workflow.Future {
 	return workflow.NewWallClockTimer(d, cancelCh, errFn)
 }
 
-// ExecuteActivity dispatches an activity over the wire via
-// ScheduleActivity and waits for the matching server-pushed
-// OpcodeDeliverActivityResult. Returns a Future that settles with
-// the activity's result (JSON-encoded bytes) or a *temporal.Error
-// decoded from the failure envelope.
+// ExecuteActivity is the replay decider for one activity call. It consults
+// the run's history by the next command sequence number (seq):
+//
+//   - ACTIVITY_TASK_COMPLETED{seq} → return the recorded result (no dispatch)
+//   - ACTIVITY_TASK_FAILED{seq}    → return the recorded failure (retries
+//     exhausted server-side)
+//   - otherwise → emit a ScheduleActivity{seq} command (unless already
+//     scheduled in history) and return a future whose Get ends the episode.
+//
+// It never touches the wire and never runs the activity function in-process
+// — the server dispatches the activity to an activity worker and the run
+// advances by replay when the result lands in history.
 func (e *workerEnv) ExecuteActivity(opts workflow.ActivityOptions, activity any, args []any) workflow.Future {
-	f := workflow.NewFuture()
+	e.mu.Lock()
+	seq := e.nextSeq
+	e.nextSeq++
+	outcome, resolved := e.activityResults[seq]
+	e.mu.Unlock()
 
-	if e.transport == nil {
-		// No transport injected — worker was built with a nil client.
-		// This is only legal in tests that use workflow.StubEnv
-		// directly; reaching here with workerEnv means misconfiguration.
-		f.Settle(nil, temporal.NewError("worker: nil transport; cannot dispatch activity", "ConfigError", true))
+	if resolved {
+		f := workflow.NewFuture()
+		if outcome.failed {
+			f.Settle(nil, temporal.Decode(outcome.failure))
+		} else {
+			f.Settle(outcome.result, nil)
+		}
 		return f
 	}
 
 	activityType := activityTypeName(activity)
 	if activityType == "" {
+		f := workflow.NewFuture()
 		f.Settle(nil, temporal.NewError("activity type unresolvable", "ConfigError", true))
 		return f
 	}
-
 	inputBytes, err := json.Marshal(args)
 	if err != nil {
+		f := workflow.NewFuture()
 		f.Settle(nil, temporal.NewErrorWithCause("encode activity args", "MarshalError", err, true))
 		return f
 	}
 
-	taskQueue := opts.TaskQueue
-	if taskQueue == "" {
-		taskQueue = e.taskQueue
-	}
-
-	// Deadline: use StartToCloseTimeout if set, otherwise a default
-	// ceiling to avoid runaway polls.
-	dl := opts.StartToCloseTimeout
-	if dl <= 0 {
-		dl = 5 * time.Minute
-	}
-
-	// Dispatch asynchronously so the workflow coroutine can block on
-	// f.Get while this goroutine drives the schedule + poll loop.
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				f.Settle(nil, temporal.NewError(fmt.Sprintf("dispatch panic: %v", r), "PanicError", true))
-			}
-		}()
-
-		ctx, cancel := context.WithTimeout(e.ctx, dl)
-		defer cancel()
-
-		schedResp, err := e.transport.ScheduleActivity(ctx, client.ScheduleActivityRequest{
-			Namespace:      e.info.Namespace,
-			WorkflowID:     e.info.WorkflowID,
-			RunID:          e.info.RunID,
-			TaskQueue:      taskQueue,
+	e.mu.Lock()
+	if !e.scheduledSeqs[seq] {
+		taskQueue := opts.TaskQueue
+		if taskQueue == "" {
+			taskQueue = e.taskQueue
+		}
+		e.newCommands = append(e.newCommands, rawCommand{
+			Kind:           commandKindScheduleActivity,
+			Seq:            seq,
 			ActivityType:   activityType,
 			Input:          inputBytes,
+			TaskQueue:      taskQueue,
 			StartToCloseMs: opts.StartToCloseTimeout.Milliseconds(),
 			HeartbeatMs:    opts.HeartbeatTimeout.Milliseconds(),
 			RetryPolicy:    retryPolicyJSON(opts.RetryPolicy),
 		})
-		if err != nil {
-			f.Settle(nil, temporal.NewErrorWithCause("schedule activity", "TransportError", err, false))
-			return
-		}
-
-		// Wait for the server-pushed activity result. The result
-		// registry was installed by the worker; the transport's
-		// OnActivityResult callback drains into ch when the activity's
-		// completion arrives via OpcodeDeliverActivityResult.
-		if e.results == nil {
-			f.Settle(nil, temporal.NewError("worker: no result registry; cannot wait for activity", "ConfigError", true))
-			return
-		}
-		ch := e.results.registerPendingActivity(schedResp.ActivityTaskID)
-		defer e.results.removePendingActivity(schedResp.ActivityTaskID)
-
-		select {
-		case msg := <-ch:
-			if msg == nil {
-				f.Settle(nil, temporal.NewError("activity result channel closed", "TransportError", false))
-				return
-			}
-			if len(msg.failure) > 0 {
-				f.Settle(nil, temporal.Decode(msg.failure))
-				return
-			}
-			f.Settle(msg.result, nil)
-		case <-ctx.Done():
-			f.Settle(nil, temporal.NewErrorWithCause("activity deadline", "TimeoutError", ctx.Err(), false))
-		case <-e.root.done:
-			f.Settle(nil, e.root.err)
-		}
-	}()
-
-	return f
+		e.scheduledSeqs[seq] = true
+	}
+	e.mu.Unlock()
+	return blockedFuture{}
 }
 
 // GetSignalChannel returns (or creates) a signal channel for name.
