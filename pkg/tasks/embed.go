@@ -339,6 +339,19 @@ func (e *Embedded) RegisterWorker(w Worker) {
 	e.engine.workers.Register(w)
 }
 
+// ActivitiesForOrg lists the standalone activities in ns for org (org=="" ⇒
+// the unscoped/embedded shard). It is the thin, org-scoped programmatic read
+// the in-process host (cloud's clients/fleet) uses to render a registry from
+// engine data without a second HTTP hop into its own surface. Tenancy is the
+// caller's to enforce: pass the validated X-Org-Id, never client input.
+func (e *Embedded) ActivitiesForOrg(org, ns string) ([]StandaloneActivity, error) {
+	if e == nil || e.engine == nil {
+		return nil, fmt.Errorf("tasks engine not ready")
+	}
+	rows, _, err := e.engine.WithOrg(org).ListActivities(ns, "", 0)
+	return rows, err
+}
+
 // EventsHandler returns the SSE realtime stream of engine events.
 func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 
@@ -1236,6 +1249,23 @@ func handleActivities(w http.ResponseWriter, r *http.Request, en *engine, ns str
 		a, err := en.StartActivity(ns, req.ActivityId, req.RunId, req.ActivityType, req.TaskQueue, req.Input, req.RetryPolicy, req.ScheduleToCloseTimeout, req.ScheduleToStartTimeout, req.StartToCloseTimeout, req.HeartbeatTimeout, req.Identity, req.RequestId)
 		if err != nil {
 			writeErr(w, 400, err.Error())
+			return
+		}
+		writeOK(w, nil, a)
+	case len(sub) == 1 && sub[0] == "claim" && r.Method == http.MethodPost:
+		var req struct {
+			TaskQueue    string `json:"taskQueue"`
+			Identity     string `json:"identity"`
+			LeaseSeconds int    `json:"leaseSeconds"`
+		}
+		_ = decode(r, &req)
+		a, ok, err := en.ClaimNextActivity(ns, req.TaskQueue, req.Identity, time.Duration(req.LeaseSeconds)*time.Second)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		writeOK(w, nil, a)
