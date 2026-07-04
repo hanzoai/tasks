@@ -1451,7 +1451,27 @@ func (e *engine) runScheduler(stop <-chan struct{}) {
 		case <-t.C:
 			_ = e.sweepSchedules()
 			e.sweepCanceling()
+			e.sweepLeases()
 		}
+	}
+}
+
+// sweepLeases reaps expired activity leases across every namespace the
+// (unscoped) engine can see, so a claimed activity stranded by a worker that
+// died and never came back is eventually reclaimed even with no fresh claim
+// to trigger reapExpiredLeases on the hot path. In the org-scoped cloud
+// deployment the per-org shards are invisible to this root sweep — there
+// reclamation rides the claim path (a restarting/peer worker) instead.
+func (e *engine) sweepLeases() {
+	namespaces, err := e.ListNamespaces()
+	if err != nil {
+		return
+	}
+	for _, ns := range namespaces {
+		name := ns.NamespaceInfo.Name
+		unlock := e.runMu.lock(e.orgID + "|claim|" + name)
+		_ = e.reapExpiredLeases(name)
+		unlock()
 	}
 }
 

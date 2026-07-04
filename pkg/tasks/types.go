@@ -167,7 +167,12 @@ type StandaloneActivity struct {
 	StartToCloseTimeout    string       `json:"startToCloseTimeout,omitempty"`
 	HeartbeatTimeout       string       `json:"heartbeatTimeout,omitempty"`
 	LastHeartbeatTime      string       `json:"lastHeartbeatTime,omitempty"`
-	HistoryLength          int64        `json:"historyLength,omitempty"`
+	// LeaseExpiry (RFC3339) is set when a worker claims the activity
+	// (ClaimNextActivity), refreshed on each heartbeat, and cleared when the
+	// lease is reaped. Empty ⇒ the activity is not lease-managed (e.g. a
+	// presence record heartbeated but never claimed) and the reaper ignores it.
+	LeaseExpiry   string `json:"leaseExpiry,omitempty"`
+	HistoryLength int64  `json:"historyLength,omitempty"`
 }
 
 // RetryPolicy — schedule retry knobs for an activity.
