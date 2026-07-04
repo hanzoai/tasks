@@ -93,6 +93,131 @@ func (e *engine) StartActivity(ns, activityID, runID string, typ TypeRef, taskQu
 	return out, nil
 }
 
+// defaultLeaseTTL bounds how long a claimed activity may go without a
+// heartbeat before the reaper reclaims it, when neither the activity's
+// HeartbeatTimeout nor the claim's lease say otherwise.
+const defaultLeaseTTL = 60 * time.Second
+
+// activityLeaseTTL derives the lease window for a claimed activity: its own
+// HeartbeatTimeout (the job author's heartbeat SLA doubles as the claim
+// lease) if set, else the worker-supplied fallback, else defaultLeaseTTL.
+func activityLeaseTTL(a *StandaloneActivity, fallback time.Duration) time.Duration {
+	if d, err := time.ParseDuration(a.HeartbeatTimeout); err == nil && d > 0 {
+		return d
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return defaultLeaseTTL
+}
+
+// ClaimNextActivity atomically claims the oldest SCHEDULED activity in ns
+// matching taskQueue (empty ⇒ any queue) for worker `identity`, transitioning
+// it SCHEDULED→STARTED under a lease. This is the NAT-safe worker primitive:
+// an outbound worker polls it to pull work rather than accepting a push.
+//
+// Before claiming it reaps expired leases (reapExpiredLeases) so a dead
+// worker's in-flight activity returns to SCHEDULED and this or a peer worker
+// reclaims it — self-healing on the hot path, no separate timer required in
+// the org-scoped (cloud) deployment where the background sweep cannot see the
+// per-org shard. The per-(org,ns) claim lock serializes concurrent workers so
+// no two ever claim the same activity. Returns (nil,false,nil) when the queue
+// is empty.
+func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Duration) (*StandaloneActivity, bool, error) {
+	if _, ok, _ := e.DescribeNamespace(ns); !ok {
+		return nil, false, fmt.Errorf("namespace %q not registered", ns)
+	}
+	unlock := e.runMu.lock(e.orgID + "|claim|" + ns)
+	defer unlock()
+	if err := e.reapExpiredLeases(ns); err != nil {
+		return nil, false, err
+	}
+	rows, err := listInto[StandaloneActivity](e.store, fmt.Sprintf("act/%s/", ns))
+	if err != nil {
+		return nil, false, err
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].StartTime == rows[j].StartTime {
+			return rows[i].Execution.WorkflowId < rows[j].Execution.WorkflowId
+		}
+		return rows[i].StartTime < rows[j].StartTime
+	})
+	for i := range rows {
+		a := rows[i]
+		if a.Status != activityStateScheduled {
+			continue
+		}
+		if taskQueue != "" && a.TaskQueue != taskQueue {
+			continue
+		}
+		wf, run := a.Execution.WorkflowId, a.Execution.RunId
+		now := time.Now().UTC()
+		a.Status = activityStateStarted
+		a.Identity = identity
+		a.LastHeartbeatTime = now.Format(time.RFC3339)
+		a.LeaseExpiry = now.Add(activityLeaseTTL(&a, lease)).Format(time.RFC3339)
+		if err := e.store.put(actKey(ns, wf, run), a); err != nil {
+			return nil, false, err
+		}
+		if _, err := e.appendActivityHistory(ns, wf, run, "ACTIVITY_TASK_STARTED", map[string]any{
+			"identity":    identity,
+			"attempt":     a.Attempt,
+			"leaseExpiry": a.LeaseExpiry,
+		}); err != nil {
+			return nil, false, err
+		}
+		out, _, _ := e.DescribeActivity(ns, wf, run)
+		e.emit(Event{Kind: "activity.started", Namespace: ns, WorkflowID: wf, RunID: run, Data: out})
+		return out, true, nil
+	}
+	return nil, false, nil
+}
+
+// reapExpiredLeases returns each STARTED activity in ns whose lease elapsed
+// back to SCHEDULED (Attempt incremented, lease + claimant cleared) so a
+// worker reclaims it; an activity that has exhausted MaximumAttempts is FAILED
+// instead. Activities without a lease (LeaseExpiry=="") are left untouched —
+// they are presence/heartbeat records, not claimed jobs. Callers on the claim
+// path hold the ns claim lock; the background sweep calls it directly.
+func (e *engine) reapExpiredLeases(ns string) error {
+	rows, err := listInto[StandaloneActivity](e.store, fmt.Sprintf("act/%s/", ns))
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for i := range rows {
+		a := rows[i]
+		if a.Status != activityStateStarted || a.LeaseExpiry == "" {
+			continue
+		}
+		exp, perr := time.Parse(time.RFC3339, a.LeaseExpiry)
+		if perr != nil || !now.After(exp) {
+			continue
+		}
+		wf, run := a.Execution.WorkflowId, a.Execution.RunId
+		if a.MaximumAttempts > 0 && a.Attempt >= a.MaximumAttempts {
+			_ = e.FailActivity(ns, wf, run, "lease expired: worker unresponsive", "reaper")
+			continue
+		}
+		a.Status = activityStateScheduled
+		a.Attempt++
+		a.Identity = ""
+		a.LeaseExpiry = ""
+		if err := e.store.put(actKey(ns, wf, run), a); err != nil {
+			return err
+		}
+		if _, err := e.appendActivityHistory(ns, wf, run, "ACTIVITY_TASK_TIMED_OUT", map[string]any{
+			"reason":  "lease expired",
+			"attempt": a.Attempt,
+		}); err != nil {
+			return err
+		}
+		out, _, _ := e.DescribeActivity(ns, wf, run)
+		e.emit(Event{Kind: "activity.timedout", Namespace: ns, WorkflowID: wf, RunID: run, Data: out})
+	}
+	return nil
+}
+
 // ListActivities returns standalone activities in ns. cursor is the
 // activityId+runId from the previous page; pageSize<=0 → 100.
 func (e *engine) ListActivities(ns, cursor string, pageSize int) ([]StandaloneActivity, string, error) {
@@ -182,6 +307,11 @@ func (e *engine) HeartbeatActivity(ns, activityID, runID string, details any) er
 	a.LastHeartbeatTime = nowRFC3339()
 	if a.Status == activityStateScheduled {
 		a.Status = activityStateStarted
+	}
+	// A live heartbeat extends the lease of a claimed activity so the reaper
+	// leaves it be. Unclaimed presence records (no lease) stay lease-free.
+	if a.LeaseExpiry != "" {
+		a.LeaseExpiry = time.Now().UTC().Add(activityLeaseTTL(a, 0)).Format(time.RFC3339)
 	}
 	if err := e.store.put(actKey(ns, activityID, runID), *a); err != nil {
 		return err
