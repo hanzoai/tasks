@@ -30,6 +30,14 @@ export interface Transport {
   close(): Promise<void>;
 }
 
+/**
+ * TokenProvider yields the caller's IAM bearer for an identity-gated Tasks
+ * frontend (cloud's ServeGated :9999). Called per request so a
+ * client_credentials caller can refresh transparently. Mirrors the Go SDK's
+ * client.TokenSource.
+ */
+export type TokenProvider = () => string | Promise<string>;
+
 export interface ZapNodeOptions {
   host: string;
   port: number;
@@ -37,6 +45,14 @@ export interface ZapNodeOptions {
   nodeId?: string;
   dialTimeoutMs?: number;
   callTimeoutMs?: number;
+  /**
+   * IAM bearer source. When set, its token rides every JSON-body RPC (client
+   * lifecycle + worker Subscribe) as `auth_token`, and the gated frontend
+   * scopes the request to the token owner's org. Field-object frames (worker
+   * Respond/Heartbeat) are authenticated by their HMAC task token and are not
+   * touched.
+   */
+  token?: TokenProvider;
 }
 
 interface Pending {
@@ -208,9 +224,14 @@ export class ZapNode implements Transport {
     }
   }
 
-  call(opcode: number, body: Buffer): Promise<Buffer> {
+  async call(opcode: number, body: Buffer): Promise<Buffer> {
     if (this.closed || !this.sock) {
-      return Promise.reject(new Error("zap: transport closed"));
+      throw new Error("zap: transport closed");
+    }
+    // Inject the IAM bearer into JSON-body RPCs (leading `{`); field-object
+    // frames (worker Respond/Heartbeat) are HMAC-authenticated and left alone.
+    if (this.opts.token && body.length > 0 && body[0] === 0x7b /* { */) {
+      body = await this.injectAuthToken(body);
     }
     const frame = frameBody(opcode, body);
     this.reqId = (this.reqId + 1) >>> 0;
@@ -234,6 +255,22 @@ export class ZapNode implements Transport {
         reject(err as Error);
       }
     });
+  }
+
+  /** Merge `auth_token` into a JSON-object request body. */
+  private async injectAuthToken(body: Buffer): Promise<Buffer> {
+    const tok = await this.opts.token!();
+    if (!tok) return body;
+    try {
+      const obj = JSON.parse(body.toString("utf8"));
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        obj.auth_token = tok;
+        return Buffer.from(JSON.stringify(obj), "utf8");
+      }
+    } catch {
+      // Not a JSON object — leave the body untouched.
+    }
+    return body;
   }
 
   handle(opcode: number, fn: (from: string, body: Buffer) => void): void {
