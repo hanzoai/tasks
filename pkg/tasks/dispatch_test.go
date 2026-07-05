@@ -64,7 +64,7 @@ func TestDispatcher_WorkflowAndActivityRoundTrip(t *testing.T) {
 
 	// Enqueue a workflow task. The dispatcher should immediately push
 	// OpcodeDeliverWorkflowTask to peerA.
-	d.EnqueueWorkflowTask(ns, queue, workflowID, runID, wfType, []byte(`{"hello":"world"}`))
+	d.EnqueueWorkflowTask("", ns, queue, workflowID, runID, wfType, []byte(`{"hello":"world"}`))
 
 	calls := cap.snapshot()
 	if len(calls) != 1 {
@@ -97,7 +97,7 @@ func TestDispatcher_WorkflowAndActivityRoundTrip(t *testing.T) {
 	// to the subscribed activity peer (peerB) and returns a token bound to
 	// (ns, wf, run, seq).
 	const actID = "run-1-act-0"
-	actToken := d.DispatchActivity(ns, queue, workflowID, runID, 0, actID, actType,
+	actToken := d.DispatchActivity("", ns, queue, workflowID, runID, 0, actID, actType,
 		[]byte(`{"name":"activity-input"}`), 60_000, 5_000)
 	if len(actToken) == 0 {
 		t.Fatalf("DispatchActivity returned empty token")
@@ -161,7 +161,7 @@ func TestDispatcher_QueuesUntilSubscribe(t *testing.T) {
 	d := newDispatcher()
 	d.send = cap.fn
 
-	d.EnqueueWorkflowTask("ns", "q", "wf", "run", "Type", nil)
+	d.EnqueueWorkflowTask("", "ns", "q", "wf", "run", "Type", nil)
 	if got := len(cap.snapshot()); got != 0 {
 		t.Fatalf("unexpected push before subscribe: %d", got)
 	}
