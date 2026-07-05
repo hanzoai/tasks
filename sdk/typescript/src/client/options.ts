@@ -40,12 +40,17 @@ export interface StartWorkflowOptions {
   /** Opaque metadata attached to the execution. */
   memo?: Record<string, unknown>;
   /**
-   * Search attributes. Accepted for @temporalio API compatibility, but the
-   * v1 Hanzo Tasks wire (StartWorkflowRequest) does not yet carry a search-
-   * attribute field — see the SDK README "Remaining" section. Values are
-   * currently ignored on the wire.
+   * Search attributes — a flat name→value record carried on the wire
+   * (StartWorkflowRequest.search_attributes), stored on the execution, and
+   * visibility-queryable via ListWorkflows (e.g. `postId="123"`).
    */
   searchAttributes?: Record<string, unknown>;
+  /**
+   * Reuse policy for an existing run under workflowId. Recognised values
+   * (long WORKFLOW_ID_CONFLICT_POLICY_* or the short suffix):
+   * USE_EXISTING | TERMINATE_EXISTING | FAIL. Empty = no policy.
+   */
+  workflowIdConflictPolicy?: string;
 }
 
 export enum WorkflowStatus {
