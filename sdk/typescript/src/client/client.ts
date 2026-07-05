@@ -108,6 +108,7 @@ export class TasksClient {
       nodeId: identity,
       dialTimeoutMs: opts.dialTimeoutMs,
       callTimeoutMs: opts.callTimeoutMs,
+      token: opts.token,
     });
     await node.connect();
     return new TasksClient(node, namespace, identity, true);
