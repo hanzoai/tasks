@@ -108,6 +108,7 @@ export class TasksClient {
       nodeId: identity,
       dialTimeoutMs: opts.dialTimeoutMs,
       callTimeoutMs: opts.callTimeoutMs,
+      token: opts.token,
     });
     await node.connect();
     return new TasksClient(node, namespace, identity, true);
@@ -142,6 +143,8 @@ export class TasksClient {
       retry_policy: retryToWire(opts.retryPolicy),
       timeouts: timeoutsToWire(opts),
       memo: opts.memo,
+      search_attributes: opts.searchAttributes,
+      workflow_id_conflict_policy: opts.workflowIdConflictPolicy || undefined,
       cron_schedule: opts.cronSchedule,
       identity: this.identity,
     };
@@ -167,6 +170,7 @@ export class TasksClient {
       retry_policy: retryToWire(opts.retryPolicy),
       timeouts: timeoutsToWire(opts),
       memo: opts.memo,
+      search_attributes: opts.searchAttributes,
       cron_schedule: opts.cronSchedule,
       identity: this.identity,
       signal_name: signalName,

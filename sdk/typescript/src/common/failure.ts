@@ -51,6 +51,59 @@ export class TaskError extends Error {
   }
 }
 
+/**
+ * ApplicationFailure — a business error a workflow or activity raises. Mirrors
+ * @temporalio/common's ApplicationFailure: `type` is the error classifier
+ * (e.g. "refresh_token", "bad_body") that workflow code switches on. On the
+ * wire it is the failure `code`, so `type` is a view over `code`.
+ */
+export class ApplicationFailure extends TaskError {
+  constructor(message: string, type: string = FailureCode.Application, nonRetryable = false, details: unknown[] = [], cause?: TaskError) {
+    super(message, type, nonRetryable, details, cause);
+    this.name = "ApplicationFailure";
+  }
+
+  /** The error classifier — the field @temporalio workflow code reads. */
+  get type(): string {
+    return this.code;
+  }
+
+  static create(opts: { message: string; type?: string; nonRetryable?: boolean; details?: unknown[] }): ApplicationFailure {
+    return new ApplicationFailure(opts.message, opts.type ?? FailureCode.Application, opts.nonRetryable ?? false, opts.details ?? []);
+  }
+
+  static nonRetryable(message: string, type?: string, ...details: unknown[]): ApplicationFailure {
+    return new ApplicationFailure(message, type ?? FailureCode.Application, true, details);
+  }
+
+  static retryable(message: string, type?: string, ...details: unknown[]): ApplicationFailure {
+    return new ApplicationFailure(message, type ?? FailureCode.Application, false, details);
+  }
+}
+
+/**
+ * ActivityFailure — wraps the cause raised by a failed activity, mirroring
+ * @temporalio's ActivityFailure. Workflow code pattern-matches
+ * `err instanceof ActivityFailure && err.cause instanceof ApplicationFailure`,
+ * so a proxied activity that fails rejects with an ActivityFailure whose
+ * `cause` is the decoded ApplicationFailure.
+ */
+export class ActivityFailure extends TaskError {
+  readonly activityType: string;
+
+  constructor(activityType: string, cause: TaskError) {
+    super(`activity ${activityType} failed: ${cause.message}`, cause.code, cause.nonRetryable, cause.details, cause);
+    this.name = "ActivityFailure";
+    this.activityType = activityType;
+  }
+}
+
+/** Coerce a decoded TaskError to an ApplicationFailure (preserving cause). */
+export function asApplicationFailure(err: TaskError): ApplicationFailure {
+  if (err instanceof ApplicationFailure) return err;
+  return new ApplicationFailure(err.message, err.code, err.nonRetryable, err.details, err.cause);
+}
+
 interface FailurePayload {
   message: string;
   code: string;
