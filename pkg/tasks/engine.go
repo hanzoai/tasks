@@ -317,12 +317,19 @@ func (e *engine) DescribeWorkflow(ns, workflowId, runId string) (*WorkflowExecut
 }
 
 // moreCurrentRun reports whether run a is a "more current" execution than b
-// for the same workflowId: an open run outranks a terminal one; otherwise
+// for the same workflowId: an open run outranks a terminal one; a
+// CONTINUED_AS_NEW run (which always has a successor) is the least current, so
+// the completed tail of a continue-as-new chain resolves over its closed
+// predecessor even when they share a second-granularity StartTime; otherwise
 // the later StartTime wins, with the runId as a deterministic tiebreak.
 func moreCurrentRun(a, b WorkflowExecution) bool {
 	aTerm, bTerm := isTerminal(a.Status), isTerminal(b.Status)
 	if aTerm != bTerm {
 		return !aTerm
+	}
+	const can = "WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW"
+	if aCAN, bCAN := a.Status == can, b.Status == can; aCAN != bCAN {
+		return !aCAN
 	}
 	if a.StartTime != b.StartTime {
 		return a.StartTime > b.StartTime
