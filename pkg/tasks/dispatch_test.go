@@ -4,6 +4,7 @@ package tasks
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -173,3 +174,70 @@ func TestDispatcher_QueuesUntilSubscribe(t *testing.T) {
 		t.Fatalf("expected 1 push to late-peer, got %+v", calls)
 	}
 }
+
+
+// TestDispatcher_PrunesDeadPeerOnSendFailure proves the self-healing delivery
+// path: a leaked subscription whose worker has disconnected (Send fails, since
+// luxfi/zap exposes no disconnect hook) is pruned on the failed push and the
+// task is redelivered to a live subscriber — never silently dropped.
+func TestDispatcher_PrunesDeadPeerOnSendFailure(t *testing.T) {
+	ns, queue := "ns", "q"
+	var mu sync.Mutex
+	var calls []sendCall
+	d := newDispatcher()
+	d.send = func(peerID string, opcode uint16, body []byte) error {
+		mu.Lock()
+		calls = append(calls, sendCall{peerID: peerID, opcode: opcode})
+		mu.Unlock()
+		if peerID == "dead" {
+			return errNoListener
+		}
+		return nil
+	}
+
+	if _, err := d.Subscribe("dead", ns, queue, kindWorkflow); err != nil {
+		t.Fatalf("subscribe dead: %v", err)
+	}
+	if _, err := d.Subscribe("live", ns, queue, kindWorkflow); err != nil {
+		t.Fatalf("subscribe live: %v", err)
+	}
+
+	d.EnqueueWorkflowTask("", ns, queue, "wf", "run", "Type", nil)
+
+	mu.Lock()
+	got := append([]sendCall(nil), calls...)
+	mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 push attempts (dead then live), got %d: %+v", len(got), got)
+	}
+	if got[0].peerID != "dead" || got[1].peerID != "live" {
+		t.Fatalf("delivery order = [%s,%s], want [dead,live]", got[0].peerID, got[1].peerID)
+	}
+
+	// The dead subscription must be pruned; only the live one remains.
+	key := subKey{ns, queue, kindWorkflow}
+	d.mu.Lock()
+	subs := d.subs[key]
+	_, deadStillTracked := d.byPeer["dead"]
+	d.mu.Unlock()
+	if len(subs) != 1 || subs[0].peerID != "live" {
+		t.Fatalf("subs after prune = %+v, want only [live]", subs)
+	}
+	if deadStillTracked {
+		t.Fatalf("dead peer still tracked in byPeer after prune")
+	}
+
+	// A second enqueue goes straight to the live peer (no dead attempt).
+	mu.Lock()
+	calls = nil
+	mu.Unlock()
+	d.EnqueueWorkflowTask("", ns, queue, "wf2", "run2", "Type", nil)
+	mu.Lock()
+	got2 := append([]sendCall(nil), calls...)
+	mu.Unlock()
+	if len(got2) != 1 || got2[0].peerID != "live" {
+		t.Fatalf("second enqueue delivery = %+v, want single [live]", got2)
+	}
+}
+
+var errNoListener = fmt.Errorf("tasks: no listener holds worker peer")
