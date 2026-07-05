@@ -150,17 +150,25 @@ func (e *engine) ListNamespaces() ([]Namespace, error) {
 // ── workflows ───────────────────────────────────────────────────────
 
 func (e *engine) StartWorkflow(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any) (*WorkflowExecution, error) {
-	return e.startWorkflowWithRequestID(ns, workflowId, runId, typ, taskQueue, input, "")
+	return e.startWorkflowFull(ns, workflowId, runId, typ, taskQueue, input, "", nil, nil, "")
 }
 
 // StartWorkflowWithRequestID is the idempotent form. When requestID is
 // non-empty and a prior Start under the same (workflowID, requestID)
 // landed, the existing execution is returned without a new run.
 func (e *engine) StartWorkflowWithRequestID(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, requestID string) (*WorkflowExecution, error) {
-	return e.startWorkflowWithRequestID(ns, workflowId, runId, typ, taskQueue, input, requestID)
+	return e.startWorkflowFull(ns, workflowId, runId, typ, taskQueue, input, requestID, nil, nil, "")
 }
 
 func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, requestID string) (*WorkflowExecution, error) {
+	return e.startWorkflowFull(ns, workflowId, runId, typ, taskQueue, input, requestID, nil, nil, "")
+}
+
+// startWorkflowFull is the single start implementation. searchAttrs/memo
+// are stored on the execution (searchAttrs are visibility-queryable — see
+// fieldValue). conflictPolicy governs a live execution already existing
+// under workflowId (see resolveWorkflowIdConflict).
+func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, requestID string, searchAttrs map[string]any, memo any, conflictPolicy string) (*WorkflowExecution, error) {
 	if _, ok, _ := e.DescribeNamespace(ns); !ok {
 		return nil, fmt.Errorf("namespace %q not registered", ns)
 	}
@@ -177,6 +185,15 @@ func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ Ty
 			}
 		}
 	}
+	// Workflow-id reuse policy: an existing NON-terminal run under
+	// workflowId is either reused, terminated, or rejected before a fresh
+	// run is created. Default (empty) preserves the historical behaviour
+	// (a new run is created under the same workflowId).
+	if existing, handled, err := e.resolveWorkflowIdConflict(ns, workflowId, conflictPolicy); err != nil {
+		return nil, err
+	} else if handled {
+		return existing, nil
+	}
 	if runId == "" {
 		runId = newRunId()
 	}
@@ -185,12 +202,14 @@ func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ Ty
 	}
 	startTime := nowRFC3339()
 	wf := WorkflowExecution{
-		Execution: ExecutionRef{WorkflowId: workflowId, RunId: runId},
-		Type:      typ,
-		StartTime: startTime,
-		Status:    "WORKFLOW_EXECUTION_STATUS_RUNNING",
-		TaskQueue: taskQueue,
-		Input:     input,
+		Execution:   ExecutionRef{WorkflowId: workflowId, RunId: runId},
+		Type:        typ,
+		StartTime:   startTime,
+		Status:      "WORKFLOW_EXECUTION_STATUS_RUNNING",
+		TaskQueue:   taskQueue,
+		Input:       input,
+		SearchAttrs: searchAttrs,
+		Memo:        memo,
 	}
 	key := fmt.Sprintf("wf/%s/%s/%s", ns, workflowId, runId)
 	if err := e.store.put(key, wf); err != nil {
@@ -225,6 +244,43 @@ func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ Ty
 	return &wf, nil
 }
 
+// resolveWorkflowIdConflict applies the workflow-id reuse policy against a
+// live (non-terminal) run already under workflowId. Returns (existing,
+// true) when the caller should short-circuit and reuse that run,
+// (nil,false) to proceed with a fresh run, or an error for FAIL. An empty
+// policy means "no policy" — proceed (historical behaviour). Recognised
+// policies (long WORKFLOW_ID_CONFLICT_POLICY_* or the short suffix):
+//   - USE_EXISTING       → reuse the live run
+//   - TERMINATE_EXISTING → terminate the live run, then start fresh
+//   - FAIL               → error if a live run exists
+func (e *engine) resolveWorkflowIdConflict(ns, workflowId, policy string) (*WorkflowExecution, bool, error) {
+	if policy == "" {
+		return nil, false, nil
+	}
+	existing, ok, _ := e.DescribeWorkflow(ns, workflowId, "")
+	if !ok || isTerminal(existing.Status) {
+		return nil, false, nil
+	}
+	switch normalizeConflictPolicy(policy) {
+	case "USE_EXISTING":
+		return existing, true, nil
+	case "TERMINATE_EXISTING":
+		if _, err := e.TerminateWorkflowWithReason(ns, existing.Execution.WorkflowId, existing.Execution.RunId, "superseded by workflow-id conflict policy", "engine"); err != nil {
+			return nil, false, err
+		}
+		return nil, false, nil
+	case "FAIL":
+		return nil, false, fmt.Errorf("workflow %q already running (conflict policy FAIL)", workflowId)
+	}
+	return nil, false, nil
+}
+
+func normalizeConflictPolicy(p string) string {
+	p = strings.ToUpper(p)
+	p = strings.TrimPrefix(p, "WORKFLOW_ID_CONFLICT_POLICY_")
+	return p
+}
+
 // lookupIdempotency returns the runID previously associated with
 // (workflowID, requestID), if any.
 func (e *engine) lookupIdempotency(ns, workflowID, requestID string) (string, bool, error) {
@@ -242,18 +298,36 @@ func (e *engine) DescribeWorkflow(ns, workflowId, runId string) (*WorkflowExecut
 		}
 		return &wf, true, err
 	}
-	// runId not supplied — return the most recent execution under workflowId.
+	// runId not supplied — return the CURRENT execution under workflowId: the
+	// open (non-terminal) run if one exists, else the most recent. This makes
+	// the successor of a continueAsNew (a fresh RUNNING run that may share the
+	// closed run's second-granularity StartTime) the one resolved, so
+	// signal / describe target the live run.
 	rows, err := listInto[WorkflowExecution](e.store, fmt.Sprintf("wf/%s/%s/", ns, workflowId))
 	if err != nil || len(rows) == 0 {
 		return nil, false, err
 	}
-	latest := rows[0]
-	for _, r := range rows[1:] {
-		if r.StartTime > latest.StartTime {
-			latest = r
+	best := 0
+	for i := 1; i < len(rows); i++ {
+		if moreCurrentRun(rows[i], rows[best]) {
+			best = i
 		}
 	}
-	return &latest, true, nil
+	return &rows[best], true, nil
+}
+
+// moreCurrentRun reports whether run a is a "more current" execution than b
+// for the same workflowId: an open run outranks a terminal one; otherwise
+// the later StartTime wins, with the runId as a deterministic tiebreak.
+func moreCurrentRun(a, b WorkflowExecution) bool {
+	aTerm, bTerm := isTerminal(a.Status), isTerminal(b.Status)
+	if aTerm != bTerm {
+		return !aTerm
+	}
+	if a.StartTime != b.StartTime {
+		return a.StartTime > b.StartTime
+	}
+	return a.Execution.RunId > b.Execution.RunId
 }
 
 func (e *engine) ListWorkflows(ns string) ([]WorkflowExecution, error) {
@@ -421,35 +495,55 @@ func (e *engine) signalWorkflow(ns, workflowId, runId, name string, payload any,
 	if isTerminal(wf.Status) {
 		return fmt.Errorf("workflow not running: status=%s", wf.Status)
 	}
-	if _, err := e.appendHistory(ns, wf.Execution.WorkflowId, wf.Execution.RunId, "WORKFLOW_EXECUTION_SIGNALED", map[string]any{
+	// Resolve to the concrete run so the signal event and the re-dispatched
+	// workflow task both target the same run (DescribeWorkflow with an empty
+	// runId returns the latest execution).
+	wfID, run := wf.Execution.WorkflowId, wf.Execution.RunId
+	// Serialize with the run's other advancers: append SIGNALED then
+	// schedule a workflow task so the stateless worker replays the extended
+	// history and delivers the signal to its handler. Without the
+	// re-dispatch a signal-driven workflow (condition on a signal-populated
+	// queue) would never wake until some other event advanced the run.
+	unlock := e.lockRun(ns, wfID, run)
+	defer unlock()
+	if _, err := e.appendHistory(ns, wfID, run, "WORKFLOW_EXECUTION_SIGNALED", map[string]any{
 		"signalName": name,
 		"input":      payload,
 		"identity":   identity,
 	}); err != nil {
 		return err
 	}
-	wf, _, _ = e.DescribeWorkflow(ns, wf.Execution.WorkflowId, wf.Execution.RunId)
+	wf, _, _ = e.DescribeWorkflow(ns, wfID, run)
 	e.emit(Event{
 		Kind:       "workflow.signaled",
 		Namespace:  ns,
-		WorkflowID: wf.Execution.WorkflowId,
-		RunID:      wf.Execution.RunId,
+		WorkflowID: wfID,
+		RunID:      run,
 		Data:       map[string]any{"signal": name, "input": payload, "history_length": wf.HistoryLen},
 	})
-	return nil
+	return e.scheduleWorkflowTask(ns, wfID, run)
 }
 
 // SignalWithStartWorkflow signals an existing running workflow under
 // workflowId; if none is running, starts a fresh one and signals that.
 // The (start, signal) pair is atomic from the caller's view.
 func (e *engine) SignalWithStartWorkflow(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, signalName string, signalPayload any, requestID string) (*WorkflowExecution, error) {
+	return e.signalWithStartFull(ns, workflowId, runId, typ, taskQueue, input, signalName, signalPayload, requestID, nil, nil)
+}
+
+// signalWithStartFull is the search-attribute-aware form: on the
+// fresh-start branch the execution is created with searchAttrs/memo (so a
+// signalWithStart-created run is visibility-queryable just like a Start).
+// USE_EXISTING semantics: a live run under workflowId is signalled, never
+// duplicated.
+func (e *engine) signalWithStartFull(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, signalName string, signalPayload any, requestID string, searchAttrs map[string]any, memo any) (*WorkflowExecution, error) {
 	if existing, ok, _ := e.DescribeWorkflow(ns, workflowId, ""); ok && !isTerminal(existing.Status) {
 		if err := e.SignalWorkflow(ns, existing.Execution.WorkflowId, existing.Execution.RunId, signalName, signalPayload); err != nil {
 			return nil, err
 		}
 		return existing, nil
 	}
-	wf, err := e.startWorkflowWithRequestID(ns, workflowId, runId, typ, taskQueue, input, requestID)
+	wf, err := e.startWorkflowFull(ns, workflowId, runId, typ, taskQueue, input, requestID, searchAttrs, memo, "")
 	if err != nil {
 		return nil, err
 	}
@@ -628,10 +722,10 @@ func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reas
 		TaskQueue: src.TaskQueue,
 		Input:     src.Input,
 		Memo: map[string]any{
-			"resetFromRunId":  src.Execution.RunId,
+			"resetFromRunId":   src.Execution.RunId,
 			"resetFromEventId": eventID,
-			"resetReason":     reason,
-			"resetIdentity":   identity,
+			"resetReason":      reason,
+			"resetIdentity":    identity,
 		},
 	}
 	// Persist the new execution shell first so appendHistory finds it.
@@ -654,10 +748,10 @@ func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reas
 		return nil, err
 	}
 	if _, err := e.appendHistory(ns, newWf.Execution.WorkflowId, newWf.Execution.RunId, "WORKFLOW_EXECUTION_RESET", map[string]any{
-		"baseRunId":  src.Execution.RunId,
-		"eventId":    eventID,
-		"reason":     reason,
-		"identity":   identity,
+		"baseRunId": src.Execution.RunId,
+		"eventId":   eventID,
+		"reason":    reason,
+		"identity":  identity,
 	}); err != nil {
 		return nil, err
 	}
@@ -1223,14 +1317,14 @@ func (e *engine) ListSearchAttributes(ns string) ([]SearchAttribute, error) {
 // NamespaceMetadataPatch carries the fields a metadata update may set.
 // Empty string fields are ignored; non-nil maps fully replace.
 type NamespaceMetadataPatch struct {
-	Description             *string            `json:"description,omitempty"`
-	OwnerEmail              *string            `json:"ownerEmail,omitempty"`
-	Retention               *string            `json:"retention,omitempty"`
-	HistoryArchivalState    *string            `json:"historyArchivalState,omitempty"`
-	HistoryArchivalUri      *string            `json:"historyArchivalUri,omitempty"`
-	VisibilityArchivalState *string            `json:"visibilityArchivalState,omitempty"`
-	VisibilityArchivalUri   *string            `json:"visibilityArchivalUri,omitempty"`
-	CustomData              map[string]string  `json:"customData,omitempty"`
+	Description             *string           `json:"description,omitempty"`
+	OwnerEmail              *string           `json:"ownerEmail,omitempty"`
+	Retention               *string           `json:"retention,omitempty"`
+	HistoryArchivalState    *string           `json:"historyArchivalState,omitempty"`
+	HistoryArchivalUri      *string           `json:"historyArchivalUri,omitempty"`
+	VisibilityArchivalState *string           `json:"visibilityArchivalState,omitempty"`
+	VisibilityArchivalUri   *string           `json:"visibilityArchivalUri,omitempty"`
+	CustomData              map[string]string `json:"customData,omitempty"`
 }
 
 func (e *engine) UpdateNamespaceMetadata(name string, p NamespaceMetadataPatch) (*Namespace, error) {
