@@ -11,6 +11,7 @@
 package client
 
 import (
+	"context"
 	"time"
 
 	"github.com/hanzoai/tasks/pkg/sdk/temporal"
@@ -42,6 +43,27 @@ type Options struct {
 	// Transport overrides the default ZAP transport. Primarily for
 	// testing — leave nil in production.
 	Transport Transport
+
+	// Token supplies the caller's IAM identity to an identity-gated Tasks
+	// frontend (a ServeGated listener running RequireIdentity). It is called
+	// per request so a short-lived client_credentials bearer refreshes
+	// transparently; the returned token rides every JSON-body RPC (client
+	// lifecycle + worker Subscribe) as auth_token, and the frontend scopes the
+	// request to the token owner's org. nil (default) sends no auth_token —
+	// correct for an ungated / loopback frontend. Binary worker respond frames
+	// stay task_token-gated and carry none.
+	Token TokenSource
+}
+
+// TokenSource returns the bearer to present to an identity-gated Tasks frontend.
+// Use StaticToken for a fixed token; a client_credentials caller returns a fresh
+// bearer per call (cache with expiry) so a long-lived worker never presents an
+// expired identity.
+type TokenSource func(ctx context.Context) (string, error)
+
+// StaticToken adapts a fixed bearer to a TokenSource.
+func StaticToken(tok string) TokenSource {
+	return func(context.Context) (string, error) { return tok, nil }
 }
 
 // StartWorkflowOptions mirrors the upstream StartWorkflowOptions struct
