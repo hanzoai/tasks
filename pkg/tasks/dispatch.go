@@ -232,33 +232,99 @@ func (d *dispatcher) pickLocked(key subKey) *subscription {
 	return list[i]
 }
 
+// removeSubLocked drops a single subscription from subs+byPeer. Used to prune a
+// subscription whose worker has disconnected: luxfi/zap exposes no disconnect
+// hook, so a leaked subscription is only discovered when a server-push Send to
+// its peer fails. Caller holds d.mu.
+func (d *dispatcher) removeSubLocked(sub *subscription) {
+	list := d.subs[sub.key]
+	for i, x := range list {
+		if x.id == sub.id {
+			d.subs[sub.key] = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
+	if len(d.subs[sub.key]) == 0 {
+		delete(d.subs, sub.key)
+		delete(d.rrIdx, sub.key)
+	}
+	if ps, ok := d.byPeer[sub.peerID]; ok {
+		for j, x := range ps {
+			if x.id == sub.id {
+				d.byPeer[sub.peerID] = append(ps[:j], ps[j+1:]...)
+				break
+			}
+		}
+		if len(d.byPeer[sub.peerID]) == 0 {
+			delete(d.byPeer, sub.peerID)
+		}
+	}
+}
+
+// deliverWFLocked tries subscribers for key in round-robin order, pruning any
+// whose peer the transport can no longer reach (a Send error means the worker
+// disconnected and its subscription leaked — there is no zap disconnect hook),
+// until one accepts the task. Returns true once delivered, false when no live
+// subscriber remains (the caller then queues the task). Caller holds d.mu.
+func (d *dispatcher) deliverWFLocked(key subKey, t *pendingWorkflowTask) bool {
+	for {
+		sub := d.pickLocked(key)
+		if sub == nil {
+			return false
+		}
+		t.workerPeer = sub.peerID
+		if d.send == nil {
+			return true // no transport (tests): treat as delivered
+		}
+		err := d.send(sub.peerID, OpcodeDeliverWorkflowTask, encodeWorkflowTaskDelivery(t))
+		if dispatcherTrace {
+			fmt.Fprintf(os.Stderr, "DISPATCH delivered_workflow peer=%s err=%v\n", sub.peerID, err)
+		}
+		if err == nil {
+			return true
+		}
+		d.removeSubLocked(sub) // dead/absent peer — prune and try the next
+	}
+}
+
+// deliverActLocked is the activity-task twin of deliverWFLocked.
+func (d *dispatcher) deliverActLocked(key subKey, t *pendingActivityTask) bool {
+	for {
+		sub := d.pickLocked(key)
+		if sub == nil {
+			return false
+		}
+		t.dispatchedToPeer = sub.peerID
+		if d.send == nil {
+			return true
+		}
+		err := d.send(sub.peerID, OpcodeDeliverActivityTask, encodeActivityTaskDelivery(t))
+		if err == nil {
+			return true
+		}
+		d.removeSubLocked(sub)
+	}
+}
+
 // drainLocked delivers any tasks queued under sub.key to sub. Caller
 // holds d.mu.
 func (d *dispatcher) drainLocked(sub *subscription) {
-	if sub.key.kind == kindWorkflow {
-		queue := d.pendingWF[sub.key]
-		if len(queue) == 0 {
-			return
-		}
-		// Pop the head and deliver.
-		t := queue[0]
-		d.pendingWF[sub.key] = queue[1:]
-		t.workerPeer = sub.peerID
-		body := encodeWorkflowTaskDelivery(t)
-		if d.send != nil {
-			_ = d.send(sub.peerID, OpcodeDeliverWorkflowTask, body)
+	key := sub.key
+	if key.kind == kindWorkflow {
+		for len(d.pendingWF[key]) > 0 {
+			t := d.pendingWF[key][0]
+			if !d.deliverWFLocked(key, t) {
+				return // no live subscriber — leave the backlog queued
+			}
+			d.pendingWF[key] = d.pendingWF[key][1:]
 		}
 	} else {
-		queue := d.pendingAct[sub.key]
-		if len(queue) == 0 {
-			return
-		}
-		t := queue[0]
-		d.pendingAct[sub.key] = queue[1:]
-		t.dispatchedToPeer = sub.peerID
-		body := encodeActivityTaskDelivery(t)
-		if d.send != nil {
-			_ = d.send(sub.peerID, OpcodeDeliverActivityTask, body)
+		for len(d.pendingAct[key]) > 0 {
+			t := d.pendingAct[key][0]
+			if !d.deliverActLocked(key, t) {
+				return
+			}
+			d.pendingAct[key] = d.pendingAct[key][1:]
 		}
 	}
 }
@@ -289,15 +355,7 @@ func (d *dispatcher) EnqueueWorkflowTask(orgID, ns, queue, workflowID, runID, wo
 	if dispatcherTrace {
 		fmt.Fprintf(os.Stderr, "DISPATCH enqueue_workflow ns=%s queue=%s wf=%s subs_for_key=%d\n", ns, queue, workflowID, len(d.subs[key]))
 	}
-	if sub := d.pickLocked(key); sub != nil {
-		t.workerPeer = sub.peerID
-		body := encodeWorkflowTaskDelivery(t)
-		if d.send != nil {
-			err := d.send(sub.peerID, OpcodeDeliverWorkflowTask, body)
-			if dispatcherTrace {
-				fmt.Fprintf(os.Stderr, "DISPATCH delivered_workflow peer=%s err=%v\n", sub.peerID, err)
-			}
-		}
+	if d.deliverWFLocked(key, t) {
 		return
 	}
 	d.pendingWF[key] = append(d.pendingWF[key], t)
@@ -332,12 +390,7 @@ func (d *dispatcher) DispatchActivity(orgID, ns, queue, workflowID, runID string
 	d.actByToken[t.tokenStr] = t
 
 	key := subKey{ns, queue, kindActivity}
-	if sub := d.pickLocked(key); sub != nil {
-		t.dispatchedToPeer = sub.peerID
-		if d.send != nil {
-			_ = d.send(sub.peerID, OpcodeDeliverActivityTask, encodeActivityTaskDelivery(t))
-		}
-	} else {
+	if !d.deliverActLocked(key, t) {
 		d.pendingAct[key] = append(d.pendingAct[key], t)
 	}
 	return t.token
