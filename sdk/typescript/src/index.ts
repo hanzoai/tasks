@@ -15,6 +15,7 @@
 export * from "./common/failure";
 export * from "./common/converter";
 export * from "./common/duration";
+export * from "./common/search-attributes";
 
 export * from "./client";
 export * from "./worker";
