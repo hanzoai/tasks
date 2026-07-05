@@ -81,6 +81,7 @@ type subscription struct {
 type pendingWorkflowTask struct {
 	token        []byte
 	tokenStr     string
+	orgID        string
 	ns           string
 	queue        string
 	workflowID   string
@@ -94,6 +95,7 @@ type pendingWorkflowTask struct {
 type pendingActivityTask struct {
 	token            []byte
 	tokenStr         string
+	orgID            string
 	ns               string
 	queue            string
 	activityID       string
@@ -265,11 +267,12 @@ func (d *dispatcher) drainLocked(sub *subscription) {
 
 // EnqueueWorkflowTask creates a workflow task, mints its token, and
 // either delivers it to a subscribed peer or queues it for later.
-func (d *dispatcher) EnqueueWorkflowTask(ns, queue, workflowID, runID, workflowType string, input []byte) {
+func (d *dispatcher) EnqueueWorkflowTask(orgID, ns, queue, workflowID, runID, workflowType string, input []byte) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	t := &pendingWorkflowTask{
+		orgID:        orgID,
 		ns:           ns,
 		queue:        queue,
 		workflowID:   workflowID,
@@ -306,11 +309,12 @@ func (d *dispatcher) EnqueueWorkflowTask(ns, queue, workflowID, runID, workflowT
 // (ns, wf, run, seq) via ResolveActivityToken. activityID is deterministic
 // for (run, seq); the token is unique per dispatch so a re-dispatch (retry
 // / recovery) does not collide with a stale token.
-func (d *dispatcher) DispatchActivity(ns, queue, workflowID, runID string, seq int, activityID, activityType string, input []byte, startToCloseMs, heartbeatMs int64) []byte {
+func (d *dispatcher) DispatchActivity(orgID, ns, queue, workflowID, runID string, seq int, activityID, activityType string, input []byte, startToCloseMs, heartbeatMs int64) []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	t := &pendingActivityTask{
+		orgID:          orgID,
 		ns:             ns,
 		queue:          queue,
 		activityID:     activityID,
