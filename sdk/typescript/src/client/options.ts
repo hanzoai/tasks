@@ -1,6 +1,6 @@
 // Copyright © 2026 Hanzo AI. MIT License.
 
-import type { Transport } from "../zap/node";
+import type { Transport, TokenProvider } from "../zap/node";
 
 /** ConnectionOptions configures a client/worker connection to tasksd. */
 export interface ConnectionOptions {
@@ -10,6 +10,8 @@ export interface ConnectionOptions {
   namespace?: string;
   /** Caller identity sent on worker RPCs. Defaults to "hanzo-tasks-ts-sdk". */
   identity?: string;
+  /** IAM bearer source for an identity-gated frontend (cloud ServeGated :9999). */
+  token?: TokenProvider;
   dialTimeoutMs?: number;
   callTimeoutMs?: number;
   /** Inject a Transport (tests / embedding). When set, `address` is ignored. */
