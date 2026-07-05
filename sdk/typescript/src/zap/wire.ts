@@ -1,6 +1,6 @@
 // Copyright © 2026 Hanzo AI. MIT License.
 //
-// Byte-exact TypeScript port of the luxfi/zap (v0.2.0) message wire format —
+// Byte-exact TypeScript port of the luxfi/zap (v1.x, wire Version2) message format —
 // the "Zero-copy Application Protocol". Every byte this module emits is
 // identical to what github.com/luxfi/zap's Builder/Object produce in Go, so a
 // Hanzo Tasks server (tasksd) cannot tell a Go client from this one.
@@ -9,7 +9,7 @@
 //
 //   Header (16 bytes):
 //     Magic       [0:4]   "ZAP\0"
-//     Version     [4:6]   u16 LE   (== 1)
+//     Version     [4:6]   u16 LE   (2 current, 1 legacy — both accepted on read)
 //     Flags       [6:8]   u16 LE   (opcode is carried in the high byte)
 //     RootOffset  [8:12]  u32 LE   offset to the root object
 //     Size        [12:16] u32 LE   total message size including header
@@ -21,7 +21,8 @@
 // points at the payload appended after the fixed section.
 
 export const ZAP_MAGIC = Uint8Array.of(0x5a, 0x41, 0x50, 0x00); // "ZAP\0"
-export const ZAP_VERSION = 1;
+export const ZAP_VERSION = 2; // current wire: luxfi/zap v1.x emits Version2
+export const ZAP_VERSION_LEGACY = 1; // legacy v1 header still accepted on read
 export const HEADER_SIZE = 16;
 const ALIGNMENT = 8;
 
@@ -199,7 +200,8 @@ export class ZapMessage {
       throw new Error("zap: invalid magic");
     }
     const version = data.readUInt16LE(4);
-    if (version !== ZAP_VERSION) throw new Error(`zap: unsupported version ${version}`);
+    if (version !== ZAP_VERSION && version !== ZAP_VERSION_LEGACY)
+      throw new Error(`zap: unsupported version ${version}`);
     const size = data.readUInt32LE(12);
     if (size > data.length) throw new Error("zap: declared size exceeds buffer");
     return new ZapMessage(data.subarray(0, size));
