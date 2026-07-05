@@ -14,7 +14,7 @@ import {
   decodeHeartbeatResponse,
 } from "../src/zap";
 
-describe("ZAP wire — byte-exact layout (parity with luxfi/zap v0.2.0)", () => {
+describe("ZAP wire — byte-exact layout (parity with luxfi/zap v1.x, wire Version2)", () => {
   it("encodes a JSON envelope with the exact Go byte layout", () => {
     const body = Buffer.from("{}", "utf8");
     const opcode = 0x0060;
@@ -22,7 +22,7 @@ describe("ZAP wire — byte-exact layout (parity with luxfi/zap v0.2.0)", () => 
 
     // header
     expect(frame.subarray(0, 4).toString("latin1")).toBe("ZAP\x00");
-    expect(frame.readUInt16LE(4)).toBe(1); // version
+    expect(frame.readUInt16LE(4)).toBe(2); // version — current wire is luxfi/zap Version2
     expect(frame.readUInt16LE(6)).toBe((opcode << 8) & 0xffff); // flags carry opcode
     expect(frame.readUInt32LE(8)).toBe(16); // root offset = HeaderSize
     expect(frame.readUInt32LE(12)).toBe(42); // total size = 16 header + 24 obj + 2 body
@@ -32,6 +32,13 @@ describe("ZAP wire — byte-exact layout (parity with luxfi/zap v0.2.0)", () => 
     expect(frame.readUInt32LE(20)).toBe(2);
     expect(frame.subarray(40, 42).toString("utf8")).toBe("{}");
     expect(frame.length).toBe(42);
+  });
+
+  it("parses a legacy Version1 header (forward-compatible read)", () => {
+    const frame = encodeEnvelope(0x0060, Buffer.from("{}", "utf8"));
+    frame.writeUInt16LE(1, 4); // downgrade header to legacy v1
+    expect(() => ZapMessage.parse(frame)).not.toThrow();
+    expect(ZapMessage.parse(frame).opcode()).toBe(0x0060);
   });
 
   it("round-trips a response envelope with status + error detail", () => {
