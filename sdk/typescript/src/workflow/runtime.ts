@@ -21,15 +21,18 @@
 // setTimeout, or perform I/O directly — use sleep()/activities/side-effects.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { TaskError } from "../common/failure";
+import { TaskError, ActivityFailure, asApplicationFailure } from "../common/failure";
 import {
   EventType,
   eventSeq,
   scheduleActivityCommand,
+  continueAsNewCommand,
+  startChildCommand,
   type HistoryEvent,
   type RawCommand,
 } from "../worker/history";
 import { decodeFailure } from "../common/failure";
+import { toSearchAttributeRecord, TypedSearchAttributes } from "../common/search-attributes";
 
 export interface WorkflowInfo {
   workflowId: string;
@@ -91,6 +94,8 @@ export class DeciderContext {
   /** Registered signal handlers; a matching name drains buffered payloads. */
   private readonly signalHandlers = new Map<string, (arg: unknown) => void>();
   readonly queryHandlers = new Map<string, (...args: unknown[]) => unknown>();
+  /** startChild seqs already CHILD_WORKFLOW_EXECUTION_STARTED in history. */
+  private readonly childStartedBySeq = new Map<number, { workflowId: string; runId: string }>();
 
   /** Local, non-durable (mirrors Go: no wire command yet). */
   readonly searchAttributes: Record<string, unknown> = {};
@@ -104,7 +109,9 @@ export class DeciderContext {
   loadHistory(events: HistoryEvent[]): void {
     for (const ev of events) {
       if (ev.eventType === EventType.WorkflowSignaled) {
-        const name = String(ev.attributes?.["signal"] ?? "");
+        // The engine records the signal name under `signalName` (see
+        // engine.signalWorkflow); tolerate a legacy `signal` alias.
+        const name = String(ev.attributes?.["signalName"] ?? ev.attributes?.["signal"] ?? "");
         if (name) {
           const arr = this.signalsByName.get(name) ?? [];
           arr.push(ev.attributes?.["input"]);
@@ -127,6 +134,12 @@ export class DeciderContext {
           this.activityResults.set(seq, { failed: true, failure });
           break;
         }
+        case EventType.ChildWorkflowStarted:
+          this.childStartedBySeq.set(seq, {
+            workflowId: String(ev.attributes?.["childWorkflowId"] ?? ""),
+            runId: String(ev.attributes?.["childRunId"] ?? ""),
+          });
+          break;
       }
     }
   }
@@ -139,9 +152,15 @@ export class DeciderContext {
     const seq = this.nextSeq++;
     const outcome = this.activityResults.get(seq);
     if (outcome) {
-      return outcome.failed
-        ? Promise.reject(outcome.failure ?? new TaskError("activity failed", "ApplicationError", true))
-        : Promise.resolve(outcome.result);
+      if (!outcome.failed) return Promise.resolve(outcome.result);
+      // Present the failure the @temporalio way: an ActivityFailure whose
+      // `cause` is the ApplicationFailure the activity raised — the shape
+      // workflow code pattern-matches (err.cause.type === "refresh_token").
+      const cause = asApplicationFailure(outcome.failure ?? new TaskError("activity failed", "ApplicationError", true));
+      // The internal timer activity is an implementation detail: surface its
+      // failure directly rather than wrapping it as an ActivityFailure.
+      if (activityType === TIMER_ACTIVITY_TYPE) return Promise.reject(cause);
+      return Promise.reject(new ActivityFailure(activityType, cause));
     }
     if (!this.scheduledSeqs.has(seq)) {
       this.newCommands.push(
@@ -213,6 +232,53 @@ export class DeciderContext {
   upsertSearchAttributes(attrs: Record<string, unknown>): void {
     Object.assign(this.searchAttributes, attrs);
   }
+
+  /**
+   * continueAsNew — close this run and start a successor of the same type
+   * with fresh arguments. Emits a continueAsNew command and parks: the
+   * function never settles, the episode ends carrying only that command, and
+   * the server closes the run (CONTINUED_AS_NEW) and starts the successor.
+   */
+  continueAsNew(args: unknown[]): Promise<never> {
+    this.newCommands.push(continueAsNewCommand(args, this.info.workflowType, this.info.taskQueue));
+    return parkForever();
+  }
+
+  /**
+   * startChild — start a detached (ABANDON) child workflow. seq-keyed and
+   * durable: resolves from history once CHILD_WORKFLOW_EXECUTION_STARTED{seq}
+   * lands, otherwise emits a startChild command and parks. Resolves with the
+   * child's identity (the parent does not await the child's result).
+   */
+  startChild(
+    workflowType: string,
+    args: unknown[],
+    opts: { workflowId?: string; taskQueue?: string; searchAttributes?: Record<string, unknown> | TypedSearchAttributes } = {},
+  ): Promise<ChildWorkflowHandle> {
+    const seq = this.nextSeq++;
+    const started = this.childStartedBySeq.get(seq);
+    if (started) {
+      return Promise.resolve({ workflowId: started.workflowId, runId: started.runId, firstExecutionRunId: started.runId });
+    }
+    this.newCommands.push(
+      startChildCommand({
+        seq,
+        workflowType,
+        workflowId: opts.workflowId,
+        args,
+        taskQueue: opts.taskQueue ?? this.info.taskQueue,
+        searchAttributes: toSearchAttributeRecord(opts.searchAttributes),
+      }),
+    );
+    return parkForever();
+  }
+}
+
+/** Minimal child-workflow handle returned by startChild (ABANDON). */
+export interface ChildWorkflowHandle {
+  workflowId: string;
+  runId: string;
+  firstExecutionRunId: string;
 }
 
 /** A promise that never settles — parks the async workflow on suspension. */

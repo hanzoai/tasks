@@ -106,36 +106,33 @@ Failures serialise to the exact `{ v, p }` envelope of `pkg/sdk/temporal`.
 
 ## Status — complete vs remaining
 
-This is **PR #1 (CORE)**. What is fully wired and tested against the real ZAP
-transport:
+Wired and tested against the real ZAP transport (Go engine ≥ v1.49.0):
 
 | Primitive | Status |
 |---|---|
 | Client: start / signal / signalWithStart / query / describe / cancel / terminate / list | ✅ complete |
 | Client: namespace register/describe/list, health | ✅ complete |
+| Client: `searchAttributes` + `workflowIdConflictPolicy` on start / signalWithStart | ✅ complete |
 | Worker: subscribe, activity dispatch + heartbeat, respond | ✅ complete |
 | Workflow decider: `proxyActivities` (durable activities) | ✅ complete |
 | Durable `sleep` / `startTimer` (activity-backed) | ✅ complete¹ |
 | `condition` (parks until predicate holds) | ✅ complete |
-| `defineSignal` / `setHandler` (replayed from history) | ✅ complete² |
-| Retry policy, activity failure propagation, cancellation signal | ✅ complete |
-| `@temporalio/*` shim: `Connection`, `Client`, `NativeConnection`, `Worker`, `ApplicationFailure` | ✅ complete |
+| `defineSignal` / `setHandler` — signal delivered to a running workflow | ✅ complete |
+| `continueAsNew` — closes the run, server starts the successor | ✅ complete |
+| `startChild` / `executeChild` — detached (ABANDON) child workflow | ✅ complete |
+| Typed search attributes (`TypedSearchAttributes`, `defineSearchAttributeKey`) — stored + visibility-queryable | ✅ complete |
+| Retry policy, activity failure propagation (`ActivityFailure`→`ApplicationFailure`), cancellation | ✅ complete |
+| `@temporalio/*` shim: `Connection`, `Client`, `NativeConnection`, `Worker`, `ApplicationFailure`, `ActivityFailure` | ✅ complete |
 
-Remaining (blocked on **server** wire support, not this SDK):
+Remaining:
 
 - **Durable timers as a native command.** `sleep`/`startTimer` are backed by an
   internal `__hanzo_timer__` sleeper activity — durable and deterministic, but a
   worker crash mid-sleep re-runs the delay from zero (fires late, never lost).
   A native `TIMER_STARTED`/`TIMER_FIRED` server command removes the caveat. ¹
-- **Signal-to-running-workflow delivery.** The API + history-replay path are
-  implemented; end-to-end delivery depends on the server appending
-  `WORKFLOW_EXECUTION_SIGNALED` to replayable history and re-dispatching a
-  workflow task (the Go SDK has the same gap today). ²
-- **`continueAsNew`** — API present; throws `ContinueAsNewNotSupported` at
-  runtime (no server command yet).
-- **Typed search attributes** — accepted on `StartWorkflowOptions` for API
-  compatibility but ignored on the v1 wire (`StartWorkflowRequest` has no
-  search-attribute field; only `memo` is carried).
+- **Child result await.** `startChild`/`executeChild` are ABANDON (detached):
+  they resolve on the child's *start*, not its completion — the parent does not
+  block on the child's result. This matches how social uses repeat-post children.
 - **`WorkflowHandle.result()` value** — resolves `undefined` on completion
   because `DescribeWorkflowResponse` carries no result field on the v1 wire
   (same gap as the Go SDK). It throws on failure/cancel/terminate.
