@@ -12,7 +12,7 @@
 //   @temporalio/workflow proxyActivities, defineSignal, setHandler, condition,
 //                        sleep, continueAsNew, workflowInfo  (see ./workflow)
 
-import { ZapNode, type Transport } from "./zap/node";
+import { ZapNode, type Transport, type TokenProvider } from "./zap/node";
 import { TasksClient } from "./client/client";
 import { WorkflowHandle } from "./client/handle";
 import { toMs, type Duration } from "./common/duration";
@@ -32,9 +32,9 @@ export class Connection {
     readonly address: string,
   ) {}
 
-  static async connect(opts: { address: string; identity?: string }): Promise<Connection> {
+  static async connect(opts: { address: string; identity?: string; token?: TokenProvider }): Promise<Connection> {
     const [host, port] = splitHostPort(opts.address);
-    const node = new ZapNode({ host, port, nodeId: opts.identity });
+    const node = new ZapNode({ host, port, nodeId: opts.identity, token: opts.token });
     await node.connect();
     return new Connection(node, opts.address);
   }
