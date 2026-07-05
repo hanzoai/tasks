@@ -96,7 +96,13 @@ describe("workflow decider — event-sourced replay produces exact wire commands
     expect(cmds).toHaveLength(1);
     expect(cmds[0].kind).toBe(CommandKind.FailWorkflow);
     const failure = JSON.parse(Buffer.from(cmds[0].failure!, "base64").toString("utf8"));
-    expect(failure.p.message).toBe("kaboom");
+    // The activity error is presented the @temporalio way: an ActivityFailure
+    // whose `cause` is the underlying ApplicationFailure. Workflow code that
+    // does not catch it fails the workflow with that wrapped error, so the raw
+    // activity message survives on the cause and the classifier (code) is kept.
+    expect(failure.p.message).toContain("kaboom");
+    expect(failure.p.code).toBe("ApplicationError");
+    expect(failure.p.cause.message).toBe("kaboom");
   });
 
   it("schedules a durable timer via the internal sleeper activity", async () => {
