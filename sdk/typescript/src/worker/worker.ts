@@ -4,7 +4,7 @@
 // and activity tasks over ZAP, dispatches each to a registered function, and
 // ships the result back. Faithful port of pkg/sdk/worker (Go).
 
-import { ZapNode, type Transport } from "../zap/node";
+import { ZapNode, type Transport, type TokenProvider } from "../zap/node";
 import { Opcode } from "../zap/opcodes";
 import {
   decodeEnvelope,
@@ -37,6 +37,8 @@ export interface WorkerOptions {
   activities?: Record<string, ActivityFn>;
   /** Inject a Transport directly (tests). */
   transport?: Transport;
+  /** IAM bearer source for an identity-gated frontend (cloud ServeGated :9999). */
+  token?: TokenProvider;
   dialTimeoutMs?: number;
   callTimeoutMs?: number;
 }
@@ -107,6 +109,7 @@ export class Worker {
         nodeId: identity,
         dialTimeoutMs: opts.dialTimeoutMs,
         callTimeoutMs: opts.callTimeoutMs,
+        token: opts.token,
       });
       await node.connect();
       transport = node;
