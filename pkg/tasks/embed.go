@@ -1460,16 +1460,22 @@ func handleIdentities(w http.ResponseWriter, r *http.Request, en *engine, ns str
 // ── ZAP handler dispatch ────────────────────────────────────────────
 
 const (
-	opStartWorkflow           uint16 = 0x0060
-	opSignalWorkflow          uint16 = 0x0061
-	opCancelWorkflow          uint16 = 0x0062
-	opTerminateWorkflow       uint16 = 0x0063
-	opDescribeWorkflow        uint16 = 0x0064
-	opListWorkflows           uint16 = 0x0065
-	opGetWorkflowHistory      uint16 = 0x0066
+	opStartWorkflow     uint16 = 0x0060
+	opSignalWorkflow    uint16 = 0x0061
+	opCancelWorkflow    uint16 = 0x0062
+	opTerminateWorkflow uint16 = 0x0063
+	opDescribeWorkflow  uint16 = 0x0064
+	opListWorkflows     uint16 = 0x0065
+	// SignalWithStart is 0x0066 on the canonical wire (pkg/sdk/client +
+	// TS opcodes + schema/tasks.zap). The server previously registered it
+	// at 0x0069 and squatted 0x0066 with GetWorkflowHistory, so every
+	// client's signalWithStart 404'd — social's digest/sendEmail/poke all
+	// depend on it. GetWorkflowHistory has no ZAP client (HTTP-served), so
+	// it takes the now-free 0x0069.
+	opSignalWithStartWorkflow uint16 = 0x0066
 	opQueryWorkflow           uint16 = 0x0067
 	opResetWorkflow           uint16 = 0x0068
-	opSignalWithStartWorkflow uint16 = 0x0069
+	opGetWorkflowHistory      uint16 = 0x0069
 	opCreateSchedule          uint16 = 0x0070
 	opDeleteSchedule          uint16 = 0x0071
 	opListSchedules           uint16 = 0x0072
@@ -1669,7 +1675,10 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 			}
 			wfID := strOr(req, "workflow_id", str(req, "workflowId"))
 			runID := strOr(req, "run_id", str(req, "runId"))
-			wf, err := en.StartWorkflow(ns, wfID, runID, TypeRef{Name: typeName}, tq, req["input"])
+			reqID := strOr(req, "request_id", "")
+			sa, _ := req["search_attributes"].(map[string]any)
+			policy := strOr(req, "workflow_id_conflict_policy", str(req, "workflowIdConflictPolicy"))
+			wf, err := en.startWorkflowFull(ns, wfID, runID, TypeRef{Name: typeName}, tq, req["input"], reqID, sa, req["memo"], policy)
 			if err != nil {
 				return nil, 400, err.Error()
 			}
@@ -1785,7 +1794,8 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 			if sigName == "" {
 				return nil, 400, "signal_name required"
 			}
-			wf, err := en.SignalWithStartWorkflow(ns, wfID, runID, TypeRef{Name: typeName}, tq, req["input"], sigName, req["signal_input"], reqID)
+			sa, _ := req["search_attributes"].(map[string]any)
+			wf, err := en.signalWithStartFull(ns, wfID, runID, TypeRef{Name: typeName}, tq, req["input"], sigName, req["signal_input"], reqID, sa, req["memo"])
 			if err != nil {
 				return nil, 400, err.Error()
 			}
@@ -1971,16 +1981,19 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 		var env struct {
 			Version  int8 `json:"v"`
 			Commands []struct {
-				Kind           int8                    `json:"kind"`
-				Result         []byte                  `json:"result,omitempty"`
-				Failure        []byte                  `json:"failure,omitempty"`
-				Seq            int                     `json:"seq,omitempty"`
-				ActivityType   string                  `json:"activityType,omitempty"`
-				Input          []byte                  `json:"input,omitempty"`
-				TaskQueue      string                  `json:"taskQueue,omitempty"`
-				StartToCloseMs int64                   `json:"startToCloseMs,omitempty"`
-				HeartbeatMs    int64                   `json:"heartbeatMs,omitempty"`
-				RetryPolicy    *client.RetryPolicyJSON `json:"retryPolicy,omitempty"`
+				Kind            int8                    `json:"kind"`
+				Result          []byte                  `json:"result,omitempty"`
+				Failure         []byte                  `json:"failure,omitempty"`
+				Seq             int                     `json:"seq,omitempty"`
+				ActivityType    string                  `json:"activityType,omitempty"`
+				WorkflowType    string                  `json:"workflowType,omitempty"`
+				ChildWorkflowId string                  `json:"childWorkflowId,omitempty"`
+				Input           []byte                  `json:"input,omitempty"`
+				TaskQueue       string                  `json:"taskQueue,omitempty"`
+				SearchAttrs     map[string]any          `json:"searchAttrs,omitempty"`
+				StartToCloseMs  int64                   `json:"startToCloseMs,omitempty"`
+				HeartbeatMs     int64                   `json:"heartbeatMs,omitempty"`
+				RetryPolicy     *client.RetryPolicyJSON `json:"retryPolicy,omitempty"`
 			} `json:"cmds"`
 		}
 		if len(commands) > 0 {
@@ -1998,6 +2011,10 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 				_ = oe.applyScheduleActivity(t.ns, t.workflowID, t.runID, c.Seq, c.ActivityType, c.Input, c.TaskQueue, c.StartToCloseMs, c.HeartbeatMs, c.RetryPolicy)
 			case 3: // canceled — worker ack of a CANCELING handshake
 				_, _ = oe.AckCanceled(t.ns, t.workflowID, t.runID, string(c.Failure), "")
+			case 4: // continueAsNew — close this run, start a successor
+				_ = oe.applyContinueAsNew(t.ns, t.workflowID, t.runID, c.Input, c.WorkflowType, c.TaskQueue)
+			case 5: // startChildWorkflow — detached (ABANDON), idempotent per (run, seq)
+				_ = oe.applyStartChild(t.ns, t.workflowID, t.runID, c.Seq, c.ChildWorkflowId, c.WorkflowType, c.TaskQueue, c.Input, c.SearchAttrs)
 			}
 		}
 		return objectAck(0, "", 200)
