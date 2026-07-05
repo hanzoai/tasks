@@ -7,11 +7,13 @@
 
 import { randomUUID } from "node:crypto";
 import { toMs, type Duration } from "../common/duration";
+import { TypedSearchAttributes } from "../common/search-attributes";
 import {
   currentContext,
   ContinueAsNewNotSupported,
   type ActivityOptions,
   type WorkflowInfo,
+  type ChildWorkflowHandle,
 } from "./runtime";
 
 export {
@@ -19,6 +21,7 @@ export {
   type ActivityOptions,
   type WorkflowInfo,
   type DeciderContext,
+  type ChildWorkflowHandle,
 } from "./runtime";
 
 // ── activities ──
@@ -150,12 +153,56 @@ export function upsertSearchAttributes(attrs: Record<string, unknown>): void {
 }
 
 /**
- * continueAsNew — API-present, not yet durable on the v1 wire (no server
- * command). Throws ContinueAsNewNotSupported at runtime. See README.
+ * continueAsNew — close the current run and start a fresh run of the same
+ * workflow type with `args`. Durable on the Hanzo Tasks wire (ContinueAsNew
+ * command, kind=4): the server records WORKFLOW_EXECUTION_CONTINUED_AS_NEW and
+ * starts the successor run. The returned promise never resolves — the run
+ * ends here.
  */
-export function continueAsNew<_F extends (...args: any[]) => any>(..._args: unknown[]): Promise<never> {
-  return Promise.reject(new ContinueAsNewNotSupported(currentContext().info.workflowType));
+export function continueAsNew<_F extends (...args: any[]) => any>(...args: unknown[]): Promise<never> {
+  return currentContext().continueAsNew(args);
 }
+
+// ── child workflows ──
+
+export interface ChildWorkflowOptions {
+  workflowId?: string;
+  taskQueue?: string;
+  args?: unknown[];
+  /** Only ABANDON is supported: the child is an independent run. */
+  parentClosePolicy?: string;
+  searchAttributes?: Record<string, unknown>;
+  typedSearchAttributes?: TypedSearchAttributes | Record<string, unknown>;
+}
+
+/**
+ * startChild — start a detached child workflow (parentClosePolicy ABANDON:
+ * the child is an independent top-level run the parent does not await). Durable
+ * on the wire (startChild command, kind=5): the server starts the child and
+ * records CHILD_WORKFLOW_EXECUTION_STARTED on the parent. Resolves with the
+ * child's identity once it is started.
+ */
+export function startChild(
+  workflow: string | ((...a: any[]) => any),
+  opts: ChildWorkflowOptions = {},
+): Promise<ChildWorkflowHandle> {
+  const workflowType = typeof workflow === "string" ? workflow : workflow.name;
+  if (!workflowType) {
+    throw new Error("hanzo/tasks: startChild cannot resolve the child workflow type (anonymous function)");
+  }
+  return currentContext().startChild(workflowType, opts.args ?? [], {
+    workflowId: opts.workflowId,
+    taskQueue: opts.taskQueue,
+    searchAttributes: opts.typedSearchAttributes ?? opts.searchAttributes,
+  });
+}
+
+/**
+ * executeChild — ABANDON-child alias of startChild. The Hanzo Tasks child is
+ * detached, so there is no durable "await child result" path; this resolves on
+ * the child's START, like startChild. Provided for @temporalio API surface.
+ */
+export const executeChild = startChild;
 
 /** Deterministic-friendly UUID (delegates to crypto; document determinism). */
 export function uuid4(): string {
