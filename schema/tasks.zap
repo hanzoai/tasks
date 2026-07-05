@@ -83,6 +83,8 @@ struct StartWorkflowRequest
   retryPolicy RetryPolicy
   timeouts Timeouts
   memo Payloads
+  searchAttributes Payloads          # name→value, stored on the execution + visibility-queryable
+  workflowIdConflictPolicy Text      # USE_EXISTING | TERMINATE_EXISTING | FAIL (empty = none)
 
 struct StartWorkflowResponse
   runId Text
@@ -301,23 +303,30 @@ struct WaitActivityResultResponse
 #                                  `result` carries JSON-encoded fn return
 #   1 = failWorkflow            — workflow fn returned an error
 #                                  `failure` carries temporal.Encode bytes
-#   2 = scheduleActivity        — in-workflow ExecuteActivity call
-#                                  `activityTaskId` is the frontend-minted id
-#   3 = scheduleChildWorkflow   — in-workflow ExecuteChildWorkflow call
-#                                  `childWorkflowId` + `childRunId` identify
-#                                  the child; used by Phase-2 replay + linkage
+#   2 = scheduleActivity        — in-workflow ExecuteActivity call, seq-keyed
+#   3 = canceled                — worker ack of a CANCELING handshake
+#   4 = continueAsNew           — close this run (CONTINUED_AS_NEW) + start a
+#                                  successor; `input` carries the successor args,
+#                                  `workflowType`/`taskQueue` optionally override
+#   5 = startChildWorkflow      — detached (ABANDON) child, seq-keyed; `workflowType`
+#                                  = child type, `childWorkflowId` + `input` +
+#                                  `searchAttrs` identify/parameterize the child
 
 struct CommandsEnvelope
   version Int8             # 1 = v1
   commands List(Command)
 
 struct Command
-  kind Int8                # 0..3; see doc block above
-  result Bytes             # only for kind=0 completeWorkflow (JSON)
-  failure Bytes            # only for kind=1 failWorkflow (temporal.Encode shape)
-  activityTaskId Text      # only for kind=2 scheduleActivity (idempotency)
-  childWorkflowId Text     # only for kind=3 scheduleChildWorkflow
-  childRunId Text          # only for kind=3 scheduleChildWorkflow
+  kind Int8                # 0..5; see doc block above
+  result Bytes             # kind=0 completeWorkflow (JSON)
+  failure Bytes            # kind=1 failWorkflow (temporal.Encode) / kind=3 canceled reason
+  seq Int32                # kind=2 scheduleActivity / kind=5 startChildWorkflow
+  activityType Text        # kind=2 scheduleActivity
+  workflowType Text        # kind=4 continueAsNew (successor type) / kind=5 startChild (child type)
+  childWorkflowId Text     # kind=5 startChildWorkflow
+  input Bytes              # kind=2 activity args / kind=4 successor args / kind=5 child args
+  taskQueue Text           # kind=2/4/5
+  searchAttrs Payloads     # kind=5 startChildWorkflow (child visibility attrs)
 
 # ── Canonical RPC service ──────────────────────────────────────
 
