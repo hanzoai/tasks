@@ -25,4 +25,4 @@ export * from "./compat";
 
 // Low-level ZAP wire (advanced / embedding / testing).
 export * as zap from "./zap";
-export type { Transport } from "./zap/node";
+export type { Transport, TokenProvider } from "./zap/node";
