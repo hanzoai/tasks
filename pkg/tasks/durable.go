@@ -178,7 +178,7 @@ func (e *engine) scheduleWorkflowTask(ns, wf, run string) error {
 		return err
 	}
 	if e.disp != nil {
-		e.disp.EnqueueWorkflowTask(ns, wfe.TaskQueue, wf, run, wfe.Type.Name, hist)
+		e.disp.EnqueueWorkflowTask(e.orgID, ns, wfe.TaskQueue, wf, run, wfe.Type.Name, hist)
 	}
 	return nil
 }
@@ -250,7 +250,7 @@ func (e *engine) dispatchActivityAttempt(ns, wf, run string, rec *workflowActivi
 		}
 	}
 	if e.disp != nil {
-		e.disp.DispatchActivity(ns, rec.TaskQueue, wf, run, rec.Seq, rec.ActivityID, rec.ActivityType, rec.Input, rec.StartToCloseMs, rec.HeartbeatMs)
+		e.disp.DispatchActivity(e.orgID, ns, rec.TaskQueue, wf, run, rec.Seq, rec.ActivityID, rec.ActivityType, rec.Input, rec.StartToCloseMs, rec.HeartbeatMs)
 	}
 	return nil
 }
