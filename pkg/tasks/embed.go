@@ -11,12 +11,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hanzoai/tasks/pkg/auth"
@@ -55,13 +57,14 @@ type EmbedConfig struct {
 
 // Embedded is the handle to a running in-process Tasks server.
 type Embedded struct {
-	cfg    EmbedConfig
-	node   *zap.Node
-	engine *engine
-	stop   chan struct{}
-	repl   replication.Replicator
-	router routing.Router
-	migr   *migration.Coordinator
+	cfg     EmbedConfig
+	nodes   []*zap.Node
+	nodesMu sync.Mutex
+	engine  *engine
+	stop    chan struct{}
+	repl    replication.Replicator
+	router  routing.Router
+	migr    *migration.Coordinator
 }
 
 // Embed starts the Tasks server. Stop before exit.
@@ -124,13 +127,27 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		NoDiscovery: true,
 	})
 
-	// Wire dispatcher → node.Send for server-push delivery.
+	// e holds the engine + every ZAP listener. Build it before wiring push so the
+	// dispatcher's send closure can route delivery to whichever listener (the
+	// loopback one here, or a gated one added later by ServeGated) holds the
+	// subscribed worker's peer.
+	e := &Embedded{cfg: cfg, engine: en, repl: repl, router: router, migr: migr, nodes: []*zap.Node{node}}
+
+	// Wire dispatcher → node.Send for server-push delivery, routed to the listener
+	// that owns the worker's subscription.
 	en.disp.send = func(peerID string, opcode uint16, body []byte) error {
 		msg, err := wireSend(opcode, body)
 		if err != nil {
 			return err
 		}
-		return node.Send(context.Background(), peerID, msg)
+		for _, nd := range e.nodeSnapshot() {
+			for _, p := range nd.Peers() {
+				if p == peerID {
+					return nd.Send(context.Background(), peerID, msg)
+				}
+			}
+		}
+		return fmt.Errorf("tasks: no listener holds worker peer %s", peerID)
 	}
 
 	for op, h := range zapHandlers(en, cfg.Namespace, cfg.JWTValidator, cfg.RequireIdentity) {
@@ -153,8 +170,9 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 
 	stop := make(chan struct{})
 	go en.runScheduler(stop)
+	e.stop = stop
 
-	return &Embedded{cfg: cfg, node: node, engine: en, stop: stop, repl: repl, router: router, migr: migr}, nil
+	return e, nil
 }
 
 // wireSend builds a ZAP message for server-initiated push: the body is
@@ -172,12 +190,59 @@ func wireSend(opcode uint16, body []byte) (*zap.Message, error) {
 	return zap.Parse(frame)
 }
 
-// ZAPPort returns the bound ZAP port.
+// ZAPPort returns the bound ZAP port of the loopback listener.
 func (e *Embedded) ZAPPort() int {
 	if e == nil {
 		return 0
 	}
 	return e.cfg.ZAPPort
+}
+
+// nodeSnapshot returns a copy of the current listener set under the lock so the
+// server-push loop never races ServeGated appending a gated listener.
+func (e *Embedded) nodeSnapshot() []*zap.Node {
+	e.nodesMu.Lock()
+	defer e.nodesMu.Unlock()
+	out := make([]*zap.Node, len(e.nodes))
+	copy(out, e.nodes)
+	return out
+}
+
+// ServeGated starts a SECOND ZAP listener on 0.0.0.0:port that exposes the SAME
+// engine to out-of-process callers under mandatory identity gating: every request
+// must carry an auth_token that validates against validator (RequireIdentity), and
+// its engine view is org-scoped to the token owner (CONTRACT §6). The loopback
+// listener started by Embed is unchanged — in-process callers inside the host's
+// trust boundary keep dialing it ungated. Server-push to a worker is routed to the
+// listener that holds its subscription, so gated and loopback workers both receive
+// delivery. A nil validator is refused: exposing durable execution ungated across
+// the cluster is never correct. Call once, after Embed; Stop tears down every
+// listener.
+func (e *Embedded) ServeGated(ctx context.Context, port int, validator *auth.Validator) error {
+	if e == nil {
+		return errors.New("tasks: ServeGated on nil Embedded")
+	}
+	if validator == nil {
+		return errors.New("tasks: ServeGated requires a validator; refusing to expose durable execution ungated")
+	}
+	n := zap.NewNode(zap.NodeConfig{
+		NodeID:      "tasks-embed-gated",
+		ServiceType: "_tasks._tcp",
+		Port:        port,
+		Logger:      e.cfg.Logger,
+		NoDiscovery: true,
+	})
+	for op, h := range zapHandlers(e.engine, e.cfg.Namespace, validator, true) {
+		n.Handle(op, h)
+	}
+	if err := n.Start(); err != nil {
+		return fmt.Errorf("tasks: gated zap start on :%d: %w", port, err)
+	}
+	e.nodesMu.Lock()
+	e.nodes = append(e.nodes, n)
+	e.nodesMu.Unlock()
+	_ = ctx
+	return nil
 }
 
 // Stop shuts the server down. Idempotent.
@@ -189,9 +254,12 @@ func (e *Embedded) Stop(ctx context.Context) error {
 		close(e.stop)
 		e.stop = nil
 	}
-	if e.node != nil {
-		e.node.Stop()
-		e.node = nil
+	e.nodesMu.Lock()
+	nodes := e.nodes
+	e.nodes = nil
+	e.nodesMu.Unlock()
+	for _, nd := range nodes {
+		nd.Stop()
 	}
 	if e.engine != nil && e.engine.store != nil {
 		_ = e.engine.store.close()
@@ -511,10 +579,10 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 		writeOK(w, err, wf)
 	case len(sub) == 1 && sub[0] == "signal-with-start" && r.Method == http.MethodPost:
 		var req struct {
-			WorkflowId    string  `json:"workflowId"`
-			RunId         string  `json:"runId"`
-			WorkflowType  TypeRef `json:"workflowType"`
-			TaskQueue     struct {
+			WorkflowId   string  `json:"workflowId"`
+			RunId        string  `json:"runId"`
+			WorkflowType TypeRef `json:"workflowType"`
+			TaskQueue    struct {
 				Name string `json:"name"`
 			} `json:"taskQueue"`
 			Input         any    `json:"input"`
@@ -778,15 +846,15 @@ func settingsResponse() map[string]any {
 		"codecEndpointsEnabled":     envBool("TASKSD_CODEC_ENDPOINTS_ENABLED", false),
 		"multiClusterEnabled":       envBool("TASKSD_MULTI_CLUSTER_ENABLED", false),
 		"capabilities": map[string]any{
-			"signalAndQueryHeader":    true,
-			"internalErrorDifferentiation": true,
+			"signalAndQueryHeader":            true,
+			"internalErrorDifferentiation":    true,
 			"activityFailureIncludeHeartbeat": true,
-			"supportsSchedules":              true,
-			"encodedFailureAttributes":       true,
-			"upsertMemo":                     true,
-			"eagerWorkflowStart":             false,
-			"sdkMetadata":                    true,
-			"countGroupByExecutionStatus":    true,
+			"supportsSchedules":               true,
+			"encodedFailureAttributes":        true,
+			"upsertMemo":                      true,
+			"eagerWorkflowStart":              false,
+			"sdkMetadata":                     true,
+			"countGroupByExecutionStatus":     true,
 		},
 	}
 }
@@ -879,10 +947,10 @@ func taskQueueDetail(rows []WorkflowExecution, queue string) map[string]any {
 		}
 	}
 	return map[string]any{
-		"name":       queue,
-		"workflows":  matches,
-		"running":    running,
-		"total":      len(matches),
+		"name":      queue,
+		"workflows": matches,
+		"running":   running,
+		"total":     len(matches),
 	}
 }
 
@@ -1229,18 +1297,18 @@ func handleActivities(w http.ResponseWriter, r *http.Request, en *engine, ns str
 		writeOK(w, err, map[string]any{"activities": rows, "nextCursor": next})
 	case len(sub) == 0 && r.Method == http.MethodPost:
 		var req struct {
-			ActivityId             string            `json:"activityId"`
-			RunId                  string            `json:"runId"`
-			ActivityType           TypeRef           `json:"activityType"`
-			TaskQueue              string            `json:"taskQueue"`
-			Input                  any               `json:"input"`
-			RetryPolicy            *RetryPolicy      `json:"retryPolicy"`
-			ScheduleToCloseTimeout string            `json:"scheduleToCloseTimeout"`
-			ScheduleToStartTimeout string            `json:"scheduleToStartTimeout"`
-			StartToCloseTimeout    string            `json:"startToCloseTimeout"`
-			HeartbeatTimeout       string            `json:"heartbeatTimeout"`
-			Identity               string            `json:"identity"`
-			RequestId              string            `json:"requestId"`
+			ActivityId             string       `json:"activityId"`
+			RunId                  string       `json:"runId"`
+			ActivityType           TypeRef      `json:"activityType"`
+			TaskQueue              string       `json:"taskQueue"`
+			Input                  any          `json:"input"`
+			RetryPolicy            *RetryPolicy `json:"retryPolicy"`
+			ScheduleToCloseTimeout string       `json:"scheduleToCloseTimeout"`
+			ScheduleToStartTimeout string       `json:"scheduleToStartTimeout"`
+			StartToCloseTimeout    string       `json:"startToCloseTimeout"`
+			HeartbeatTimeout       string       `json:"heartbeatTimeout"`
+			Identity               string       `json:"identity"`
+			RequestId              string       `json:"requestId"`
 		}
 		if err := decode(r, &req); err != nil {
 			writeErr(w, 400, err.Error())
@@ -1571,6 +1639,15 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 			if b, _ := json.Marshal(req); b != nil {
 				_ = json.Unmarshal(b, &ns)
 			}
+			// The SDK client sends the flat registerNamespaceWire shape
+			// ({"name","description","owner_email"}); map it onto NamespaceInfo
+			// when the nested {"namespaceInfo":{...}} form is absent so an
+			// org-scoped caller can register the namespace ExecuteWorkflow requires.
+			if ns.NamespaceInfo.Name == "" {
+				ns.NamespaceInfo.Name = strOr(req, "name", "")
+				ns.NamespaceInfo.Description = strOr(req, "description", "")
+				ns.NamespaceInfo.OwnerEmail = strOr(req, "owner_email", "")
+			}
 			if err := en.RegisterNamespace(ns); err != nil {
 				return nil, 400, err.Error()
 			}
@@ -1884,6 +1961,10 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
+		// Apply on the org that owns the run: org-scoped runs live in a prefixed
+		// store partition rootEn cannot see. t.orgID == "" (unscoped/loopback)
+		// makes WithOrg a no-op, so the in-process path is unchanged.
+		oe := en.WithOrg(t.orgID)
 		// Apply the decider's command batch. kind=2 (scheduleActivity)
 		// carries the deterministic seq + activity spec — this is where a
 		// workflow-driven activity enters the durable, event-sourced path.
@@ -1905,18 +1986,18 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 		if len(commands) > 0 {
 			_ = json.Unmarshal(commands, &env)
 		}
-		unlock := en.lockRun(t.ns, t.workflowID, t.runID)
+		unlock := oe.lockRun(t.ns, t.workflowID, t.runID)
 		defer unlock()
 		for _, c := range env.Commands {
 			switch c.Kind {
 			case 0: // complete
-				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_COMPLETED", "workflow.completed", "WORKFLOW_EXECUTION_COMPLETED", map[string]any{"result": string(c.Result)})
+				_, _ = oe.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_COMPLETED", "workflow.completed", "WORKFLOW_EXECUTION_COMPLETED", map[string]any{"result": string(c.Result)})
 			case 1: // fail
-				_, _ = en.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_FAILED", "workflow.failed", "WORKFLOW_EXECUTION_FAILED", map[string]any{"failure": string(c.Failure)})
+				_, _ = oe.terminalTransition(t.ns, t.workflowID, t.runID, "WORKFLOW_EXECUTION_STATUS_FAILED", "workflow.failed", "WORKFLOW_EXECUTION_FAILED", map[string]any{"failure": string(c.Failure)})
 			case 2: // scheduleActivity — idempotent per (run, seq)
-				_ = en.applyScheduleActivity(t.ns, t.workflowID, t.runID, c.Seq, c.ActivityType, c.Input, c.TaskQueue, c.StartToCloseMs, c.HeartbeatMs, c.RetryPolicy)
+				_ = oe.applyScheduleActivity(t.ns, t.workflowID, t.runID, c.Seq, c.ActivityType, c.Input, c.TaskQueue, c.StartToCloseMs, c.HeartbeatMs, c.RetryPolicy)
 			case 3: // canceled — worker ack of a CANCELING handshake
-				_, _ = en.AckCanceled(t.ns, t.workflowID, t.runID, string(c.Failure), "")
+				_, _ = oe.AckCanceled(t.ns, t.workflowID, t.runID, string(c.Failure), "")
 			}
 		}
 		return objectAck(0, "", 200)
@@ -1930,7 +2011,7 @@ func respondActivityCompletedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
+		if err := en.WithOrg(pt.orgID).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)
@@ -1944,7 +2025,7 @@ func respondActivityFailedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
+		if err := en.WithOrg(pt.orgID).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)

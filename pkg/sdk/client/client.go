@@ -245,7 +245,7 @@ func Dial(opts Options) (Client, error) {
 		if opts.HostPort == "" {
 			return nil, errors.New("hanzo/tasks/client: Options.HostPort is required when no Transport is injected")
 		}
-		zt, err := newZAPTransport(opts.HostPort, opts.DialTimeout, id)
+		zt, err := newZAPTransport(opts.HostPort, opts.DialTimeout, id, opts.Token)
 		if err != nil {
 			return nil, err
 		}
@@ -354,11 +354,12 @@ func decodeEnvelope(frame []byte) (status uint32, detail string, body []byte, er
 
 // zapTransport is the production Transport backed by luxfi/zap.
 type zapTransport struct {
-	node *zap.Node
-	peer string
+	node  *zap.Node
+	peer  string
+	token TokenSource
 }
 
-func newZAPTransport(addr string, dialTimeout time.Duration, nodeID string) (*zapTransport, error) {
+func newZAPTransport(addr string, dialTimeout time.Duration, nodeID string, token TokenSource) (*zapTransport, error) {
 	if nodeID == "" {
 		nodeID = "hanzo-tasks-sdk"
 	}
@@ -386,7 +387,7 @@ func newZAPTransport(addr string, dialTimeout time.Duration, nodeID string) (*za
 		peer = peers[0]
 	}
 	_ = dialTimeout // reserved for future HandshakeDeadline wiring
-	return &zapTransport{node: node, peer: peer}, nil
+	return &zapTransport{node: node, peer: peer, token: token}, nil
 }
 
 // zapMagic is the ZAP frame magic ("ZAP\x00"). Used to detect whether
@@ -395,7 +396,45 @@ func newZAPTransport(addr string, dialTimeout time.Duration, nodeID string) (*za
 // (user-facing RPC path).
 var zapMagic = []byte{'Z', 'A', 'P', 0}
 
+// isFramedZAP reports whether body is already a complete ZAP frame — the worker
+// respond/heartbeat path emits pre-framed binary objects, capability-gated by
+// their HMAC task_token, so they carry no auth_token.
+func isFramedZAP(body []byte) bool {
+	return len(body) >= len(zapMagic) && string(body[:len(zapMagic)]) == string(zapMagic)
+}
+
+// injectAuthToken merges auth_token into a JSON-object request body so an
+// identity-gated frontend's scope() can validate the caller. Every JSON-body
+// opcode (client lifecycle RPCs + worker Subscribe) flows through here; binary
+// respond frames are short-circuited by isFramedZAP in Call.
+func injectAuthToken(jsonBody []byte, tok string) ([]byte, error) {
+	m := map[string]json.RawMessage{}
+	if len(jsonBody) > 0 {
+		if err := json.Unmarshal(jsonBody, &m); err != nil {
+			return nil, fmt.Errorf("hanzo/tasks: cannot attach auth_token to non-object body: %w", err)
+		}
+	}
+	tb, err := json.Marshal(tok)
+	if err != nil {
+		return nil, err
+	}
+	m["auth_token"] = tb
+	return json.Marshal(m)
+}
+
 func (t *zapTransport) Call(ctx context.Context, opcode uint16, body []byte) ([]byte, error) {
+	if t.token != nil && !isFramedZAP(body) {
+		tok, terr := t.token(ctx)
+		if terr != nil {
+			return nil, fmt.Errorf("hanzo/tasks: obtain auth token: %w", terr)
+		}
+		if tok != "" {
+			body, terr = injectAuthToken(body, tok)
+			if terr != nil {
+				return nil, terr
+			}
+		}
+	}
 	frame, err := FrameBody(opcode, body)
 	if err != nil {
 		return nil, err
