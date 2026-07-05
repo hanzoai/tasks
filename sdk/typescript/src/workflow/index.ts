@@ -32,6 +32,8 @@ export interface ProxyActivityOptions {
   scheduleToCloseTimeout?: Duration;
   heartbeatTimeout?: Duration;
   taskQueue?: string;
+  /** @temporalio source-compat: accepted, no-op on the Hanzo Tasks wire. */
+  cancellationType?: string;
   retry?: {
     initialInterval?: Duration;
     backoffCoefficient?: number;
@@ -63,9 +65,11 @@ function normalizeActivityOptions(opts: ProxyActivityOptions): ActivityOptions {
 /**
  * Create typed activity stubs. Calling a stub schedules a durable activity
  * and returns a Promise that resolves with its result (or rejects with a
- * TaskError). `A` is an interface of activity functions.
+ * TaskError). `A` is the activity interface OR class type — the constraint is
+ * intentionally open (like @temporalio) so `proxyActivities<SomeActivityClass>()`
+ * type-checks; each accessed member is proxied to a durable activity call.
  */
-export function proxyActivities<A extends Record<string, (...args: any[]) => any>>(
+export function proxyActivities<A = Record<string, (...args: any[]) => any>>(
   opts: ProxyActivityOptions,
 ): A {
   const normalized = normalizeActivityOptions(opts);
