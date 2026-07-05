@@ -12,11 +12,11 @@
 //   @temporalio/workflow proxyActivities, defineSignal, setHandler, condition,
 //                        sleep, continueAsNew, workflowInfo  (see ./workflow)
 
-import { ZapNode, type Transport } from "./zap/node";
+import { ZapNode, type Transport, type TokenProvider } from "./zap/node";
 import { TasksClient } from "./client/client";
 import { WorkflowHandle } from "./client/handle";
 import { toMs, type Duration } from "./common/duration";
-import { TaskError, FailureCode } from "./common/failure";
+import { TypedSearchAttributes, toSearchAttributeRecord } from "./common/search-attributes";
 import type { RetryPolicy, StartWorkflowOptions } from "./client/options";
 
 function splitHostPort(addr: string): [string, number] {
@@ -32,9 +32,9 @@ export class Connection {
     readonly address: string,
   ) {}
 
-  static async connect(opts: { address: string; identity?: string }): Promise<Connection> {
+  static async connect(opts: { address: string; identity?: string; token?: TokenProvider }): Promise<Connection> {
     const [host, port] = splitHostPort(opts.address);
-    const node = new ZapNode({ host, port, nodeId: opts.identity });
+    const node = new ZapNode({ host, port, nodeId: opts.identity, token: opts.token });
     await node.connect();
     return new Connection(node, opts.address);
   }
@@ -66,6 +66,10 @@ export interface WorkflowStartOptions {
   cronSchedule?: string;
   memo?: Record<string, unknown>;
   searchAttributes?: Record<string, unknown>;
+  /** Typed search attributes (@temporalio TypedSearchAttributes) — flattened to the wire record. */
+  typedSearchAttributes?: TypedSearchAttributes | Record<string, unknown>;
+  /** Reuse policy for an existing run under workflowId: USE_EXISTING | TERMINATE_EXISTING | FAIL. */
+  workflowIdConflictPolicy?: string;
 }
 
 function toRetryPolicy(r?: CompatRetry): RetryPolicy | undefined {
@@ -80,6 +84,10 @@ function toRetryPolicy(r?: CompatRetry): RetryPolicy | undefined {
 }
 
 function toStartOptions(o: WorkflowStartOptions): StartWorkflowOptions {
+  // typedSearchAttributes wins when both are present; both flatten to a
+  // name→value record on the wire.
+  const searchAttributes =
+    toSearchAttributeRecord(o.typedSearchAttributes) ?? o.searchAttributes;
   return {
     taskQueue: o.taskQueue,
     workflowId: o.workflowId,
@@ -90,7 +98,8 @@ function toStartOptions(o: WorkflowStartOptions): StartWorkflowOptions {
     retryPolicy: toRetryPolicy(o.retry),
     cronSchedule: o.cronSchedule,
     memo: o.memo,
-    searchAttributes: o.searchAttributes,
+    searchAttributes,
+    workflowIdConflictPolicy: o.workflowIdConflictPolicy,
   };
 }
 
@@ -156,28 +165,6 @@ export class Client {
 // WorkerOptions already accepts `connection`, `address`, or `transport`, so
 // `Worker.create({ connection, namespace, taskQueue, workflows, activities })`
 // works exactly like @temporalio/worker.
-
-/** Mirrors @temporalio/common's ApplicationFailure. */
-export class ApplicationFailure extends TaskError {
-  static create(opts: {
-    message: string;
-    type?: string;
-    nonRetryable?: boolean;
-    details?: unknown[];
-  }): ApplicationFailure {
-    return new ApplicationFailure(
-      opts.message,
-      opts.type ?? FailureCode.Application,
-      opts.nonRetryable ?? false,
-      opts.details ?? [],
-    );
-  }
-
-  static nonRetryable(message: string, type?: string, ...details: unknown[]): ApplicationFailure {
-    return new ApplicationFailure(message, type ?? FailureCode.Application, true, details);
-  }
-
-  static retryable(message: string, type?: string, ...details: unknown[]): ApplicationFailure {
-    return new ApplicationFailure(message, type ?? FailureCode.Application, false, details);
-  }
-}
+//
+// ApplicationFailure + ActivityFailure are the canonical @temporalio/common
+// error types; they live in ./common/failure and are re-exported by index.ts.

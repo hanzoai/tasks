@@ -68,6 +68,8 @@ export class MockTasksServer {
   private readonly sockets = new Set<net.Socket>();
   /** Records every RPC opcode the server received (for assertions). */
   readonly seenOpcodes: number[] = [];
+  /** auth_token seen on each JSON-body RPC (undefined when absent). */
+  readonly seenAuthTokens: Array<string | undefined> = [];
 
   constructor(private readonly opts: MockOptions = {}) {
     this.server = net.createServer((sock) => this.onConnection(sock));
@@ -141,6 +143,15 @@ export class MockTasksServer {
     }
     const opcode = msg.opcode();
     this.seenOpcodes.push(opcode);
+    try {
+      const bodyBuf = envelopeBody(frame);
+      if (bodyBuf.length > 0 && bodyBuf[0] === 0x7b /* { */) {
+        const obj = JSON.parse(bodyBuf.toString("utf8"));
+        this.seenAuthTokens.push(typeof obj?.auth_token === "string" ? obj.auth_token : undefined);
+      }
+    } catch {
+      /* non-JSON body (field-object frame) — no auth_token expected */
+    }
     const response = this.dispatch(sock, opcode, frame);
     this.writeCorrelated(sock, reqId, REQ_FLAG_RESP, response);
   }

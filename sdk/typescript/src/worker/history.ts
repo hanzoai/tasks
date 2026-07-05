@@ -18,6 +18,8 @@ export const EventType = {
   ActivityCompleted: "ACTIVITY_TASK_COMPLETED",
   ActivityFailed: "ACTIVITY_TASK_FAILED",
   WorkflowSignaled: "WORKFLOW_EXECUTION_SIGNALED",
+  WorkflowContinuedAsNew: "WORKFLOW_EXECUTION_CONTINUED_AS_NEW",
+  ChildWorkflowStarted: "CHILD_WORKFLOW_EXECUTION_STARTED",
 } as const;
 
 export interface HistoryEvent {
@@ -31,6 +33,9 @@ export const CommandKind = {
   CompleteWorkflow: 0,
   FailWorkflow: 1,
   ScheduleActivity: 2,
+  // 3 = canceled (worker cancel-ack) — not emitted by the TS decider.
+  ContinueAsNew: 4,
+  StartChildWorkflow: 5,
 } as const;
 
 export interface RawCommand {
@@ -39,8 +44,11 @@ export interface RawCommand {
   failure?: string; // base64
   seq?: number;
   activityType?: string;
+  workflowType?: string; // kind=4 continueAsNew (successor type) / kind=5 startChild (child type)
+  childWorkflowId?: string; // kind=5 startChild
   input?: string; // base64
   taskQueue?: string;
+  searchAttrs?: Record<string, unknown>; // kind=5 startChild
   startToCloseMs?: number;
   heartbeatMs?: number;
   retryPolicy?: {
@@ -117,6 +125,38 @@ export function scheduleActivityCommand(spec: ScheduleActivitySpec): RawCommand 
     startToCloseMs: spec.startToCloseMs || undefined,
     heartbeatMs: spec.heartbeatMs || undefined,
     retryPolicy: spec.retryPolicy,
+  };
+}
+
+/** continueAsNew command (kind=4): carries the successor run's arguments. */
+export function continueAsNewCommand(args: unknown[], workflowType?: string, taskQueue?: string): RawCommand {
+  return {
+    kind: CommandKind.ContinueAsNew,
+    input: Buffer.from(JSON.stringify(args ?? []), "utf8").toString("base64"),
+    workflowType: workflowType || undefined,
+    taskQueue: taskQueue || undefined,
+  };
+}
+
+export interface StartChildSpec {
+  seq: number;
+  workflowType: string;
+  workflowId?: string;
+  args: unknown[];
+  taskQueue?: string;
+  searchAttributes?: Record<string, unknown>;
+}
+
+/** startChild command (kind=5): a detached (ABANDON) child, seq-keyed. */
+export function startChildCommand(spec: StartChildSpec): RawCommand {
+  return {
+    kind: CommandKind.StartChildWorkflow,
+    seq: spec.seq,
+    workflowType: spec.workflowType,
+    childWorkflowId: spec.workflowId || undefined,
+    input: Buffer.from(JSON.stringify(spec.args ?? []), "utf8").toString("base64"),
+    taskQueue: spec.taskQueue || undefined,
+    searchAttrs: spec.searchAttributes,
   };
 }
 
