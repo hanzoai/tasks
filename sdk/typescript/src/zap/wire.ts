@@ -21,7 +21,14 @@
 // points at the payload appended after the fixed section.
 
 export const ZAP_MAGIC = Uint8Array.of(0x5a, 0x41, 0x50, 0x00); // "ZAP\0"
+// Emit version 1 — accepted by every luxfi/zap (v0.2.0 and v1.2.0's
+// backward-compatible Parse). Accept BOTH 1 and 2 on read: luxfi/zap v1.2.0's
+// NewBuilder stamps version 2 in the header, but the generic object encoding
+// (magic, version, flags, rootOffset, size + the field table) is byte-identical
+// to v1 — only the platformvm TxKind schema, which this SDK never uses, differs.
+// Cloud's embedded engine links zap v1.2.0 (MVS) and therefore emits version 2.
 export const ZAP_VERSION = 1;
+export const ZAP_VERSIONS_ACCEPTED = new Set([1, 2]);
 export const HEADER_SIZE = 16;
 const ALIGNMENT = 8;
 
@@ -199,7 +206,7 @@ export class ZapMessage {
       throw new Error("zap: invalid magic");
     }
     const version = data.readUInt16LE(4);
-    if (version !== ZAP_VERSION) throw new Error(`zap: unsupported version ${version}`);
+    if (!ZAP_VERSIONS_ACCEPTED.has(version)) throw new Error(`zap: unsupported version ${version}`);
     const size = data.readUInt32LE(12);
     if (size > data.length) throw new Error("zap: declared size exceeds buffer");
     return new ZapMessage(data.subarray(0, size));
