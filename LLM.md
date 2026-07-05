@@ -335,14 +335,44 @@ persisted in the `history` table alongside the existing `kv` records.
 
 ### Phasing (what ships when)
 
-- **Phase 2a (first coherent slice, this lane):** durable activity core.
-  Workflow-driven activity lifecycle written to the workflow's history;
-  exactly-once dispatch keyed by `(run, seq)`; server-side activity
-  retry+backoff per RetryPolicy; crash-recovery re-dispatch of in-flight
-  activities; history-backed `ExecuteActivity` replay (recorded result
-  returned on re-run) + workflow-task-driven advance. Tests (`-race`):
-  determinism/replay, retry+backoff timing, exactly-once dispatch,
-  crash-recovery (kill mid-activity → resume, no double-run).
+- **Phase 2a — LANDED (`feat/tasks-durable-engine`).** Durable activity
+  core, event-sourced, `go test -race ./pkg/tasks/... ./pkg/sdk/...` green.
+  The coroutine-push activity path is gone — one way, replay only.
+  - Server (`pkg/tasks/durable.go`): seq-keyed activity records
+    `wfact/<ns>/<wf>/<run>/<seq>` are the exactly-once anchor;
+    `applyScheduleActivity` is idempotent per `(run, seq)` (writes
+    `ACTIVITY_TASK_SCHEDULED`, dispatches once); `completeWorkflowActivity`
+    applies the terminal outcome and schedules a new workflow task, or
+    retries the same `(run, seq)` after `min(MaximumInterval,
+    InitialInterval·Backoff^(attempt-1))` per RetryPolicy (finite default
+    bound `defaultMaxActivityAttempts=10`; `MaximumAttempts=1` disables).
+    A per-run `keyedMutex` (`lockRun`) makes schedule/complete atomic above
+    the store's single writer. `Recover()` (called from `Embed`) rebuilds
+    in-flight dispatch from the store at boot.
+  - Workflow tasks now carry the run's full history (`wfh/` log serialized);
+    the dispatcher delivery field is `history` (was `input`).
+    `dispatch.go`: `DispatchActivity` (seq-bound token) + `ResolveActivity
+    Token`; the old push-result mechanism (`workflowPeer`, `pendingActivity`,
+    `OpcodeDeliverActivityResult`, `OnActivityResult`, worker
+    `pendingActivities`) and the mid-episode `ScheduleActivity` RPC (0x006B)
+    are removed.
+  - Worker (`pkg/sdk/worker`): `workerEnv` is a replay decider —
+    `ExecuteActivity` resolves seq `k` from history (recorded result → no
+    re-dispatch; recorded failure → recorded error; else emit
+    `ScheduleActivity{seq=k}` and end the episode via `blockedFuture`).
+    `commandsEnvelope` kind=2 carries `{seq,type,input,taskQueue,timeouts,
+    retryPolicy}`.
+  - Tests (`-race`): worker replay determinism (`TestReplay_*`), exactly-once
+    dispatch + concurrent (`TestDurable_ExactlyOnce*`), retry+backoff timing
+    and exhaustion (`TestDurable_ActivityRetry*`), crash-recovery
+    (`TestDurable_CrashRecovery_ReachesCompleted` + white-box
+    `TestDurable_Recover_SkipsTerminal_RedispatchesInflight`), and the full
+    e2e (`TestE2E_WorkflowExecutesActivityAndCompletes`, exactly-once).
+  - Known limits (deferred): `Recover()` scans the engine's own org scope
+    (embedded/root); multi-org recovery iterates orgs with the multi-replica
+    lease (Phase 2c). Retry timers are in-memory (`time.AfterFunc`) — a crash
+    before fire is covered by boot recovery re-dispatch (durable timers are
+    Phase 2b).
 - **Phase 2b:** durable timers (`StartTimer`/`TimerFired` + timer wheel),
   signals/cancel folded into replay, child workflows (retire the 0x006D
   501), query consistency against replayed state.
