@@ -38,7 +38,7 @@ go build ./cmd/tasksd/
 
 ### Live at tasks.hanzo.ai
 - **Cluster**: hanzo-k8s (do-sfo3-hanzo-k8s), namespace `hanzo`
-- **Server**: `ghcr.io/hanzoai/tasks:latest` -- gRPC on 7233, HTTP on 7234
+- **Server**: `ghcr.io/hanzoai/tasks:latest` -- ZAP on 9999, HTTP on 7243
 - **UI**: `ghcr.io/hanzoai/tasks-ui:latest` -- port 8080
 - **Database**: PostgreSQL at `sql.hanzo.svc:5432` (databases: `tasks`, `tasks_visibility`)
 - **Secrets**: KMS-managed via `tasks-secrets` (POSTGRES_PASSWORD, TASKS_AUTH_SECRET, IAM_CLIENT_SECRET)
@@ -47,7 +47,7 @@ go build ./cmd/tasksd/
 | URL | Service | Protocol |
 |-----|---------|----------|
 | tasks.hanzo.ai | tasks-ui (Web UI) | HTTPS |
-| tasks-api.hanzo.ai | tasks (gRPC) | gRPC+TLS |
+| tasks-api.hanzo.ai | tasks (ZAP) | ZAP+TLS |
 
 ### IAM Integration
 - **Provider**: hanzo.id (OIDC)
@@ -62,7 +62,7 @@ go build ./cmd/tasksd/
 1. **UI (OIDC login)**: Tasks UI (`tasks-ui` container) handles the browser OIDC flow.
    User visits tasks.hanzo.ai, gets redirected to hanzo.id for login, callback returns
    JWT tokens. Configured via `TASKS_AUTH_*` env vars on the tasks-ui container.
-2. **Server (JWT validation)**: Tasks server validates the JWT bearer token on every gRPC/HTTP
+2. **Server (JWT validation)**: Tasks server validates the JWT bearer token on every ZAP/HTTP
    request using JWKS keys fetched from hanzo.id. Configured via the wire-protocol env vars
    below (legacy names preserved for upstream config compatibility). These env vars feed into
    the embedded config template at `common/config/config_template_embedded.yaml` ->
