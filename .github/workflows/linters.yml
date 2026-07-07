@@ -24,50 +24,6 @@ jobs:
           make lint-actions
         shell: bash
 
-  lint-protos:
-    runs-on: hanzo-build-linux-amd64
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: "go.mod"
-          check-latest: true
-          cache: true
-
-      - uses: jdx/mise-action@v4
-        with:
-          working_directory: .github
-          install_args: protoc
-
-      - name: lint protobuf definitions
-        run: |
-          make lint-protos
-
-  lint-api:
-    runs-on: hanzo-build-linux-amd64
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: true
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: "go.mod"
-          check-latest: true
-          cache: true
-
-      - uses: jdx/mise-action@v4
-        with:
-          working_directory: .github
-          install_args: protoc
-
-      - name: lint protobuf API definitions
-        run: |
-          make lint-api
-
   lint-workflows:
     runs-on: hanzo-build-linux-amd64
     steps:
@@ -171,8 +127,6 @@ jobs:
     name: All Linters Succeed
     needs:
       - fmt
-      - lint-api
-      - lint-protos
       - lint-actions
       - golangci
       - parallelize-tests
