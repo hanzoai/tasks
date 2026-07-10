@@ -38,7 +38,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/hanzoai/sqlite"
 
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
 )

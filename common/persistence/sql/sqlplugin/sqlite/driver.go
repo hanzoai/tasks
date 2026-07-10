@@ -1,35 +1,28 @@
 package sqlite
 
 import (
-	"errors"
 	"regexp"
 
-	"modernc.org/sqlite"
-	sqlite3 "modernc.org/sqlite/lib"
+	// hanzosqlite is the ONE Hanzo SQLite driver (registers "sqlite" under both
+	// build tags; !cgo backend IS modernc, cgo is mattn+SQLCipher). Its
+	// backend-neutral constraint classifiers replace the direct
+	// modernc.org/sqlite/lib error-code checks so no file imports modernc.
+	hanzosqlite "github.com/hanzoai/sqlite"
 )
 
 const (
 	goSQLDriverName       = "sqlite"
-	sqlConstraintCodes    = sqlite3.SQLITE_CONSTRAINT | sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY | sqlite3.SQLITE_CONSTRAINT_UNIQUE
 	sqlTableExistsPattern = "SQL logic error: table .* already exists \\(1\\)"
 )
 
 var sqlTableExistsRegex = regexp.MustCompile(sqlTableExistsPattern)
 
+// IsDupEntryError reports a duplicate-key insert — a UNIQUE or PRIMARY KEY
+// constraint violation — via the driver's backend-neutral classifier.
 func (*db) IsDupEntryError(err error) bool {
-	var sqlErr *sqlite.Error
-	if errors.As(err, &sqlErr) {
-		return sqlErr.Code()&sqlConstraintCodes != 0
-	}
-
-	return false
+	return hanzosqlite.IsConstraintUnique(err) || hanzosqlite.IsConstraintPrimaryKey(err)
 }
 
 func isTableExistsError(err error) bool {
-	var sqlErr *sqlite.Error
-	if errors.As(err, &sqlErr) {
-		return sqlTableExistsRegex.MatchString(sqlErr.Error())
-	}
-
-	return false
+	return err != nil && sqlTableExistsRegex.MatchString(err.Error())
 }
