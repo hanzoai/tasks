@@ -147,6 +147,31 @@ func (m *Manager) Get(ctx context.Context, org, ns string) (*Shard, error) {
 	return s, nil
 }
 
+// ListOrgs enumerates every org that owns at least one shard directory,
+// mapping the sentinel dir back to the unscoped org "". Used by the cron
+// sweeper, which must see EVERY org's schedules from the root engine.
+func (m *Manager) ListOrgs(ctx context.Context) ([]string, error) {
+	entries, err := os.ReadDir(m.rootDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == SentinelOrg {
+			name = ""
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
 // ListShards enumerates every namespace shard under org. Used by
 // cross-namespace operations like ListNamespaces().
 func (m *Manager) ListShards(ctx context.Context, org string) ([]*Shard, error) {
