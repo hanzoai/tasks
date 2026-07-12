@@ -23,11 +23,14 @@ import (
 
 // IAMClaims is the subset of Casdoor/hanzo.id claims tasksd cares about.
 // `owner` is the org slug (X-Org-Id), `sub` is the user id (X-User-Id),
-// `email` is the user email (X-User-Email).
+// `email` is the user email (X-User-Email), `project` is the validated
+// project slug (X-Project-Id) — the third leg of the org/project/user
+// identity model (empty for tokens without a project scope).
 type IAMClaims struct {
 	jwt.Claims
 
 	Owner             string `json:"owner"`
+	Project           string `json:"project"`
 	Email             string `json:"email"`
 	PreferredUsername string `json:"preferred_username"`
 	Name              string `json:"name"`
