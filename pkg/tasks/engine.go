@@ -80,9 +80,12 @@ func newEngine(s *store) *engine {
 	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex()}
 }
 
-// WithOrg returns an engine view scoped to orgID. Reads and writes go
-// through a store wrapper that prefixes every key with "org:<id>:".
-// orgID == "" returns e unchanged (legacy embedded-use behavior).
+// WithOrg returns an engine view scoped to orgID. Reads and writes route
+// to the org's own per-namespace shard directory (store.withOrg); the
+// dispatcher/broker/worker registry stay SHARED, so org-scoped workflows
+// dispatch to whatever worker is subscribed on (ns, queue) regardless of
+// which view enqueued them. orgID == "" returns e unchanged (the root/
+// embedded view).
 func (e *engine) WithOrg(orgID string) *engine {
 	if orgID == "" {
 		return e
@@ -1578,42 +1581,55 @@ func (e *engine) sweepLeases() {
 
 func (e *engine) sweepSchedules() error {
 	now := time.Now().UTC()
-	return e.store.list("sc/", func(_ string, body []byte) error {
+	// Phase 1: COLLECT due schedules. Firing inside the List callback would
+	// nest a query on the same single-connection SQLite shard and deadlock,
+	// so the scan only gathers.
+	type due struct {
+		org string
+		s   Schedule
+	}
+	var dues []due
+	if err := e.store.listAllOrgs("sc/", func(org, _ string, body []byte) error {
 		var s Schedule
 		if err := unmarshal(body, &s); err != nil {
-			return err
+			return nil // skip one corrupt record, never poison the sweep
 		}
 		if s.State.Paused {
 			return nil
 		}
 		next, ok := nextScheduleFire(s, anchorTime(s, now))
-		if !ok {
+		if !ok || next.After(now) {
 			return nil
 		}
-		// Fire any pending actions whose next-time is in the past.
-		fired := false
-		for !next.After(now) {
-			if _, err := e.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input); err != nil {
-				return err
-			}
-			s.Info.ActionCount++
-			s.Info.UpdateTime = next.UTC().Format(time.RFC3339)
-			fired = true
-			n2, ok2 := nextScheduleFire(s, next)
-			if !ok2 {
-				next = time.Time{}
-				break
-			}
-			next = n2
+		dues = append(dues, due{org: org, s: s})
+		return nil
+	}); err != nil {
+		return err
+	}
+	// Phase 2: fire AT MOST ONE action per schedule per sweep and re-anchor
+	// at NOW. A schedule that missed many ticks (engine downtime, a long-
+	// paused window) must not storm its whole backlog on recovery — cron
+	// semantics are "run on schedule", not "replay history". Sub-5s specs
+	// quantize to the sweep cadence.
+	for _, d := range dues {
+		s := d.s
+		oe := e.WithOrg(d.org)
+		if _, err := oe.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input); err != nil {
+			// Per-schedule isolation: a broken action (e.g. unregistered
+			// namespace) skips this entry and the sweep continues; it is
+			// re-attempted next sweep.
+			continue
 		}
-		if !fired && s.Info.NextActionTime == next.UTC().Format(time.RFC3339) {
-			return nil
+		s.Info.ActionCount++
+		s.Info.UpdateTime = now.Format(time.RFC3339)
+		if n2, ok2 := nextScheduleFire(s, now); ok2 {
+			s.Info.NextActionTime = n2.UTC().Format(time.RFC3339)
 		}
-		if !next.IsZero() {
-			s.Info.NextActionTime = next.UTC().Format(time.RFC3339)
+		if err := oe.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s); err != nil {
+			return err
 		}
-		return e.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s)
-	})
+	}
+	return nil
 }
 
 // anchorTime returns the timestamp from which the next cron firing
@@ -1637,8 +1653,10 @@ func anchorTime(s Schedule, fallback time.Time) time.Time {
 var cronParser = cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
 // nextScheduleFire computes the next fire time across all configured
-// cron strings, returning the earliest. (false, _) means the schedule
-// has no valid spec.
+// cron strings AND interval specs, returning the earliest. (false, _)
+// means the schedule has no valid spec. An interval fires one interval
+// after the anchor (the last fire / create time), so re-anchoring on
+// each fire yields steady every-N cadence.
 func nextScheduleFire(s Schedule, after time.Time) (time.Time, bool) {
 	var earliest time.Time
 	for _, cs := range s.Spec.CronString {
@@ -1647,6 +1665,16 @@ func nextScheduleFire(s Schedule, after time.Time) (time.Time, bool) {
 			continue
 		}
 		t := sched.Next(after)
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+	}
+	for _, iv := range s.Spec.Interval {
+		d, err := time.ParseDuration(iv.Interval)
+		if err != nil || d <= 0 {
+			continue
+		}
+		t := after.Add(d)
 		if earliest.IsZero() || t.Before(earliest) {
 			earliest = t
 		}
