@@ -1,0 +1,21 @@
+# Canonical CI/CD config for hanzoai/tasks — read by both the hanzoai/ci
+# reusable workflow (.github/workflows/cicd.yml) and platform.hanzo.ai
+# (webhook → BuildScheduler → arcd → operator rollout). One file, one way.
+#
+# The image is the root Dockerfile: native ZAP-only tasksd (no CGO, no gRPC,
+# no protobuf) with the admin SPA embedded from ui/dist (checked in;
+# scripts/sync-admin-ui.sh refreshes it).
+images:
+  - name: tasks
+    context: .
+    dockerfile: Dockerfile
+    repo: ghcr.io/hanzoai/tasks
+
+# The engine + SDK suites are the repo's real gate (event-sourced durable
+# core, schedule sweeper, dispatch, replay). -race matches how the suites
+# are developed and how regressions have actually been caught.
+test:
+  - name: go-test
+    run: go test -race ./pkg/... ./cmd/... ./common/...
+  - name: go-vet
+    run: go vet ./pkg/... ./cmd/... ./common/...
