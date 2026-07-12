@@ -20,6 +20,7 @@ import (
 
 const (
 	HeaderOrgID     = "X-Org-Id"
+	HeaderProjectID = "X-Project-Id"
 	HeaderUserID    = "X-User-Id"
 	HeaderUserEmail = "X-User-Email"
 
@@ -30,6 +31,7 @@ type ctxKey int
 
 const (
 	ctxKeyOrgID ctxKey = iota
+	ctxKeyProjectID
 	ctxKeyUserID
 	ctxKeyUserEmail
 )
@@ -37,7 +39,7 @@ const (
 // mintedHeaders are the identity headers tasksd considers authoritative
 // only when minted from a validated JWT. They are stripped from every
 // inbound request before any downstream code sees them.
-var mintedHeaders = []string{HeaderOrgID, HeaderUserID, HeaderUserEmail}
+var mintedHeaders = []string{HeaderOrgID, HeaderProjectID, HeaderUserID, HeaderUserEmail}
 
 // stripIdentityHeaders deletes every minted identity header. Called
 // unconditionally on every request — the strip-list ⊇ mint-list contract
@@ -64,14 +66,15 @@ func RequireIdentity(v *Validator, require bool) func(http.Handler) http.Handler
 			stripIdentityHeaders(r.Header)
 
 			var (
-				org, user, email string
-				authed           bool
+				org, project, user, email string
+				authed                    bool
 			)
 			if v != nil {
 				if bearer := r.Header.Get(HeaderAuthorization); bearer != "" {
 					claims, err := v.Validate(r.Context(), bearer)
 					if err == nil && claims != nil {
 						org = claims.Owner
+						project = claims.Project
 						user = claims.Subject
 						if user == "" {
 							user = claims.PreferredUsername
@@ -80,6 +83,9 @@ func RequireIdentity(v *Validator, require bool) func(http.Handler) http.Handler
 						authed = true
 						r.Header.Set(HeaderOrgID, org)
 						r.Header.Set(HeaderUserID, user)
+						if project != "" {
+							r.Header.Set(HeaderProjectID, project)
+						}
 						if email != "" {
 							r.Header.Set(HeaderUserEmail, email)
 						}
@@ -94,6 +100,7 @@ func RequireIdentity(v *Validator, require bool) func(http.Handler) http.Handler
 
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, ctxKeyOrgID, org)
+			ctx = context.WithValue(ctx, ctxKeyProjectID, project)
 			ctx = context.WithValue(ctx, ctxKeyUserID, user)
 			ctx = context.WithValue(ctx, ctxKeyUserEmail, email)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -111,8 +118,9 @@ func RequireIdentity(v *Validator, require bool) func(http.Handler) http.Handler
 // upstream. Passing empty strings yields the unscoped (dev) context, the same as
 // the no-token path — an embedder MUST therefore gate on its own validated
 // principal before calling this, never on a raw client header.
-func WithIdentity(ctx context.Context, org, user, email string) context.Context {
+func WithIdentity(ctx context.Context, org, project, user, email string) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyOrgID, org)
+	ctx = context.WithValue(ctx, ctxKeyProjectID, project)
 	ctx = context.WithValue(ctx, ctxKeyUserID, user)
 	ctx = context.WithValue(ctx, ctxKeyUserEmail, email)
 	return ctx
@@ -120,6 +128,11 @@ func WithIdentity(ctx context.Context, org, user, email string) context.Context 
 
 // OrgID returns the org id minted from a validated JWT, or "".
 func OrgID(ctx context.Context) string { return strFromCtx(ctx, ctxKeyOrgID) }
+
+// ProjectID returns the project id minted from a validated JWT, or "" —
+// the org/project/user identity model's middle scope. Convention: a
+// project maps onto a tasks NAMESPACE inside the org's shard.
+func ProjectID(ctx context.Context) string { return strFromCtx(ctx, ctxKeyProjectID) }
 
 // UserID returns the user id minted from a validated JWT, or "".
 func UserID(ctx context.Context) string { return strFromCtx(ctx, ctxKeyUserID) }
