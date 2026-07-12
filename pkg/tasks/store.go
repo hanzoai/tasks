@@ -171,6 +171,33 @@ func (s *store) list(prefix string, fn func(key string, body []byte) error) erro
 	return sh.List(ctx, prefix, fn)
 }
 
+// listAllOrgs iterates entries with the given prefix across EVERY org's
+// shards — the root cron sweeper's view of the world. fn receives the
+// owning org alongside each entry so the caller can act through an
+// org-scoped engine view (WithOrg) and hit the right shard.
+func (s *store) listAllOrgs(prefix string, fn func(org, key string, body []byte) error) error {
+	ctx := context.Background()
+	orgs, err := s.mgr.ListOrgs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, org := range orgs {
+		shards, err := s.mgr.ListShards(ctx, org)
+		if err != nil {
+			return err
+		}
+		for _, sh := range shards {
+			org := org
+			if err := sh.List(ctx, prefix, func(key string, body []byte) error {
+				return fn(org, key, body)
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // listInto loads every record under prefix into a typed slice.
 func listInto[T any](s *store, prefix string) ([]T, error) {
 	out := []T{}
