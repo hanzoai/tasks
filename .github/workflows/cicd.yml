@@ -1,0 +1,21 @@
+# Canonical CI/CD — imports the shared hanzoai/ci reusable workflow. All real
+# config (images, test) lives in the repo-root hanzo.yml; this file is just
+# the trigger + the import. Same shape every hanzo/lux/zoo repo uses.
+#
+# This replaces the legacy upstream-Temporal workflow suite (run-tests
+# sharding matrices, promote-* lanes, flaky-test reporting), which targeted
+# the pre-rip fork layout and had been red on every run since the ZAP-native
+# rewrite (yq-less runners, deleted directories, Temporal-era tooling).
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cicd:
+    uses: hanzoai/ci/.github/workflows/build.yml@main
+    secrets: inherit
