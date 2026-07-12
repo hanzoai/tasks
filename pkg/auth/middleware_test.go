@@ -111,17 +111,20 @@ func TestRequireIdentity_ValidJWT_MintsHeaders(t *testing.T) {
 			Expiry:   jwt.NewNumericDate(now.Add(time.Hour)),
 			IssuedAt: jwt.NewNumericDate(now),
 		},
-		Owner: "hanzo",
-		Email: "z@hanzo.ai",
+		Owner:   "hanzo",
+		Project: "acme-app",
+		Email:   "z@hanzo.ai",
 	})
 
-	var gotOrg, gotUser, gotEmail string
-	var headerOrg, headerUser, headerEmail string
+	var gotOrg, gotProject, gotUser, gotEmail string
+	var headerOrg, headerProject, headerUser, headerEmail string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotOrg = OrgID(r.Context())
+		gotProject = ProjectID(r.Context())
 		gotUser = UserID(r.Context())
 		gotEmail = UserEmail(r.Context())
 		headerOrg = r.Header.Get(HeaderOrgID)
+		headerProject = r.Header.Get(HeaderProjectID)
 		headerUser = r.Header.Get(HeaderUserID)
 		headerEmail = r.Header.Get(HeaderUserEmail)
 		w.WriteHeader(http.StatusOK)
@@ -132,6 +135,7 @@ func TestRequireIdentity_ValidJWT_MintsHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/foo", nil)
 	// Spoof headers — must be stripped before mint.
 	req.Header.Set(HeaderOrgID, "attacker")
+	req.Header.Set(HeaderProjectID, "attacker-project")
 	req.Header.Set(HeaderAuthorization, "Bearer "+tok)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -139,11 +143,11 @@ func TestRequireIdentity_ValidJWT_MintsHeaders(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200; got %d body=%q", rec.Code, rec.Body.String())
 	}
-	if gotOrg != "hanzo" || gotUser != "user-123" || gotEmail != "z@hanzo.ai" {
-		t.Fatalf("ctx mismatch: org=%q user=%q email=%q", gotOrg, gotUser, gotEmail)
+	if gotOrg != "hanzo" || gotProject != "acme-app" || gotUser != "user-123" || gotEmail != "z@hanzo.ai" {
+		t.Fatalf("ctx mismatch: org=%q project=%q user=%q email=%q", gotOrg, gotProject, gotUser, gotEmail)
 	}
-	if headerOrg != "hanzo" || headerUser != "user-123" || headerEmail != "z@hanzo.ai" {
-		t.Fatalf("headers not minted from JWT: org=%q user=%q email=%q", headerOrg, headerUser, headerEmail)
+	if headerOrg != "hanzo" || headerProject != "acme-app" || headerUser != "user-123" || headerEmail != "z@hanzo.ai" {
+		t.Fatalf("headers not minted from JWT: org=%q project=%q user=%q email=%q", headerOrg, headerProject, headerUser, headerEmail)
 	}
 }
 
