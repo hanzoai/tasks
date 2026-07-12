@@ -198,6 +198,43 @@ func (e *Embedded) ZAPPort() int {
 	return e.cfg.ZAPPort
 }
 
+// View is an org-scoped, in-process control-plane handle on the embedded
+// engine — the door for a HOST binary (e.g. cloud's platform cron) to manage
+// namespaces and schedules in a specific org's shard without a ZAP hop or a
+// minted identity. In-process callers share the host's trust boundary (the
+// same stance as the ungated loopback listener), so the org they pass is
+// authoritative — never derive it from anything client-supplied. Workflows a
+// schedule starts dispatch to whatever worker is subscribed on the schedule's
+// (namespace, task queue) — worker subscription is org-agnostic; results
+// route back to the owning shard via the task's org.
+type View struct{ en *engine }
+
+// View returns the org-scoped control-plane view. org "" is the root view.
+func (e *Embedded) View(org string) View { return View{en: e.engine.WithOrg(org)} }
+
+// RegisterNamespace idempotently registers ns in this org's shard — required
+// before any workflow (including a schedule fire) can start in it.
+func (v View) RegisterNamespace(ns Namespace) error { return v.en.RegisterNamespace(ns) }
+
+// CreateSchedule upserts a schedule (store-keyed by namespace+id).
+func (v View) CreateSchedule(s Schedule) error { return v.en.CreateSchedule(s) }
+
+// DeleteSchedule removes a schedule.
+func (v View) DeleteSchedule(ns, id string) error { return v.en.DeleteSchedule(ns, id) }
+
+// ListSchedules returns every schedule in ns.
+func (v View) ListSchedules(ns string) ([]Schedule, error) { return v.en.ListSchedules(ns) }
+
+// DescribeSchedule loads one schedule; ok=false when absent.
+func (v View) DescribeSchedule(ns, id string) (*Schedule, bool, error) {
+	return v.en.DescribeSchedule(ns, id)
+}
+
+// TriggerSchedule fires the schedule's action immediately (manual run).
+func (v View) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, error) {
+	return v.en.TriggerSchedule(ns, id, requestID)
+}
+
 // nodeSnapshot returns a copy of the current listener set under the lock so the
 // server-push loop never races ServeGated appending a gated listener.
 func (e *Embedded) nodeSnapshot() []*zap.Node {
