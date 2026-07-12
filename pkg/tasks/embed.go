@@ -235,6 +235,12 @@ func (v View) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, err
 	return v.en.TriggerSchedule(ns, id, requestID)
 }
 
+// ListWorkflows returns every workflow execution in ns (this org's shard) —
+// how a host observes the runs its schedules produced.
+func (v View) ListWorkflows(ns string) ([]WorkflowExecution, error) {
+	return v.en.ListWorkflows(ns)
+}
+
 // nodeSnapshot returns a copy of the current listener set under the lock so the
 // server-push loop never races ServeGated appending a gated listener.
 func (e *Embedded) nodeSnapshot() []*zap.Node {
