@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
 	storepkg "github.com/hanzoai/tasks/pkg/tasks/store"
@@ -23,10 +22,8 @@ import (
 // orgID == "" preserves the embedded/dev path: shards live under
 // <root>/_/ (sentinel directory).
 type store struct {
-	mgr    *storepkg.Manager
-	orgID  string
-	mu     sync.RWMutex
-	bootNS map[string]struct{}
+	mgr   *storepkg.Manager
+	orgID string
 }
 
 // newStore returns a sqlite-backed single-shard store rooted at a temp dir.
@@ -40,7 +37,7 @@ func newStore() *store {
 	if err != nil {
 		panic(fmt.Errorf("newStore: %w", err))
 	}
-	return &store{mgr: mgr, bootNS: map[string]struct{}{}}
+	return &store{mgr: mgr}
 }
 
 // newStoreFromEnv selects the backend by TASKSD_STORE.
@@ -59,7 +56,7 @@ func newStoreFromEnv(dataDir string) (*store, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &store{mgr: mgr, bootNS: map[string]struct{}{}}, nil
+		return &store{mgr: mgr}, nil
 	case "memory":
 		return newStore(), nil
 	default:
@@ -75,7 +72,7 @@ func (s *store) withOrg(orgID string) *store {
 	if orgID == s.orgID {
 		return s
 	}
-	return &store{mgr: s.mgr, orgID: orgID, bootNS: s.bootNS}
+	return &store{mgr: s.mgr, orgID: orgID}
 }
 
 func (s *store) close() error {
@@ -92,14 +89,7 @@ func (s *store) shardFor(ctx context.Context, key string) (*storepkg.Shard, erro
 	if !ok {
 		return nil, fmt.Errorf("store: cannot route key %q", key)
 	}
-	sh, err := s.mgr.Get(ctx, s.orgID, ns)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	s.bootNS[ns] = struct{}{}
-	s.mu.Unlock()
-	return sh, nil
+	return s.mgr.Get(ctx, s.orgID, ns)
 }
 
 // put serializes v and writes to the resolved shard.
