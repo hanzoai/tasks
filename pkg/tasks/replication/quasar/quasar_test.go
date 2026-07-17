@@ -1,6 +1,6 @@
 // Copyright © 2026 Hanzo AI. MIT License.
 
-package replication_test
+package quasar_test
 
 import (
 	"context"
@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
+	"github.com/hanzoai/tasks/pkg/tasks/replication/quasar"
 )
 
 func TestQuasar_SingleNodeAccepts(t *testing.T) {
-	hub := replication.NewMemoryHub()
+	hub := quasar.NewMemoryHub()
 	t1 := hub.Connect("node-a")
-	r, err := replication.NewQuasar(context.Background(), replication.QuasarConfig{
+	r, err := quasar.NewQuasar(context.Background(), quasar.QuasarConfig{
 		NodeID:      "node-a",
 		Validators:  []string{"node-a"},
 		Transport:   t1,
@@ -42,9 +43,9 @@ func TestQuasar_SingleNodeAccepts(t *testing.T) {
 }
 
 func TestQuasar_AssignsSequenceMonotonic(t *testing.T) {
-	hub := replication.NewMemoryHub()
+	hub := quasar.NewMemoryHub()
 	t1 := hub.Connect("a")
-	r, err := replication.NewQuasar(context.Background(), replication.QuasarConfig{
+	r, err := quasar.NewQuasar(context.Background(), quasar.QuasarConfig{
 		NodeID: "a", Validators: []string{"a"}, Transport: t1, ProposeWait: time.Second,
 	})
 	if err != nil {
@@ -74,9 +75,9 @@ func TestQuasar_AssignsSequenceMonotonic(t *testing.T) {
 }
 
 func TestQuasar_Stats(t *testing.T) {
-	hub := replication.NewMemoryHub()
+	hub := quasar.NewMemoryHub()
 	t1 := hub.Connect("a")
-	r, err := replication.NewQuasar(context.Background(), replication.QuasarConfig{
+	r, err := quasar.NewQuasar(context.Background(), quasar.QuasarConfig{
 		NodeID: "a", Validators: []string{"a"}, Transport: t1, ProposeWait: time.Second,
 	})
 	if err != nil {
@@ -93,9 +94,9 @@ func TestQuasar_Stats(t *testing.T) {
 }
 
 func TestQuasar_TimeoutReturnsTimeout(t *testing.T) {
-	hub := replication.NewMemoryHub()
+	hub := quasar.NewMemoryHub()
 	t1 := hub.Connect("a")
-	r, err := replication.NewQuasar(context.Background(), replication.QuasarConfig{
+	r, err := quasar.NewQuasar(context.Background(), quasar.QuasarConfig{
 		NodeID: "a", Validators: []string{"a"}, Transport: t1, ProposeWait: time.Millisecond,
 	})
 	if err != nil {
@@ -113,9 +114,9 @@ func TestQuasar_TimeoutReturnsTimeout(t *testing.T) {
 }
 
 func TestQuasar_CloseIdempotent(t *testing.T) {
-	hub := replication.NewMemoryHub()
+	hub := quasar.NewMemoryHub()
 	t1 := hub.Connect("a")
-	r, err := replication.NewQuasar(context.Background(), replication.QuasarConfig{
+	r, err := quasar.NewQuasar(context.Background(), quasar.QuasarConfig{
 		NodeID: "a", Validators: []string{"a"}, Transport: t1, ProposeWait: time.Second,
 	})
 	if err != nil {

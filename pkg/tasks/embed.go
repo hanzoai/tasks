@@ -350,12 +350,8 @@ func (e *Embedded) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["validators"] = out
 	}
-	switch rep := e.repl.(type) {
-	case *replication.LocalReplicator:
-		a, rj := rep.Stats()
-		resp["stats"] = stats{Accepted: a, Rejected: rj}
-	case *replication.QuasarReplicator:
-		a, rj, to := rep.Stats()
+	if e.repl != nil {
+		a, rj, to := e.repl.Stats()
 		resp["stats"] = stats{Accepted: a, Rejected: rj, Timeouts: to}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -414,14 +410,10 @@ func (e *Embedded) handleNamespaceMigrate(w http.ResponseWriter, r *http.Request
 }
 
 func replicatorKind(r replication.Replicator) string {
-	switch r.(type) {
-	case *replication.QuasarReplicator:
-		return "quasar"
-	case *replication.LocalReplicator:
-		return "local"
-	default:
+	if r == nil {
 		return "none"
 	}
+	return r.Kind()
 }
 
 func shardCount(e *Embedded) int {

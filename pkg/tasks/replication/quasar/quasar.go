@@ -1,6 +1,6 @@
 // Copyright © 2026 Hanzo AI. MIT License.
 
-package replication
+package quasar
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/luxfi/consensus"
+
+	"github.com/hanzoai/tasks/pkg/tasks/replication"
 )
 
 // Transport abstracts the cluster wire so tests can swap a memory bus
@@ -49,7 +51,7 @@ type QuasarReplicator struct {
 	cfg      QuasarConfig
 	engine   consensus.Engine
 	mu       sync.RWMutex
-	handlers []Handler
+	handlers []replication.Handler
 	pending  map[consensus.ID]*proposal
 	height   uint64
 	parent   consensus.ID
@@ -60,8 +62,8 @@ type QuasarReplicator struct {
 }
 
 type proposal struct {
-	frame Frame
-	done  chan Decision
+	frame replication.Frame
+	done  chan replication.Decision
 }
 
 // NewQuasar wires consensus.NewPQ to the supplied transport and starts
@@ -107,7 +109,7 @@ func NewQuasar(ctx context.Context, cfg QuasarConfig) (*QuasarReplicator, error)
 // it to the engine, broadcasts it to peers, and waits for the engine to
 // mark it accepted. Self-vote happens immediately so single-node
 // configurations terminate without external traffic.
-func (r *QuasarReplicator) Propose(ctx context.Context, f Frame) (Decision, error) {
+func (r *QuasarReplicator) Propose(ctx context.Context, f replication.Frame) (replication.Decision, error) {
 	if f.Seq == 0 {
 		r.mu.Lock()
 		r.height++
@@ -116,15 +118,15 @@ func (r *QuasarReplicator) Propose(ctx context.Context, f Frame) (Decision, erro
 	}
 	body, err := json.Marshal(f)
 	if err != nil {
-		return DecisionReject, fmt.Errorf("quasar: marshal frame: %w", err)
+		return replication.DecisionReject, fmt.Errorf("quasar: marshal frame: %w", err)
 	}
 	id := frameID(f, body)
 	block := consensus.NewBlock(id, r.parent, f.Seq, body)
 	block.Time = time.Now()
 	if err := r.engine.Add(ctx, block); err != nil {
-		return DecisionReject, fmt.Errorf("quasar: engine.Add: %w", err)
+		return replication.DecisionReject, fmt.Errorf("quasar: engine.Add: %w", err)
 	}
-	p := &proposal{frame: f, done: make(chan Decision, 1)}
+	p := &proposal{frame: f, done: make(chan replication.Decision, 1)}
 	r.mu.Lock()
 	r.pending[id] = p
 	r.mu.Unlock()
@@ -155,7 +157,7 @@ func (r *QuasarReplicator) Propose(ctx context.Context, f Frame) (Decision, erro
 			r.stats.accepted++
 			delete(r.pending, id)
 			r.mu.Unlock()
-			return DecisionAccept, nil
+			return replication.DecisionAccept, nil
 		}
 		select {
 		case <-ctx.Done():
@@ -163,7 +165,7 @@ func (r *QuasarReplicator) Propose(ctx context.Context, f Frame) (Decision, erro
 			r.stats.timeouts++
 			delete(r.pending, id)
 			r.mu.Unlock()
-			return DecisionTimeout, ctx.Err()
+			return replication.DecisionTimeout, ctx.Err()
 		case <-time.After(2 * time.Millisecond):
 		}
 	}
@@ -171,12 +173,12 @@ func (r *QuasarReplicator) Propose(ctx context.Context, f Frame) (Decision, erro
 	r.stats.timeouts++
 	delete(r.pending, id)
 	r.mu.Unlock()
-	return DecisionTimeout, ErrTimeout
+	return replication.DecisionTimeout, replication.ErrTimeout
 }
 
 // Subscribe registers an applier; called both for self-proposed frames
 // (after engine accept) and for frames received from peers.
-func (r *QuasarReplicator) Subscribe(h Handler) {
+func (r *QuasarReplicator) Subscribe(h replication.Handler) {
 	r.mu.Lock()
 	r.handlers = append(r.handlers, h)
 	r.mu.Unlock()
@@ -194,6 +196,9 @@ func (r *QuasarReplicator) Close() error {
 }
 
 // Stats returns counters used by /v1/tasks/cluster.
+// Kind identifies the consensus-backed driver.
+func (r *QuasarReplicator) Kind() string { return "quasar" }
+
 func (r *QuasarReplicator) Stats() (accepted, rejected, timeouts uint64) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -201,9 +206,9 @@ func (r *QuasarReplicator) Stats() (accepted, rejected, timeouts uint64) {
 }
 
 // applyAccepted invokes registered handlers under the read lock.
-func (r *QuasarReplicator) applyAccepted(ctx context.Context, f Frame) {
+func (r *QuasarReplicator) applyAccepted(ctx context.Context, f replication.Frame) {
 	r.mu.RLock()
-	hs := append([]Handler(nil), r.handlers...)
+	hs := append([]replication.Handler(nil), r.handlers...)
 	r.mu.RUnlock()
 	for _, h := range hs {
 		_ = h(ctx, f)
@@ -213,7 +218,7 @@ func (r *QuasarReplicator) applyAccepted(ctx context.Context, f Frame) {
 // handleFrame receives a peer-proposed frame. We add it to our engine
 // and self-vote so quorum forms; once IsAccepted, applyAccepted runs.
 func (r *QuasarReplicator) handleFrame(payload []byte) error {
-	var f Frame
+	var f replication.Frame
 	if err := json.Unmarshal(payload, &f); err != nil {
 		return fmt.Errorf("quasar.handleFrame: %w", err)
 	}
@@ -236,7 +241,7 @@ func (r *QuasarReplicator) handleFrame(payload []byte) error {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	return ErrTimeout
+	return replication.ErrTimeout
 }
 
 // handleVote forwards an inbound peer vote to the engine. The vote
@@ -258,7 +263,7 @@ func (r *QuasarReplicator) handleVote(payload []byte) error {
 
 // frameID is a deterministic SHA-256 over (seq||key||value||op) so the
 // same frame produces the same Block ID across nodes.
-func frameID(f Frame, body []byte) consensus.ID {
+func frameID(f replication.Frame, body []byte) consensus.ID {
 	h := sha256.New()
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], f.Seq)
@@ -342,7 +347,7 @@ func (t *MemoryTransport) Validators() []string {
 func (t *MemoryTransport) LocalID() string { return t.id }
 
 // frameKey is exported for /v1/tasks/cluster diagnostics.
-func (f Frame) FrameKey() []byte {
+func (f replication.Frame) FrameKey() []byte {
 	var buf bytes.Buffer
 	buf.WriteString(f.OrgID)
 	buf.WriteByte('/')
