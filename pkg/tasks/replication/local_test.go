@@ -61,9 +61,9 @@ func TestLocal_StatsCount(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		_, _ = r.Propose(context.Background(), replication.Frame{Key: "k"})
 	}
-	a, rj := r.Stats()
-	if a != 5 || rj != 0 {
-		t.Fatalf("stats = (%d, %d), want (5, 0)", a, rj)
+	a, rj, to := r.Stats()
+	if a != 5 || rj != 0 || to != 0 {
+		t.Fatalf("stats = (%d, %d, %d), want (5, 0, 0)", a, rj, to)
 	}
 }
 

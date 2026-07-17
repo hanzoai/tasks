@@ -56,4 +56,12 @@ type Replicator interface {
 	Subscribe(h Handler)
 	// Close releases driver resources.
 	Close() error
+	// Kind names the driver ("local" | "quasar") for introspection — so the
+	// embed handlers never type-switch on a concrete driver, which is what keeps
+	// the consensus-backed quasar driver out of this package's import graph (and
+	// thus out of hanzoai/base's module graph via pruning).
+	Kind() string
+	// Stats returns cumulative accept/reject/timeout counts. A driver with no
+	// timeout outcome (local) reports timeouts as 0.
+	Stats() (accepted, rejected, timeouts uint64)
 }
