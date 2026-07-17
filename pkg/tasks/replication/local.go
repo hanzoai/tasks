@@ -59,8 +59,12 @@ func (r *LocalReplicator) Subscribe(h Handler) {
 func (r *LocalReplicator) Close() error { return nil }
 
 // Stats returns counters used by /v1/tasks/cluster.
-func (r *LocalReplicator) Stats() (accepted, rejected uint64) {
+// Kind identifies the single-node passthrough driver.
+func (r *LocalReplicator) Kind() string { return "local" }
+
+// Stats reports accept/reject counts; the local driver has no timeout outcome.
+func (r *LocalReplicator) Stats() (accepted, rejected, timeouts uint64) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.accepted, r.rejected
+	return r.accepted, r.rejected, 0
 }

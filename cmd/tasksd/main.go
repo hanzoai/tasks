@@ -25,6 +25,7 @@ import (
 	"github.com/hanzoai/tasks/pkg/tasks"
 	"github.com/hanzoai/tasks/pkg/tasks/migration"
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
+	"github.com/hanzoai/tasks/pkg/tasks/replication/quasar"
 	"github.com/hanzoai/tasks/pkg/tasks/routing"
 	"github.com/hanzoai/tasks/pkg/tasks/store"
 	tasksui "github.com/hanzoai/tasks/ui"
@@ -233,7 +234,7 @@ func buildReplicator(ctx context.Context, kind, node, validatorsCSV string) (rep
 		if node == "" {
 			return nil, nil, fmt.Errorf("quasar replicator requires --node-id")
 		}
-		hub := replication.NewMemoryHub()
+		hub := quasar.NewMemoryHub()
 		t := hub.Connect(node)
 		var vs []routing.NodeID
 		for _, v := range strings.Split(validatorsCSV, ",") {
@@ -250,7 +251,7 @@ func buildReplicator(ctx context.Context, kind, node, validatorsCSV string) (rep
 		for i, v := range vs {
 			validators[i] = string(v)
 		}
-		rep, err := replication.NewQuasar(ctx, replication.QuasarConfig{
+		rep, err := quasar.NewQuasar(ctx, quasar.QuasarConfig{
 			NodeID:     node,
 			Validators: validators,
 			Transport:  t,
