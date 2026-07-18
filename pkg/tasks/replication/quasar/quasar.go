@@ -346,8 +346,10 @@ func (t *MemoryTransport) Validators() []string {
 // LocalID returns this node's id.
 func (t *MemoryTransport) LocalID() string { return t.id }
 
-// frameKey is exported for /v1/tasks/cluster diagnostics.
-func (f replication.Frame) FrameKey() []byte {
+// FrameKey is exported for /v1/tasks/cluster diagnostics. A free function, not a
+// method: replication.Frame is a non-local type (moved to its own package), so a
+// method on it won't compile — same shape as frameID above.
+func FrameKey(f replication.Frame) []byte {
 	var buf bytes.Buffer
 	buf.WriteString(f.OrgID)
 	buf.WriteByte('/')
