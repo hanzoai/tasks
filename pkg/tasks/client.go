@@ -13,21 +13,19 @@
 // "*/5 * * * *"). Anything that parses as a Go duration is treated as an
 // interval; anything else is treated as a cron expression.
 //
-// If TASKS_URL is set, schedules run as durable Hanzo Tasks workflows
-// (retries, dead letter, audit trail). If not, runs locally via goroutine
-// timer (dev mode, same behaviour as cron but no persistence).
-//
-// If zapAddr is set, ZAP binary transport is preferred over HTTP for
-// submitting tasks (lower latency, same semantics). HTTP is fallback.
+// If zapAddr is set, schedules and one-shot tasks run as durable Hanzo
+// Tasks over the ZAP binary transport (retries, dead letter, audit
+// trail). The submit path stamps opStartWorkflow; the schedule path
+// stamps opCreateSchedule — the same opcodes the full SDK client and the
+// server dispatch on. If zapAddr is empty, everything runs locally via a
+// goroutine timer (dev mode, same behaviour as cron but no persistence).
 package tasks
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -37,35 +35,16 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// ZAP opcodes for task submission.
-const (
-	OpcodeTaskSubmit   uint16 = 0x0050 // one-shot task
-	OpcodeTaskSchedule uint16 = 0x0051 // recurring schedule
-)
-
-// ZAP object field offsets.
-const (
-	fieldTaskType = 0  // Text: task/workflow type
-	fieldPayload  = 8  // Bytes: JSON payload
-	fieldInterval = 16 // Text: duration string (schedules only)
-	fieldCron     = 24 // Text: cron expression (schedules only, alt to interval)
-	fieldName     = 0  // Text: schedule name (schedules)
-	respStatus    = 0  // Uint32: status code
-	respBody      = 4  // Bytes: response JSON
-)
-
 // Handler processes a one-shot task (webhook delivery, settlement, etc.)
 type Handler func(taskType string, payload map[string]any)
 
 // Client manages both one-shot tasks and recurring schedules.
 type Client struct {
-	tasksURL   string
-	zapAddr    string
-	httpClient *http.Client
-	handler    Handler
-	logger     *slog.Logger
-	mu         sync.RWMutex
-	schedules  map[string]context.CancelFunc // local schedule cancellers
+	zapAddr   string
+	handler   Handler
+	logger    *slog.Logger
+	mu        sync.RWMutex
+	schedules map[string]context.CancelFunc // local schedule cancellers
 
 	zapOnce sync.Once
 	zapNode *zap.Node
@@ -73,16 +52,11 @@ type Client struct {
 	zapErr  error
 }
 
-// New creates a Client.
-// If both tasksURL and zapAddr are empty, everything runs locally.
-// If zapAddr is set, ZAP transport is preferred. HTTP is fallback.
-func New(tasksURL, zapAddr string, handler Handler) *Client {
+// New creates a Client. If zapAddr is empty, everything runs locally.
+// If zapAddr is set, tasks submit durably over ZAP.
+func New(zapAddr string, handler Handler) *Client {
 	return &Client{
-		tasksURL: tasksURL,
-		zapAddr:  zapAddr,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		zapAddr:   zapAddr,
 		handler:   handler,
 		logger:    slog.Default(),
 		schedules: make(map[string]context.CancelFunc),
@@ -105,7 +79,7 @@ func SetDefault(c *Client) {
 }
 
 // Default returns the process-wide client. If SetDefault was never called,
-// lazily creates a client from TASKS_URL / TASKS_ZAP env vars so callers that
+// lazily creates a client from the TASKS_ZAP env var so callers that
 // register schedules before main() finished wiring still work. main() may
 // replace this with a handler-bound client via SetDefault.
 func Default() *Client {
@@ -115,7 +89,7 @@ func Default() *Client {
 	if c != nil {
 		return c
 	}
-	c = New(os.Getenv("TASKS_URL"), os.Getenv("TASKS_ZAP"), nil)
+	c = New(os.Getenv("TASKS_ZAP"), nil)
 	defaultMu.Lock()
 	if defaultClient == nil {
 		defaultClient = c
@@ -130,9 +104,9 @@ func Default() *Client {
 //
 // spec is either a Go duration ("30s", "5m", "1h") or a standard 5-field
 // cron expression ("0 3 * * *", "*/5 * * * *", "0 14 8 * *"). The fn runs
-// on that cadence. If TASKS_URL is set, creates a durable Hanzo Tasks schedule
-// so retries, dead-letter and audit are handled server-side. Otherwise
-// runs locally.
+// on that cadence. If zapAddr is set, creates a durable Hanzo Tasks
+// schedule so retries, dead-letter and audit are handled server-side.
+// Otherwise runs locally.
 //
 //	tasks.Default().Add("settlement.process", "30s", func() { ... })
 //	tasks.Default().Add("audit.archive", "0 3 * * *", func() { ... })
@@ -154,80 +128,51 @@ func (c *Client) Add(name, spec string, fn func()) error {
 	return c.addCron(name, spec, fn)
 }
 
-// addInterval registers a fixed-interval task.
+// addInterval registers a fixed-interval task. Durable over ZAP when a
+// server is configured; otherwise a local ticker.
 func (c *Client) addInterval(name string, dur time.Duration, fn func()) error {
-	if c.zapAddr != "" || c.tasksURL != "" {
-		scheduled := false
-		if c.zapAddr != "" {
-			if err := c.scheduleIntervalZAP(name, dur); err == nil {
-				scheduled = true
-			} else {
-				c.logger.Warn("taskqueue: ZAP interval schedule failed", "name", name, "error", err)
-			}
-		}
-		if !scheduled && c.tasksURL != "" {
-			if err := c.createIntervalSchedule(name, dur); err != nil {
-				c.logger.Warn("taskqueue: durable interval schedule failed, falling back to local",
-					"name", name, "error", err)
-				c.addLocalInterval(name, dur, fn)
-			}
+	if c.zapAddr != "" {
+		if err := c.scheduleIntervalZAP(name, dur); err == nil {
 			return nil
-		} else if !scheduled {
-			c.addLocalInterval(name, dur, fn)
+		} else {
+			c.logger.Warn("taskqueue: ZAP interval schedule failed, running locally",
+				"name", name, "error", err)
 		}
-		return nil
 	}
 	c.addLocalInterval(name, dur, fn)
 	return nil
 }
 
-// addCron registers a cron-expression task.
+// addCron registers a cron-expression task. Durable over ZAP when a
+// server is configured; otherwise a local schedule.
 func (c *Client) addCron(name, expr string, fn func()) error {
-	if c.zapAddr != "" || c.tasksURL != "" {
-		scheduled := false
-		if c.zapAddr != "" {
-			if err := c.scheduleCronZAP(name, expr); err == nil {
-				scheduled = true
-			} else {
-				c.logger.Warn("taskqueue: ZAP cron schedule failed", "name", name, "error", err)
-			}
-		}
-		if !scheduled && c.tasksURL != "" {
-			if err := c.createCronSchedule(name, expr); err != nil {
-				c.logger.Warn("taskqueue: durable cron schedule failed, falling back to local",
-					"name", name, "error", err)
-				c.addLocalCron(name, expr, fn)
-			}
+	if c.zapAddr != "" {
+		if err := c.scheduleCronZAP(name, expr); err == nil {
 			return nil
-		} else if !scheduled {
-			c.addLocalCron(name, expr, fn)
+		} else {
+			c.logger.Warn("taskqueue: ZAP cron schedule failed, running locally",
+				"name", name, "error", err)
 		}
-		return nil
 	}
 	c.addLocalCron(name, expr, fn)
 	return nil
 }
 
-// Now submits a one-shot task for durable execution.
-// Prefers ZAP transport when zapAddr is configured, falls back to HTTP.
+// Now submits a one-shot task for durable execution over ZAP. When no
+// server is configured, or the submit fails, the handler runs directly.
 func (c *Client) Now(taskType string, payload map[string]any) error {
 	if c == nil {
 		return nil
 	}
-	if c.tasksURL == "" && c.zapAddr == "" {
+	if c.zapAddr == "" {
 		return c.execDirect(taskType, payload)
 	}
-	if c.zapAddr != "" {
-		if err := c.submitZAP(taskType, payload); err == nil {
-			return nil
-		}
-		c.logger.Warn("taskqueue: ZAP submit failed, falling back to HTTP",
-			"type", taskType, "zapAddr", c.zapAddr)
+	if err := c.submitZAP(taskType, payload); err != nil {
+		c.logger.Warn("taskqueue: ZAP submit failed, executing directly",
+			"type", taskType, "zapAddr", c.zapAddr, "error", err)
+		return c.execDirect(taskType, payload)
 	}
-	if c.tasksURL != "" {
-		return c.submitHTTP(taskType, payload)
-	}
-	return c.execDirect(taskType, payload)
+	return nil
 }
 
 // Stop cancels all local schedules and closes ZAP connection. Call on shutdown.
@@ -275,30 +220,21 @@ func (c *Client) connectZAP() error {
 	return c.zapErr
 }
 
-// submitZAP sends a one-shot task over ZAP (opcode 0x0050).
-func (c *Client) submitZAP(taskType string, payload map[string]any) error {
+// callDurable is the one ZAP request path shared by submit and schedule.
+// It marshals body into the canonical envelope, stamps op, and reports a
+// non-2xx status as an error.
+func (c *Client) callDurable(op uint16, body any) error {
 	if err := c.connectZAP(); err != nil {
 		return err
 	}
-
-	payloadBytes, err := json.Marshal(payload)
+	raw, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("taskqueue: marshal: %w", err)
 	}
-
-	b := zap.NewBuilder(len(taskType) + len(payloadBytes) + 64)
-	obj := b.StartObject(24)
-	obj.SetText(fieldTaskType, taskType)
-	obj.SetBytes(fieldPayload, payloadBytes)
-	obj.FinishAsRoot()
-	flags := uint16(OpcodeTaskSubmit) << 8
-	data := b.FinishWithFlags(flags)
-
-	msg, err := zap.Parse(data)
+	msg, err := wireSend(op, raw)
 	if err != nil {
 		return fmt.Errorf("taskqueue: build zap msg: %w", err)
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -306,87 +242,60 @@ func (c *Client) submitZAP(taskType string, payload map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("taskqueue: zap call: %w", err)
 	}
-
-	status := resp.Root().Uint32(respStatus)
-	if status != 0 && status != 200 {
-		body := resp.Root().Bytes(respBody)
-		return fmt.Errorf("taskqueue: zap status %d: %s", status, string(body))
+	if status := resp.Root().Uint32(envelopeStatus); status != 0 && status != 200 {
+		return fmt.Errorf("taskqueue: zap status %d: %s", status, string(resp.Root().Bytes(envelopeError)))
 	}
 	return nil
 }
 
-// scheduleIntervalZAP creates a recurring interval schedule over ZAP (opcode 0x0051).
+// submitZAP starts a one-shot workflow (opStartWorkflow). The task type is
+// the workflow type; the payload is the workflow input.
+func (c *Client) submitZAP(taskType string, payload map[string]any) error {
+	return c.callDurable(opStartWorkflow, map[string]any{
+		"namespace":     "default",
+		"workflow_type": taskType,
+		"task_queue":    "ats",
+		"input":         payload,
+	})
+}
+
+// scheduleIntervalZAP creates a recurring interval schedule (opCreateSchedule).
 func (c *Client) scheduleIntervalZAP(name string, interval time.Duration) error {
-	if err := c.connectZAP(); err != nil {
+	if err := c.callDurable(opCreateSchedule, scheduleEnvelope(name, map[string]any{
+		"interval": []map[string]any{{"interval": interval.String()}},
+	})); err != nil {
 		return err
 	}
-
-	b := zap.NewBuilder(len(name) + 64)
-	obj := b.StartObject(32)
-	obj.SetText(fieldName, name)
-	obj.SetText(fieldInterval, interval.String())
-	obj.FinishAsRoot()
-	flags := uint16(OpcodeTaskSchedule) << 8
-	data := b.FinishWithFlags(flags)
-
-	msg, err := zap.Parse(data)
-	if err != nil {
-		return fmt.Errorf("taskqueue: build zap msg: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	resp, err := c.zapNode.Call(ctx, c.zapPeer, msg)
-	if err != nil {
-		return fmt.Errorf("taskqueue: zap call: %w", err)
-	}
-
-	status := resp.Root().Uint32(respStatus)
-	if status != 0 && status != 200 {
-		body := resp.Root().Bytes(respBody)
-		return fmt.Errorf("taskqueue: zap status %d: %s", status, string(body))
-	}
-
 	c.logger.Info("taskqueue: ZAP interval schedule created", "name", name, "interval", interval)
 	return nil
 }
 
-// scheduleCronZAP creates a recurring cron schedule over ZAP (opcode 0x0051).
+// scheduleCronZAP creates a recurring cron schedule (opCreateSchedule).
 func (c *Client) scheduleCronZAP(name, expr string) error {
-	if err := c.connectZAP(); err != nil {
+	if err := c.callDurable(opCreateSchedule, scheduleEnvelope(name, map[string]any{
+		"cron": []string{expr},
+	})); err != nil {
 		return err
 	}
-
-	b := zap.NewBuilder(len(name) + len(expr) + 64)
-	obj := b.StartObject(32)
-	obj.SetText(fieldName, name)
-	obj.SetText(fieldCron, expr)
-	obj.FinishAsRoot()
-	flags := uint16(OpcodeTaskSchedule) << 8
-	data := b.FinishWithFlags(flags)
-
-	msg, err := zap.Parse(data)
-	if err != nil {
-		return fmt.Errorf("taskqueue: build zap msg: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	resp, err := c.zapNode.Call(ctx, c.zapPeer, msg)
-	if err != nil {
-		return fmt.Errorf("taskqueue: zap call: %w", err)
-	}
-
-	status := resp.Root().Uint32(respStatus)
-	if status != 0 && status != 200 {
-		body := resp.Root().Bytes(respBody)
-		return fmt.Errorf("taskqueue: zap status %d: %s", status, string(body))
-	}
-
 	c.logger.Info("taskqueue: ZAP cron schedule created", "name", name, "expr", expr)
 	return nil
+}
+
+// scheduleEnvelope builds the create-schedule request body shared by the
+// interval and cron paths. spec carries either an "interval" or a "cron"
+// entry; the action starts a workflow named after the schedule.
+func scheduleEnvelope(name string, spec map[string]any) map[string]any {
+	return map[string]any{
+		"namespace":   "default",
+		"schedule_id": name,
+		"schedule": map[string]any{
+			"spec": spec,
+			"action": map[string]any{
+				"workflow_type": name,
+				"task_queue":    "ats",
+			},
+		},
+	}
 }
 
 // addLocalInterval runs fn on a ticker (dev fallback, no persistence).
@@ -464,71 +373,6 @@ func (c *Client) runFn(name string, fn func()) {
 	fn()
 }
 
-// createIntervalSchedule creates a durable interval schedule on Hanzo Tasks.
-func (c *Client) createIntervalSchedule(name string, interval time.Duration) error {
-	schedule := map[string]any{
-		"schedule_id": name,
-		"schedule": map[string]any{
-			"spec": map[string]any{
-				"interval": []map[string]any{
-					{"every": interval.String()},
-				},
-			},
-			"action": c.workflowAction(name),
-		},
-	}
-	return c.putSchedule(name, schedule, fmt.Sprintf("interval=%s", interval))
-}
-
-// createCronSchedule creates a durable cron schedule on Hanzo Tasks. The
-// server parses the standard 5-field expression into a ScheduleSpec.
-func (c *Client) createCronSchedule(name, expr string) error {
-	schedule := map[string]any{
-		"schedule_id": name,
-		"schedule": map[string]any{
-			"spec": map[string]any{
-				"cron_expressions": []string{expr},
-			},
-			"action": c.workflowAction(name),
-		},
-	}
-	return c.putSchedule(name, schedule, fmt.Sprintf("cron=%q", expr))
-}
-
-// workflowAction returns the start_workflow action block shared by both
-// interval and cron schedules.
-func (c *Client) workflowAction(name string) map[string]any {
-	return map[string]any{
-		"start_workflow": map[string]any{
-			"workflow_type": name,
-			"task_queue":    "ats",
-		},
-	}
-}
-
-func (c *Client) putSchedule(name string, schedule map[string]any, detail string) error {
-	body, err := json.Marshal(schedule)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	url := c.tasksURL + "/api/v1/namespaces/default/schedules/" + name
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("http: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		c.logger.Info("taskqueue: durable schedule created", "name", name, "detail", detail)
-		return nil
-	}
-	return fmt.Errorf("status %d", resp.StatusCode)
-}
-
 // execDirect runs the handler in a goroutine (dev mode).
 func (c *Client) execDirect(taskType string, payload map[string]any) error {
 	c.mu.RLock()
@@ -542,41 +386,4 @@ func (c *Client) execDirect(taskType string, payload map[string]any) error {
 
 	go h(taskType, payload)
 	return nil
-}
-
-// submitHTTP posts a one-shot task to the Hanzo Tasks HTTP API.
-func (c *Client) submitHTTP(taskType string, payload map[string]any) error {
-	envelope := map[string]any{
-		"workflow_type": taskType,
-		"task_queue":    "ats",
-		"input":         payload,
-	}
-
-	body, err := json.Marshal(envelope)
-	if err != nil {
-		return fmt.Errorf("taskqueue: marshal: %w", err)
-	}
-
-	url := c.tasksURL + "/api/v1/namespaces/default/workflows"
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("taskqueue: request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		c.logger.Warn("taskqueue: server unreachable, executing directly",
-			"type", taskType, "error", err)
-		return c.execDirect(taskType, payload)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil
-	}
-
-	c.logger.Warn("taskqueue: server error, executing directly",
-		"type", taskType, "status", resp.StatusCode)
-	return c.execDirect(taskType, payload)
 }
