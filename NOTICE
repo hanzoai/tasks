@@ -5,3 +5,35 @@ This product includes software from Temporal (https://github.com/temporalio/temp
 
     Copyright (c) 2025 Temporal Technologies Inc.
     Copyright (c) 2020 Uber Technologies, Inc.
+
+Forked from https://github.com/temporalio/temporal (last upstream dependency
+pin before the native rewrite: go.temporal.io/server v1.32.0-157.0,
+go.temporal.io/api v1.62.13).
+
+DEVIATIONS
+
+Hanzo Tasks has diverged substantially from upstream Temporal:
+
+  - Rebranded to "Hanzo Tasks"; the Go module path is github.com/hanzoai/tasks
+    (upstream: go.temporal.io/server).
+  - The wire protocol is rewritten to the native ZAP transport
+    (github.com/luxfi/zap); all gRPC and protobuf are removed. go.mod contains
+    no google.golang.org/grpc and no go.temporal.io/* dependency. The canonical
+    wire schema is schema/tasks.zap.
+  - The server binary is renamed from cmd/server to cmd/tasksd; tasksd serves
+    ZAP on :9999 and HTTP on :7243 (health checks + the embedded React UI).
+  - The engine runs in-process: tasks.Embed(ctx, EmbedConfig{...}) embeds it
+    directly in the unified Hanzo cloud binary for durable cron and batch
+    execution.
+  - Authentication is Hanzo IAM (hanzo.id OIDC): tasksd verifies bearer JWTs
+    against IAM JWKS, strips inbound identity headers, and mints X-Org-Id,
+    X-User-Id, and X-User-Email from validated claims (pkg/auth).
+  - Persistence is embedded SQLite via github.com/hanzoai/sqlite — a
+    per-(org, namespace) shard store (pkg/tasks/store) with WAL and a single
+    writer; PostgreSQL backs multi-instance production deployments.
+  - The engine is reimplemented natively in pkg/tasks (in-process ZAP node +
+    opcode dispatch) and the SDK in pkg/sdk (client, worker, workflow, activity,
+    converter).
+  - Upstream server components are removed: service/ (frontend, history,
+    matching, worker), chasm/, client/, api/, proto/, components/, and tools/.
+  - Container images publish to ghcr.io/hanzoai/tasks.
