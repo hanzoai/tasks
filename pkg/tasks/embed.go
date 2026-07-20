@@ -1863,6 +1863,13 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 							}
 						}
 					}
+					if iv, ok := spec["interval"]; ok {
+						// The engine fires interval schedules (engine.go
+						// scheduleNext); decode straight into the spec's
+						// interval entries via their json tags.
+						raw, _ := json.Marshal(iv)
+						_ = json.Unmarshal(raw, &s.Spec.Interval)
+					}
 				}
 				if action, ok := sched["action"].(map[string]any); ok {
 					s.Action.WorkflowType.Name, _ = action["workflow_type"].(string)
