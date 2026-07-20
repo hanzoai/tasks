@@ -1,20 +1,46 @@
 package tasks
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"context"
+	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// TestNew_ThreeArgSignature pins the public constructor contract
-// (tasksURL, zapAddr, handler).
-func TestNew_ThreeArgSignature(t *testing.T) {
-	c := New("", "", nil)
+// pickPort returns an OS-assigned loopback port. There is a small race
+// between close and ZAP bind; acceptable for a test.
+func pickPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	return port
+}
+
+// bootServer starts an embedded Tasks server on a free ZAP port and
+// returns it plus its loopback address.
+func bootServer(t *testing.T) (*Embedded, string) {
+	t.Helper()
+	ctx := context.Background()
+	port := pickPort(t)
+	emb, err := Embed(ctx, EmbedConfig{ZAPPort: port})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	t.Cleanup(func() { _ = emb.Stop(context.Background()) })
+	return emb, net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+}
+
+// TestNew_TwoArgSignature pins the public constructor contract
+// (zapAddr, handler).
+func TestNew_TwoArgSignature(t *testing.T) {
+	c := New("", nil)
 	if c == nil {
 		t.Fatal("expected non-nil client")
 	}
@@ -41,7 +67,7 @@ func TestSetDefault_HandlerRouting(t *testing.T) {
 		gotPay  map[string]any
 	)
 
-	c := New("", "", func(taskType string, payload map[string]any) {
+	c := New("", func(taskType string, payload map[string]any) {
 		mu.Lock()
 		gotType = taskType
 		gotPay = payload
@@ -77,9 +103,9 @@ func TestSetDefault_HandlerRouting(t *testing.T) {
 }
 
 // TestAdd_DurationLocal registers a short-interval schedule and verifies it
-// runs at least once locally when neither TASKS_URL nor TASKS_ZAP is set.
+// runs at least once locally when no server is configured.
 func TestAdd_DurationLocal(t *testing.T) {
-	c := New("", "", nil)
+	c := New("", nil)
 	t.Cleanup(c.Stop)
 
 	var ran atomic.Int32
@@ -95,7 +121,7 @@ func TestAdd_DurationLocal(t *testing.T) {
 
 // TestAdd_CronExpression accepts a standard 5-field cron expression.
 func TestAdd_CronExpression(t *testing.T) {
-	c := New("", "", nil)
+	c := New("", nil)
 	t.Cleanup(c.Stop)
 
 	// Standard cron, parseable by robfig/cron/v3's ParseStandard.
@@ -106,7 +132,7 @@ func TestAdd_CronExpression(t *testing.T) {
 
 // TestAdd_InvalidSpec rejects garbage.
 func TestAdd_InvalidSpec(t *testing.T) {
-	c := New("", "", nil)
+	c := New("", nil)
 	t.Cleanup(c.Stop)
 
 	if err := c.Add("bad", "not-a-cron-or-duration", func() {}); err == nil {
@@ -117,53 +143,85 @@ func TestAdd_InvalidSpec(t *testing.T) {
 	}
 }
 
-// TestNow_HTTPSubmit verifies Now() submits to the HTTP endpoint when
-// TASKS_URL is set. (ZAP not tested here — needs a running server.)
-func TestNow_HTTPSubmit(t *testing.T) {
-	var got map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&got)
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
+// TestNow_ZAPSubmit verifies Now() starts a durable workflow over ZAP when
+// zapAddr points at a running server. The task type becomes the workflow
+// type; the payload becomes the workflow input.
+func TestNow_ZAPSubmit(t *testing.T) {
+	emb, addr := bootServer(t)
 
-	c := New(srv.URL, "", nil)
+	c := New(addr, nil)
 	t.Cleanup(c.Stop)
 	if err := c.Now("webhook.deliver", map[string]any{"org_id": "o2"}); err != nil {
 		t.Fatalf("Now: %v", err)
 	}
 
-	if got == nil {
-		t.Fatal("server did not receive task")
-	}
-	if got["workflow_type"] != "webhook.deliver" {
-		t.Fatalf("workflow_type mismatch: %v", got)
-	}
-	input, _ := got["input"].(map[string]any)
-	if input["org_id"] != "o2" {
-		t.Fatalf("input not forwarded: %v", input)
+	// The submit is a synchronous request/response; the workflow record
+	// is persisted before Now returns. Poll briefly to absorb any wire
+	// scheduling jitter.
+	if !eventually(t, 5*time.Second, func() bool {
+		rows, err := emb.View("").ListWorkflows("default")
+		if err != nil {
+			return false
+		}
+		for i := range rows {
+			if rows[i].Type.Name == "webhook.deliver" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("server did not record the workflow started via ZAP submit")
 	}
 }
 
-// TestAdd_HTTPDurableSchedule verifies Add() calls the server schedule API
-// when TASKS_URL is set. Payload shape is pinned.
-func TestAdd_HTTPDurableSchedule(t *testing.T) {
-	var got bytes.Buffer
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = got.ReadFrom(r.Body)
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
+// TestAdd_ZAPDurableSchedule verifies Add() creates durable schedules over
+// ZAP for both a duration (interval) and a cron expression, and that the
+// server persists the spec faithfully.
+func TestAdd_ZAPDurableSchedule(t *testing.T) {
+	emb, addr := bootServer(t)
 
-	c := New(srv.URL, "", nil)
+	c := New(addr, nil)
 	t.Cleanup(c.Stop)
-	if err := c.Add("sched-duration", "1m", func() {}); err != nil {
+
+	if err := c.Add("sched-interval", "1m", func() {}); err != nil {
 		t.Fatalf("Add duration: %v", err)
 	}
 	if err := c.Add("sched-cron", "*/5 * * * *", func() {}); err != nil {
 		t.Fatalf("Add cron: %v", err)
 	}
-	if got.Len() == 0 {
-		t.Fatal("server did not receive schedule payload")
+
+	// Interval schedule persisted with the interval spec.
+	if !eventually(t, 5*time.Second, func() bool {
+		s, ok, err := emb.View("").DescribeSchedule("default", "sched-interval")
+		if err != nil || !ok {
+			return false
+		}
+		return len(s.Spec.Interval) == 1 && s.Spec.Interval[0].Interval == "1m0s"
+	}) {
+		t.Fatal("interval schedule not persisted with its spec over ZAP")
 	}
+
+	// Cron schedule persisted with the cron spec.
+	if !eventually(t, 5*time.Second, func() bool {
+		s, ok, err := emb.View("").DescribeSchedule("default", "sched-cron")
+		if err != nil || !ok {
+			return false
+		}
+		return len(s.Spec.CronString) == 1 && s.Spec.CronString[0] == "*/5 * * * *"
+	}) {
+		t.Fatal("cron schedule not persisted with its spec over ZAP")
+	}
+}
+
+// eventually polls cond until it returns true or the deadline elapses.
+func eventually(t *testing.T, within time.Duration, cond func() bool) bool {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return cond()
 }
