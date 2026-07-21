@@ -455,6 +455,32 @@ func (e *Embedded) ActivitiesForOrg(org, ns string) ([]StandaloneActivity, error
 	return rows, err
 }
 
+// ActivitiesPageForOrg is the PAGINATED org-scoped read: it exposes the cursor
+// ActivitiesForOrg hides, so an in-process host can walk a namespace to COMPLETION
+// instead of silently seeing only the first (hash-ordered) 100 rows — the truncation
+// that hides live jobs and drops online workers on a busy org. cursor "" starts the
+// walk; pageSize<=0 defaults to the engine's 100. Returns the next cursor ("" at the
+// end). Tenancy is the caller's to enforce: pass the validated X-Org-Id.
+func (e *Embedded) ActivitiesPageForOrg(org, ns, cursor string, pageSize int) ([]StandaloneActivity, string, error) {
+	if e == nil || e.engine == nil {
+		return nil, "", fmt.Errorf("tasks engine not ready")
+	}
+	return e.engine.WithOrg(org).ListActivities(ns, cursor, pageSize)
+}
+
+// CancelActivityForOrg cancels a standalone activity in org's shard — the
+// org-scoped programmatic MUTATOR that mirrors ActivitiesForOrg's read, so an
+// in-process host (cloud's clients/fleet) can cancel a queued/running job it just
+// listed without a second HTTP hop into its own surface. Tenancy is the caller's
+// to enforce: pass the validated X-Org-Id, never client input. Rejected (error)
+// if the activity is missing or already terminal, exactly like the HTTP path.
+func (e *Embedded) CancelActivityForOrg(org, ns, activityID, runID, reason, identity string) error {
+	if e == nil || e.engine == nil {
+		return fmt.Errorf("tasks engine not ready")
+	}
+	return e.engine.WithOrg(org).CancelActivity(ns, activityID, runID, reason, identity)
+}
+
 // EventsHandler returns the SSE realtime stream of engine events.
 func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 
