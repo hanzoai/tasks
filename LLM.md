@@ -12,6 +12,10 @@ Durable workflow execution engine for AI agent orchestration.
 - Major version bump in semver-import-versioning would require module-path suffix (`/v2`, `/v3`); we don't do that.
 - Old v2.x and v3.x tags (transition era) were deleted on 2026-04-30. Old v1.x tags (`v1.0.0`–`v1.42.0`) are upstream-Temporal-era artifacts and remain in git history for blame.
 - New Hanzo-Tasks releases continue from `v1.43.0` and bump minor for features, patch for fixes.
+- `v1.51.2` added `Embedded.CancelActivityForOrg`; `v1.51.3` added `Embedded.ActivitiesPageForOrg` — the org-scoped cancel + paginated read cloud's fleet queue surface (hanzoai/cloud `clients/visor`) depends on.
+
+## Known gaps
+- **Terminal standalone-activity GC is unimplemented.** Completed/failed/canceled standalone activities under the `act/<ns>/` key family (and their `ahist/<ns>/…` history) are never pruned — the namespace `WorkflowExecutionRetentionTtl` (default `720h`) has **no sweeper enforcing it** for standalone activities. The store therefore grows unbounded with volume (one row per job, e.g. every `studio.render` in the `gpu-jobs` namespace), and every `ListActivities` / `ActivitiesForOrg` / `ActivitiesPageForOrg` scans the full set. Consumers can bound the READ (cloud's fleet queue recency-sorts + caps terminal history, and now walks all pages via `ActivitiesPageForOrg`), but the underlying storage + scan cost still grow. **Fix (queued v1.51.4):** a background sweeper alongside `runScheduler` that deletes terminal standalone activities older than the namespace retention TTL, plus their history — idempotent, org-shard-scoped. Surfaced in the hanzoai/cloud per-GPU-queue review.
 
 ## Quick Start
 ```bash
