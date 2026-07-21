@@ -4,6 +4,7 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -51,5 +52,59 @@ func TestCancelActivityForOrg(t *testing.T) {
 	// reaching across the boundary.
 	if err := emb.CancelActivityForOrg("other-org", ns, "job1", "run1", "x", "y"); err == nil {
 		t.Fatal("cross-org cancel should error (activity not in the other org's shard)")
+	}
+}
+
+// TestActivitiesPageForOrgWalksPastFirstPage proves the paginated read returns EVERY
+// activity, not just the hash-ordered first 100 ActivitiesForOrg caps at — the
+// truncation that hid live jobs and dropped online workers on a busy org.
+func TestActivitiesPageForOrgWalksPastFirstPage(t *testing.T) {
+	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0})
+	if err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+	defer emb.Stop(context.Background())
+
+	const org, ns, n = "acme", "gpu-jobs", 250
+	en := emb.engine.WithOrg(org)
+	if err := en.RegisterNamespace(Namespace{
+		NamespaceInfo: NamespaceInfo{Name: ns, State: "NAMESPACE_STATE_REGISTERED"},
+		Config:        NamespaceCfg{WorkflowExecutionRetentionTtl: "720h", APSLimit: 400},
+	}); err != nil {
+		t.Fatalf("register ns: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("job-%03d", i)
+		if _, err := en.StartActivity(ns, id, id, TypeRef{Name: "studio.render"},
+			"gpu:spark", nil, nil, "", "", "", "", "", ""); err != nil {
+			t.Fatalf("start %s: %v", id, err)
+		}
+	}
+	// The single-page read caps at 100 — the truncation this fix addresses.
+	first, err := emb.ActivitiesForOrg(org, ns)
+	if err != nil {
+		t.Fatalf("ActivitiesForOrg: %v", err)
+	}
+	if len(first) != 100 {
+		t.Fatalf("ActivitiesForOrg returned %d, expected the 100-row cap", len(first))
+	}
+	// The paginated walk returns EVERY row.
+	seen := map[string]bool{}
+	cursor := ""
+	for pages := 0; pages < 100; pages++ {
+		page, next, err := emb.ActivitiesPageForOrg(org, ns, cursor, 100)
+		if err != nil {
+			t.Fatalf("page: %v", err)
+		}
+		for _, a := range page {
+			seen[a.Execution.WorkflowId] = true
+		}
+		if next == "" || len(page) == 0 {
+			break
+		}
+		cursor = next
+	}
+	if len(seen) != n {
+		t.Fatalf("paginated walk saw %d distinct jobs, want %d (all)", len(seen), n)
 	}
 }
