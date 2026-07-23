@@ -241,6 +241,18 @@ func (v View) ListWorkflows(ns string) ([]WorkflowExecution, error) {
 	return v.en.ListWorkflows(ns)
 }
 
+// StartActivity enqueues a standalone activity in ns (this org's shard) — the
+// in-binary seam a host subsystem uses to put work on an org queue for a fleet
+// worker to claim (fn.run, studio.render), mirroring the HTTP activities API.
+func (v View) StartActivity(ns, activityID, runID string, typ TypeRef, taskQueue string, input any, retry *RetryPolicy, scheduleToClose, scheduleToStart, startToClose, heartbeat string, identity, requestID string) (*StandaloneActivity, error) {
+	return v.en.StartActivity(ns, activityID, runID, typ, taskQueue, input, retry, scheduleToClose, scheduleToStart, startToClose, heartbeat, identity, requestID)
+}
+
+// DescribeActivity loads one standalone activity in ns; ok=false when absent.
+func (v View) DescribeActivity(ns, activityID, runID string) (*StandaloneActivity, bool, error) {
+	return v.en.DescribeActivity(ns, activityID, runID)
+}
+
 // nodeSnapshot returns a copy of the current listener set under the lock so the
 // server-push loop never races ServeGated appending a gated listener.
 func (e *Embedded) nodeSnapshot() []*zap.Node {
