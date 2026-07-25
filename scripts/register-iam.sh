@@ -40,8 +40,8 @@ Create (or verify) the following application in Hanzo IAM:
     email
 
   JWKS endpoint (for server-side validation):
-    https://hanzo.id/.well-known/jwks
-    In-cluster: http://iam.hanzo.svc/.well-known/jwks
+    https://hanzo.id/v1/iam/.well-known/jwks
+    In-cluster: http://iam.hanzo.svc/v1/iam/.well-known/jwks
 
 After creating the application:
 
@@ -57,7 +57,7 @@ Verify OIDC discovery:
   curl -s https://hanzo.id/.well-known/openid-configuration | jq .
 
 Verify JWKS:
-  curl -s https://hanzo.id/.well-known/jwks | jq .keys[].kid
+  curl -s https://hanzo.id/v1/iam/.well-known/jwks | jq .keys[].kid
 
 === Namespace-to-Org Mapping ===
 

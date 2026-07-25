@@ -58,7 +58,7 @@ go build ./cmd/tasksd/
 - **Client ID**: `app-tasks`
 - **Callback**: `https://tasks.hanzo.ai/auth/sso/callback`
 - **Scopes**: openid, profile, email
-- **JWKS URI**: `https://hanzo.id/.well-known/jwks` (in-cluster: `http://iam.hanzo.svc/.well-known/jwks`)
+- **JWKS URI**: `https://hanzo.id/v1/iam/.well-known/jwks` (in-cluster: `http://iam.hanzo.svc/v1/iam/.well-known/jwks`)
 - **Discovery**: `https://hanzo.id/.well-known/openid-configuration`
 - **Registration script**: `scripts/register-iam.sh`
 
@@ -79,7 +79,7 @@ go build ./cmd/tasksd/
 
 | Env Var | Purpose | Value in K8s |
 |---------|---------|-------------|
-| `TASKS_JWT_KEY_SOURCE1` | JWKS URI for key fetching | `http://iam.hanzo.svc/.well-known/jwks` |
+| `TASKS_JWT_KEY_SOURCE1` | JWKS URI for key fetching | `http://iam.hanzo.svc/v1/iam/.well-known/jwks` |
 | `TASKS_JWT_KEY_REFRESH` | Key refresh interval | `5m` |
 | `TASKS_AUTH_AUTHORIZER` | Authorizer type | `default` |
 | `TASKS_AUTH_CLAIM_MAPPER` | Claim mapper type | `default` |
@@ -187,7 +187,7 @@ trust boundary:
 
 Production env (do-sfo3-hanzo-k8s/hanzo):
 ```
-TASKSD_JWKS_URL=http://iam.hanzo.svc/.well-known/jwks
+TASKSD_JWKS_URL=http://iam.hanzo.svc/v1/iam/.well-known/jwks
 TASKSD_JWT_ISSUER=https://hanzo.id
 TASKSD_REQUIRE_IDENTITY=true
 ```

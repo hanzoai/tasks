@@ -40,7 +40,7 @@ type IAMClaims struct {
 // (auth.RequireIdentity falls back to header-pass-through, gated by the
 // require flag).
 type JWTConfig struct {
-	JWKSURL  string        // e.g. https://hanzo.id/.well-known/jwks
+	JWKSURL  string        // e.g. https://hanzo.id/v1/iam/.well-known/jwks
 	Issuer   string        // e.g. https://hanzo.id
 	Audience string        // optional; "" → audience check skipped
 	TTL      time.Duration // JWKS cache TTL; 0 → 5 min
