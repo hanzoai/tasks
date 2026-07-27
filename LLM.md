@@ -108,9 +108,33 @@ permission model.
 - DB init (one-time): `kubectl apply -f k8s/init-db.yaml`
 
 ### CI/CD
-- GitHub Actions: `.github/workflows/build-and-publish.yml`
-- Pushes to `ghcr.io/hanzoai/tasks:{sha,branch,latest}` on main/release branches
-- Uses docker-bake.hcl for multi-arch builds (linux/amd64, linux/arm64)
+
+One way, and it runs on our own stack:
+
+    push  ->  github.com/hanzoai/tasks        (a mirror)
+              .github/workflows/sync.yml       carries refs onward
+      ->  git.hanzo.ai/hanzoai/tasks           CANONICAL
+              .hanzo/workflows/cicd.yml        tests + builds ghcr.io/hanzoai/tasks
+      ->  hanzoai/cloud go.mod                 pins the tag this repo cuts
+
+**git.hanzo.ai is canonical; GitHub is a mirror.** `.github/workflows/` holds
+exactly one file, `sync.yml`, and its only job is getting refs to the forge. Every
+build, check and deploy is a workflow under `.hanzo/workflows/`, which the forge
+reads. `.hanzo/workflows` uses GitHub Actions syntax, so a workflow moves between
+the two by changing directory and nothing else.
+
+`.hanzo/workflows/cicd.yml` is a thin trigger; all config lives in the repo-root
+`hanzo.yml` — `go test -race ./pkg/... ./cmd/...` plus `go vet`, and the image
+`ghcr.io/hanzoai/tasks` from the root `Dockerfile`. `hanzo.yml` declares no
+`deploy:` key, so **cicd.yml never deploys**: it publishes an image and stops.
+
+What this repo is actually load-bearing for is the **Go module tag**, which
+`hanzoai/cloud` `go.mod` pins. Tags are cut by hand; CI only stamps image tags off
+a tag that already exists.
+
+The `tasks` image has no live consumer today. `tasks.hanzo.ai` is served by
+cloud's embedded `clients/tasks/ui`, not by this image, and there is no App CR for
+it in `hanzoai/universe`.
 
 ### Observability
 - OTEL traces: `otel-collector.hanzo.svc:4318`
