@@ -1,5 +1,5 @@
 # Canonical CI/CD config for hanzoai/tasks — read by both the hanzoai/ci
-# reusable workflow (.github/workflows/cicd.yml) and platform.hanzo.ai
+# reusable workflow (.hanzo/workflows/cicd.yml) and platform.hanzo.ai
 # (webhook → BuildScheduler → arcd → operator rollout). One file, one way.
 #
 # The image is the root Dockerfile: native ZAP-only tasksd (no CGO, no gRPC,
