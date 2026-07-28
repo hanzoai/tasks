@@ -11,7 +11,7 @@ import (
 
 // TestStore_ConcurrentCrossOrgNoRace guards the fix for a production crash:
 // `fatal error: concurrent map writes` at store.shardFor. The prior store held
-// an unread `bootNS` set guarded by a value `mu`; withOrg shared the map by
+// an unread `bootNS` set guarded by a value `mu`; as shared the map by
 // reference but COPIED the mutex, so N org-scoped views each locked a DIFFERENT
 // mutex while writing the ONE shared map — no mutual exclusion → the runtime
 // fataled (crashing the whole cloud process / api.hanzo.ai). The dead set is
@@ -19,7 +19,7 @@ import (
 // once) so the crash can never regress. Run with -race for good measure; the
 // original bug crashed the binary outright, not merely tripped the detector.
 func TestStore_ConcurrentCrossOrgNoRace(t *testing.T) {
-	s, err := newStoreFromEnv(t.TempDir())
+	s, err := newStoreFromEnv(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestStore_ConcurrentCrossOrgNoRace(t *testing.T) {
 		wg.Add(1)
 		go func(o int) {
 			defer wg.Done()
-			os := s.withOrg(fmt.Sprintf("org-%d", o))
+			os := s.as(Org(fmt.Sprintf("org-%d", o)))
 			for i := 0; i < iters; i++ {
 				// put → shardFor: the exact path that raced across org views.
 				if err := os.put(fmt.Sprintf("ns/probe-%d", i), map[string]any{"i": i}); err != nil {
@@ -47,7 +47,7 @@ func TestStore_ConcurrentCrossOrgNoRace(t *testing.T) {
 // TestStore_FactoryDefault — TASKSD_STORE unset → sqlite shards.
 func TestStore_FactoryDefault(t *testing.T) {
 	t.Setenv("TASKSD_STORE", "")
-	s, err := newStoreFromEnv(t.TempDir())
+	s, err := newStoreFromEnv(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestStore_FactoryDefault(t *testing.T) {
 func TestStore_PersistsAcrossOpen(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tasks-persist")
 
-	s1, err := newStoreFromEnv(dir)
+	s1, err := newStoreFromEnv(dir, nil)
 	if err != nil {
 		t.Fatalf("open 1: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestStore_PersistsAcrossOpen(t *testing.T) {
 	}
 	_ = s1.close()
 
-	s2, err := newStoreFromEnv(dir)
+	s2, err := newStoreFromEnv(dir, nil)
 	if err != nil {
 		t.Fatalf("open 2: %v", err)
 	}

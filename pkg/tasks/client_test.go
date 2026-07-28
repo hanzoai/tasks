@@ -159,7 +159,7 @@ func TestNow_ZAPSubmit(t *testing.T) {
 	// is persisted before Now returns. Poll briefly to absorb any wire
 	// scheduling jitter.
 	if !eventually(t, 5*time.Second, func() bool {
-		rows, err := emb.View("").ListWorkflows("default")
+		rows, err := emb.View(Principal{}).ListWorkflows("default")
 		if err != nil {
 			return false
 		}
@@ -192,7 +192,7 @@ func TestAdd_ZAPDurableSchedule(t *testing.T) {
 
 	// Interval schedule persisted with the interval spec.
 	if !eventually(t, 5*time.Second, func() bool {
-		s, ok, err := emb.View("").DescribeSchedule("default", "sched-interval")
+		s, ok, err := emb.View(Principal{}).DescribeSchedule("default", "sched-interval")
 		if err != nil || !ok {
 			return false
 		}
@@ -203,7 +203,7 @@ func TestAdd_ZAPDurableSchedule(t *testing.T) {
 
 	// Cron schedule persisted with the cron spec.
 	if !eventually(t, 5*time.Second, func() bool {
-		s, ok, err := emb.View("").DescribeSchedule("default", "sched-cron")
+		s, ok, err := emb.View(Principal{}).DescribeSchedule("default", "sched-cron")
 		if err != nil || !ok {
 			return false
 		}

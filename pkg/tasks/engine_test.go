@@ -31,7 +31,11 @@ func TestEngine_StartWorkflow(t *testing.T) {
 	}{
 		{name: "ok", ns: "default", wfID: "wf-a", typ: TypeRef{Name: "Demo"}},
 		{name: "missing type", ns: "default", wfID: "wf-b", typ: TypeRef{}, wantErr: "workflow type required"},
-		{name: "missing namespace", ns: "ghost", wfID: "wf-c", typ: TypeRef{Name: "Demo"}, wantErr: `namespace "ghost" not registered`},
+		// A namespace is an addressing fact, not a resource to provision:
+		// starting in one that has never been seen registers it.
+		{name: "unseen namespace", ns: "ghost", wfID: "wf-c", typ: TypeRef{Name: "Demo"}},
+		{name: "unusable namespace", ns: "../escape", wfID: "wf-d", typ: TypeRef{Name: "Demo"}, wantErr: "path separator"},
+		{name: "sentinel namespace", ns: "_", wfID: "wf-e", typ: TypeRef{Name: "Demo"}, wantErr: "sentinel"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

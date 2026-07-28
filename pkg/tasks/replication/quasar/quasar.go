@@ -351,7 +351,7 @@ func (t *MemoryTransport) LocalID() string { return t.id }
 // method on it won't compile — same shape as frameID above.
 func FrameKey(f replication.Frame) []byte {
 	var buf bytes.Buffer
-	buf.WriteString(f.OrgID)
+	buf.WriteString(f.Principal)
 	buf.WriteByte('/')
 	buf.WriteString(f.Namespace)
 	buf.WriteByte('/')

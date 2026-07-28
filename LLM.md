@@ -205,7 +205,9 @@ trust boundary:
   audience are checked against `TASKSD_JWT_ISSUER` / `TASKSD_JWT_AUDIENCE`.
 - On success, `X-Org-Id` is minted from the `owner` claim, `X-User-Id`
   from `sub`, `X-User-Email` from `email`. Per-org store scoping uses
-  `engine.WithOrg(auth.OrgID(ctx))`.
+  `engine.As(Org(auth.OrgID(ctx)))`. The frontend scopes to the ORG; a
+  host that wants project- or user-level isolation asks for it explicitly
+  via `Embedded.View(Principal{Org, Project, User})`.
 - `TASKSD_REQUIRE_IDENTITY=true` (production) rejects requests without
   a validated JWT. Default false keeps embedded/dev path functional.
 
@@ -254,12 +256,29 @@ and tested today:
   workflow's peer.
 - Schedules (cron + interval), namespaces, deployments (worker
   versioning), nexus endpoints, identities, visibility query parser,
-  per-org store scoping, SSE event stream, replication scaffolding
+  per-tenant store scoping, SSE event stream, replication scaffolding
   (`replication/` quasar + local), migration tool.
 
-Persistence = per-`(org, namespace)` SQLite shard (`pkg/tasks/store`),
-WAL, single-writer, `kv` + `history` + `idem` + `meta` tables. Survives
-restart (`TestStore_PersistsAcrossOpen`).
+Persistence = per-`(principal, namespace)` SQLite shard
+(`pkg/tasks/store`), WAL, single-writer, `kv` + `history` + `idem` +
+`meta` tables. Survives restart (`TestStore_PersistsAcrossOpen`).
+
+A `Principal` is the tenant that owns a shard — an org, optionally
+narrowed to a project and a user. It is one value used in the two places
+tenancy is decided, so they cannot disagree: the shard's directory
+(`<data>/<org>/<project>/<user>/<ns>.db`, each unset leg written `_`) and
+the key its DEK is wrapped under. Shards and namespaces are created on
+first use; nothing is declared up front.
+
+`EmbedConfig.MasterKey` (32 bytes, `KMS_MASTER_KEY` base64 for `tasksd`)
+opens every shard encrypted at rest. Each file carries its own DEK,
+wrapped under a KEK derived master -> org -> project -> user and stored
+beside it as `<ns>.db.dek`, so rotating the master rewraps sidecars and
+never touches ciphertext. A keyed shard is ciphertext on every build:
+`hanzoai/sqlite` uses the live libsqlcipher codec when one is linked and
+its pure-Go SQLCipher envelope when one is not. On the envelope the file
+is sealed at checkpoint/close rather than per commit, which is what the
+manager's sweep bounds. Unset leaves shards plaintext (dev).
 
 ### What is genuinely missing (the real gap)
 

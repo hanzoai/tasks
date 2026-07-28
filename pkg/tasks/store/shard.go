@@ -5,8 +5,13 @@
 //
 // Layout on disk:
 //
-//	<rootDir>/<orgID>/<namespace>.db   — one SQLite file per namespace
-//	<rootDir>/_/<namespace>.db         — orgID == "" (embedded/dev)
+//	<rootDir>/<org>/<project>/<user>/<namespace>.db
+//
+// The three directory levels are the Principal that owns the shard, each
+// unset leg written as the sentinel "_" (see principal.go). The root
+// tenant — the unscoped embedded / dev path — is therefore <rootDir>/_/_/_.
+//
+// A shard is created on first use. Namespaces are not declared up front.
 //
 // Schema (single table; key/value blob):
 //
@@ -15,6 +20,12 @@
 //	  value BLOB NOT NULL,
 //	  upd   INTEGER NOT NULL
 //	);
+//
+// Encryption:
+//
+//	A non-nil master key opens every shard at rest encrypted, under a DEK
+//	of its own wrapped for its Principal (see dek.go). A nil master key
+//	opens plaintext — the zero-config dev posture.
 //
 // Replication:
 //
@@ -41,10 +52,6 @@ import (
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
 )
 
-// SentinelOrg is the on-disk directory name for the empty org slot. We
-// avoid using "" so the path stays well-formed.
-const SentinelOrg = "_"
-
 // IdleEvictAfter sets how long an open shard may sit unused before the
 // manager closes it. Mutable for tests.
 var IdleEvictAfter = 10 * time.Minute
@@ -55,6 +62,7 @@ var ErrClosed = errors.New("store: manager closed")
 // Manager owns the on-disk shard layout and the open-shard cache.
 type Manager struct {
 	rootDir    string
+	master     []byte
 	replicator replication.Replicator
 	mu         sync.Mutex
 	shards     map[shardKey]*Shard
@@ -63,27 +71,41 @@ type Manager struct {
 }
 
 type shardKey struct {
-	org string
-	ns  string
+	principal Principal
+	ns        string
 }
 
 // New opens the manager rooted at rootDir. The directory is created on
 // demand; errors are returned only for unrecoverable IO problems.
-func New(rootDir string) (*Manager, error) {
+//
+// master is the 32-byte root key every shard's DEK is wrapped under. A nil
+// master opens shards plaintext — the zero-config dev posture; any other
+// length is rejected here rather than at the first shard open.
+func New(rootDir string, master []byte) (*Manager, error) {
 	if rootDir == "" {
 		return nil, fmt.Errorf("store.New: rootDir required")
+	}
+	if master != nil && len(master) != MasterKeyLen {
+		return nil, fmt.Errorf("store.New: master key must be %d bytes, got %d", MasterKeyLen, len(master))
 	}
 	if err := os.MkdirAll(rootDir, 0o755); err != nil {
 		return nil, fmt.Errorf("store.New: mkdir: %w", err)
 	}
 	m := &Manager{
 		rootDir: rootDir,
+		master:  master,
 		shards:  make(map[shardKey]*Shard),
 		stopGC:  make(chan struct{}),
 	}
 	go m.gc()
 	return m, nil
 }
+
+// MasterKeyLen is the required length of the store's root key.
+const MasterKeyLen = 32
+
+// Encrypted reports whether shards are opened at rest encrypted.
+func (m *Manager) Encrypted() bool { return m.master != nil }
 
 // WithReplicator installs r as the consensus driver for every shard
 // opened from now on, and re-installs it on already-open shards.
@@ -98,7 +120,11 @@ func (m *Manager) WithReplicator(r replication.Replicator) {
 		return
 	}
 	r.Subscribe(func(ctx context.Context, f replication.Frame) error {
-		s, err := m.Get(ctx, f.OrgID, f.Namespace)
+		p, err := ParsePrincipal(f.Principal)
+		if err != nil {
+			return err
+		}
+		s, err := m.Get(ctx, p, f.Namespace)
 		if err != nil {
 			return err
 		}
@@ -106,16 +132,19 @@ func (m *Manager) WithReplicator(r replication.Replicator) {
 	})
 }
 
-// Get returns the open shard for (org, ns), creating it on disk if
+// Get returns the open shard for (principal, ns), creating it on disk if
 // needed. The returned Shard is safe for concurrent use.
-func (m *Manager) Get(ctx context.Context, org, ns string) (*Shard, error) {
+func (m *Manager) Get(ctx context.Context, p Principal, ns string) (*Shard, error) {
 	if m.closed.Load() {
 		return nil, ErrClosed
 	}
-	if ns == "" {
-		return nil, fmt.Errorf("store.Get: namespace required")
+	if err := ValidName(ns); err != nil {
+		return nil, fmt.Errorf("store.Get: namespace: %w", err)
 	}
-	k := shardKey{org: orgDir(org), ns: ns}
+	if err := p.Valid(); err != nil {
+		return nil, err
+	}
+	k := shardKey{principal: p, ns: ns}
 	m.mu.Lock()
 	if s, ok := m.shards[k]; ok {
 		s.touch()
@@ -124,12 +153,16 @@ func (m *Manager) Get(ctx context.Context, org, ns string) (*Shard, error) {
 	}
 	m.mu.Unlock()
 
-	dir := filepath.Join(m.rootDir, k.org)
+	dir := filepath.Join(m.rootDir, p.dir())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("store.Get: mkdir %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, ns+".db")
-	s, err := openShard(path, k.org, k.ns)
+	dek, err := shardDEK(path, p, m.master)
+	if err != nil {
+		return nil, err
+	}
+	s, err := openShard(path, p, ns, dek)
 	if err != nil {
 		return nil, err
 	}
@@ -147,35 +180,53 @@ func (m *Manager) Get(ctx context.Context, org, ns string) (*Shard, error) {
 	return s, nil
 }
 
-// ListOrgs enumerates every org that owns at least one shard directory,
-// mapping the sentinel dir back to the unscoped org "". Used by the cron
-// sweeper, which must see EVERY org's schedules from the root engine.
-func (m *Manager) ListOrgs(ctx context.Context) ([]string, error) {
-	entries, err := os.ReadDir(m.rootDir)
+// ListPrincipals enumerates every tenant that owns at least one shard.
+// Used by the cron sweeper, which must see EVERY tenant's schedules from
+// the root engine.
+func (m *Manager) ListPrincipals(ctx context.Context) ([]Principal, error) {
+	var out []Principal
+	err := m.walkTenants(m.rootDir, nil, &out)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	out := make([]string, 0, len(entries))
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out, nil
+}
+
+// walkTenants descends exactly Depth directory levels, collecting the
+// principal each leaf directory encodes.
+func (m *Manager) walkTenants(dir string, legs []string, out *[]Principal) error {
+	if len(legs) == Depth {
+		p, err := ParsePrincipal(strings.Join(legs, "/"))
+		if err != nil {
+			// A directory that does not encode a principal is not ours.
+			return nil
+		}
+		*out = append(*out, p)
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		if name == SentinelOrg {
-			name = ""
+		if err := m.walkTenants(filepath.Join(dir, e.Name()), append(legs, e.Name()), out); err != nil {
+			return err
 		}
-		out = append(out, name)
 	}
-	return out, nil
+	return nil
 }
 
-// ListShards enumerates every namespace shard under org. Used by
+// ListShards enumerates every namespace shard the principal owns. Used by
 // cross-namespace operations like ListNamespaces().
-func (m *Manager) ListShards(ctx context.Context, org string) ([]*Shard, error) {
-	dir := filepath.Join(m.rootDir, orgDir(org))
+func (m *Manager) ListShards(ctx context.Context, p Principal) ([]*Shard, error) {
+	dir := filepath.Join(m.rootDir, p.dir())
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -190,7 +241,7 @@ func (m *Manager) ListShards(ctx context.Context, org string) ([]*Shard, error) 
 			continue
 		}
 		ns := strings.TrimSuffix(name, ".db")
-		s, err := m.Get(ctx, org, ns)
+		s, err := m.Get(ctx, p, ns)
 		if err != nil {
 			return nil, err
 		}
@@ -225,9 +276,12 @@ func (m *Manager) Close() error {
 	return firstErr
 }
 
-// gc closes idle shards every minute.
+// gc seals and closes idle shards every minute. Sealing every resident
+// shard on the same tick bounds how much an encrypted shard can lose to an
+// unclean exit (see Shard.Checkpoint); it is a no-op for a shard that
+// persists per commit.
 func (m *Manager) gc() {
-	t := time.NewTicker(time.Minute)
+	t := time.NewTicker(SweepEvery)
 	defer t.Stop()
 	for {
 		select {
@@ -235,7 +289,25 @@ func (m *Manager) gc() {
 			return
 		case <-t.C:
 			m.evictIdle()
+			m.checkpointAll()
 		}
+	}
+}
+
+// SweepEvery is how often idle shards are evicted and resident shards
+// sealed. Mutable for tests.
+var SweepEvery = time.Minute
+
+// checkpointAll seals every resident shard.
+func (m *Manager) checkpointAll() {
+	m.mu.Lock()
+	live := make([]*Shard, 0, len(m.shards))
+	for _, s := range m.shards {
+		live = append(live, s)
+	}
+	m.mu.Unlock()
+	for _, s := range live {
+		_ = s.Checkpoint()
 	}
 }
 
@@ -249,14 +321,6 @@ func (m *Manager) evictIdle() {
 			delete(m.shards, k)
 		}
 	}
-}
-
-// orgDir maps the on-disk directory name for an org id.
-func orgDir(org string) string {
-	if org == "" {
-		return SentinelOrg
-	}
-	return org
 }
 
 // CopyFile is a helper used by the migration tool. Returns bytes copied.
@@ -277,9 +341,9 @@ func CopyFile(dst, src string) (int64, error) {
 	return io.Copy(out, in)
 }
 
-// ShardPath returns the on-disk file for (org, ns).
-func (m *Manager) ShardPath(org, ns string) string {
-	return filepath.Join(m.rootDir, orgDir(org), ns+".db")
+// ShardPath returns the on-disk file for (principal, ns).
+func (m *Manager) ShardPath(p Principal, ns string) string {
+	return filepath.Join(m.rootDir, p.dir(), ns+".db")
 }
 
 // Replicator returns the currently-installed driver, or nil.

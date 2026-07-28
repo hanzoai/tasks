@@ -127,7 +127,7 @@ func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Du
 	if _, ok, _ := e.DescribeNamespace(ns); !ok {
 		return nil, false, fmt.Errorf("namespace %q not registered", ns)
 	}
-	unlock := e.runMu.lock(e.orgID + "|claim|" + ns)
+	unlock := e.runMu.lock(e.principal.String() + "|claim|" + ns)
 	defer unlock()
 	if err := e.reapExpiredLeases(ns); err != nil {
 		return nil, false, err

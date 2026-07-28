@@ -83,7 +83,7 @@ func TestScheduleSweepFires(t *testing.T) {
 // mechanics cloud's platform cron and its console visibility stand on.
 func TestScheduleSweepFiresOrgScoped(t *testing.T) {
 	root := newEngine(newStore())
-	org := root.WithOrg("acme")
+	org := root.As(Org("acme"))
 	if err := org.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "acme"}}); err != nil {
 		t.Fatalf("RegisterNamespace: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestScheduleSweepSkipsBrokenEntry(t *testing.T) {
 func TestViewScheduleCRUD(t *testing.T) {
 	en := newEngine(newStore())
 	emb := &Embedded{engine: en}
-	v := emb.View("hanzo")
+	v := emb.View(Org("hanzo"))
 
 	if err := v.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "hanzo"}}); err != nil {
 		t.Fatalf("RegisterNamespace: %v", err)

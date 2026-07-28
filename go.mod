@@ -10,7 +10,7 @@ retract (
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.4
-	github.com/hanzoai/sqlite v0.1.4
+	github.com/hanzoai/sqlite v0.4.0
 	github.com/luxfi/consensus v1.36.3
 	github.com/luxfi/log v1.4.3
 	github.com/luxfi/zap v1.2.6
@@ -24,7 +24,7 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.1-0.20241114170450-2d3c2a9cc518 // indirect
 	github.com/gorilla/rpc v1.2.1 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
@@ -55,11 +55,11 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/supranational/blst v0.3.16 // indirect
 	go.uber.org/mock v0.6.0 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260529124908-c761662dc8c9 // indirect
-	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
+	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/tools v0.47.0 // indirect
 	gonum.org/v1/gonum v0.17.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
@@ -69,12 +69,13 @@ require (
 )
 
 require (
+	github.com/hanzoai/csqlite v0.1.0 // indirect
+	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/luxfi/bft v0.1.5 // indirect
 	github.com/luxfi/pq v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/mattn/go-sqlite3 v1.14.47 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 	modernc.org/sqlite v1.51.0 // indirect
 )

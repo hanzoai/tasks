@@ -26,6 +26,7 @@ import (
 	"github.com/hanzoai/tasks/pkg/tasks/migration"
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
 	"github.com/hanzoai/tasks/pkg/tasks/routing"
+	storepkg "github.com/hanzoai/tasks/pkg/tasks/store"
 	"github.com/luxfi/zap"
 )
 
@@ -37,10 +38,17 @@ type EmbedConfig struct {
 	ZAPPort   int          // 0 → 9999
 	Namespace string       // "" → "default"
 	Logger    *slog.Logger // nil → slog.Default()
+	// MasterKey is the 32-byte root key every shard is encrypted under.
+	// Each shard file gets a data-encryption key of its own, wrapped under
+	// a key the shard's tenant derives from this one, so rotating the
+	// master rewraps the sidecars and leaves the ciphertext untouched.
+	// nil leaves shards plaintext — the zero-config dev posture. Supply it
+	// from KMS in production; hold it nowhere else.
+	MasterKey []byte
 	// JWTValidator validates the auth_token field on every ZAP request.
 	// nil = no ZAP-side validation (dev / embedded). When non-nil and
 	// RequireIdentity=true, every ZAP request must carry an auth_token
-	// that validates against IAM; per-request engine is WithOrg-scoped
+	// that validates against IAM; per-request engine is scoped
 	// to claims.Owner. This mirrors the HTTP middleware trust boundary.
 	JWTValidator    *auth.Validator
 	RequireIdentity bool
@@ -86,7 +94,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		cfg.Logger = slog.Default()
 	}
 
-	st, err := newStoreFromEnv(cfg.DataDir)
+	st, err := newStoreFromEnv(cfg.DataDir, cfg.MasterKey)
 	if err != nil {
 		return nil, fmt.Errorf("tasks.Embed: store: %w", err)
 	}
@@ -107,17 +115,12 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	en := newEngine(st)
 	migr := migration.NewCoordinator(st.mgr, repl)
 
-	// Bootstrap default namespace so the UI has something to render
-	// on first boot. Idempotent.
-	_ = en.RegisterNamespace(Namespace{
-		NamespaceInfo: NamespaceInfo{
-			Name:        cfg.Namespace,
-			State:       "NAMESPACE_STATE_REGISTERED",
-			Description: "Default namespace (bootstrapped)",
-			Region:      "embedded",
-		},
-		Config: NamespaceCfg{WorkflowExecutionRetentionTtl: "720h", APSLimit: 400},
-	})
+	// Bootstrap the root tenant's default namespace so the UI has
+	// something to render on first boot. Every other namespace, in every
+	// other tenant, comes into existence on first use (engine.namespace).
+	if _, err := en.namespace(cfg.Namespace); err != nil {
+		return nil, fmt.Errorf("tasks.Embed: namespace %q: %w", cfg.Namespace, err)
+	}
 
 	node := zap.NewNode(zap.NodeConfig{
 		NodeID:      "tasks-embed",
@@ -209,8 +212,28 @@ func (e *Embedded) ZAPPort() int {
 // route back to the owning shard via the task's org.
 type View struct{ en *engine }
 
-// View returns the org-scoped control-plane view. org "" is the root view.
-func (e *Embedded) View(org string) View { return View{en: e.engine.WithOrg(org)} }
+// mustPrincipal decodes a principal carried on a dispatch token. The token
+// was minted from a live engine view, so an undecodable one is a lost
+// tenant, not a caller error: fall back to the root tenant rather than drop
+// the delivery.
+func mustPrincipal(s string) Principal {
+	p, err := storepkg.ParsePrincipal(s)
+	if err != nil {
+		return Principal{}
+	}
+	return p
+}
+
+// Principal is the tenant a store view is scoped to: an org, optionally
+// narrowed to a project and a user. The zero value is the root tenant.
+type Principal = storepkg.Principal
+
+// Org returns the principal naming an org.
+func Org(org string) Principal { return storepkg.Org(org) }
+
+// View returns the control-plane view scoped to p. The zero Principal is
+// the root view.
+func (e *Embedded) View(p Principal) View { return View{en: e.engine.As(p)} }
 
 // RegisterNamespace idempotently registers ns in this org's shard — required
 // before any workflow (including a schedule fire) can start in it.
@@ -410,7 +433,7 @@ func (e *Embedded) handleNamespaceMigrate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	job, err := e.migr.Migrate(r.Context(), migration.Job{
-		OrgID:     auth.OrgID(r.Context()),
+		Principal: Org(auth.OrgID(r.Context())).String(),
 		Namespace: ns,
 		To:        req.ToNode,
 	})
@@ -463,7 +486,7 @@ func (e *Embedded) ActivitiesForOrg(org, ns string) ([]StandaloneActivity, error
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("tasks engine not ready")
 	}
-	rows, _, err := e.engine.WithOrg(org).ListActivities(ns, "", 0)
+	rows, _, err := e.engine.As(Org(org)).ListActivities(ns, "", 0)
 	return rows, err
 }
 
@@ -477,7 +500,7 @@ func (e *Embedded) ActivitiesPageForOrg(org, ns, cursor string, pageSize int) ([
 	if e == nil || e.engine == nil {
 		return nil, "", fmt.Errorf("tasks engine not ready")
 	}
-	return e.engine.WithOrg(org).ListActivities(ns, cursor, pageSize)
+	return e.engine.As(Org(org)).ListActivities(ns, cursor, pageSize)
 }
 
 // CancelActivityForOrg cancels a standalone activity in org's shard — the
@@ -490,7 +513,7 @@ func (e *Embedded) CancelActivityForOrg(org, ns, activityID, runID, reason, iden
 	if e == nil || e.engine == nil {
 		return fmt.Errorf("tasks engine not ready")
 	}
-	return e.engine.WithOrg(org).CancelActivity(ns, activityID, runID, reason, identity)
+	return e.engine.As(Org(org)).CancelActivity(ns, activityID, runID, reason, identity)
 }
 
 // EventsHandler returns the SSE realtime stream of engine events.
@@ -515,7 +538,7 @@ func (e *Embedded) HTTPHandler() http.Handler {
 
 	// /v1/tasks/namespaces
 	mux.HandleFunc("/v1/tasks/namespaces", func(w http.ResponseWriter, r *http.Request) {
-		en := e.engine.WithOrg(auth.OrgID(r.Context()))
+		en := e.engine.As(Org(auth.OrgID(r.Context())))
 		switch r.Method {
 		case http.MethodGet:
 			rows, err := en.ListNamespaces()
@@ -541,14 +564,14 @@ func (e *Embedded) HTTPHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		en := e.engine.WithOrg(auth.OrgID(r.Context()))
+		en := e.engine.As(Org(auth.OrgID(r.Context())))
 		rows, err := en.ListAllNexusEndpoints()
 		writeOK(w, err, map[string]any{"endpoints": rows})
 	})
 
 	// /v1/tasks/namespaces/{ns}[/...]
 	mux.HandleFunc("/v1/tasks/namespaces/", func(w http.ResponseWriter, r *http.Request) {
-		en := e.engine.WithOrg(auth.OrgID(r.Context()))
+		en := e.engine.As(Org(auth.OrgID(r.Context())))
 		rest := strings.TrimPrefix(r.URL.Path, "/v1/tasks/namespaces/")
 		parts := strings.Split(rest, "/")
 		ns := parts[0]
@@ -1585,7 +1608,7 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 			}
 			return rootEn, 0, ""
 		}
-		return rootEn.WithOrg(claims.Owner), 0, ""
+		return rootEn.As(Org(claims.Owner)), 0, ""
 	}
 	wrap := func(fn func(en *engine, req map[string]any) (any, uint32, string)) zap.Handler {
 		return func(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
@@ -2052,9 +2075,9 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 			return objectAck(0, "task token not found", 404)
 		}
 		// Apply on the org that owns the run: org-scoped runs live in a prefixed
-		// store partition rootEn cannot see. t.orgID == "" (unscoped/loopback)
-		// makes WithOrg a no-op, so the in-process path is unchanged.
-		oe := en.WithOrg(t.orgID)
+		// store partition rootEn cannot see. The root principal (unscoped /
+		// loopback) makes As a no-op, so the in-process path is unchanged.
+		oe := en.As(mustPrincipal(t.principal))
 		// Apply the decider's command batch. kind=2 (scheduleActivity)
 		// carries the deterministic seq + activity spec — this is where a
 		// workflow-driven activity enters the durable, event-sourced path.
@@ -2108,7 +2131,7 @@ func respondActivityCompletedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.WithOrg(pt.orgID).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
+		if err := en.As(mustPrincipal(pt.principal)).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)
@@ -2122,7 +2145,7 @@ func respondActivityFailedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.WithOrg(pt.orgID).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
+		if err := en.As(mustPrincipal(pt.principal)).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)

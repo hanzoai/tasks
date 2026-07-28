@@ -15,7 +15,7 @@ import (
 
 func newMgr(t *testing.T) *store.Manager {
 	t.Helper()
-	mgr, err := store.New(t.TempDir())
+	mgr, err := store.New(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -26,7 +26,7 @@ func newMgr(t *testing.T) *store.Manager {
 func TestShard_PutGetDel(t *testing.T) {
 	mgr := newMgr(t)
 	ctx := context.Background()
-	s, err := mgr.Get(ctx, "org-a", "ns1")
+	s, err := mgr.Get(ctx, store.Org("org-a"), "ns1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +48,8 @@ func TestShard_PutGetDel(t *testing.T) {
 func TestShard_NamespaceIsolation(t *testing.T) {
 	mgr := newMgr(t)
 	ctx := context.Background()
-	a, _ := mgr.Get(ctx, "org-x", "alpha")
-	b, _ := mgr.Get(ctx, "org-x", "beta")
+	a, _ := mgr.Get(ctx, store.Org("org-x"), "alpha")
+	b, _ := mgr.Get(ctx, store.Org("org-x"), "beta")
 	_ = a.Put(ctx, "wf/alpha/k/1", []byte("A"))
 	_ = b.Put(ctx, "wf/beta/k/1", []byte("B"))
 	if _, ok, _ := a.Get(ctx, "wf/beta/k/1"); ok {
@@ -63,8 +63,8 @@ func TestShard_NamespaceIsolation(t *testing.T) {
 func TestShard_OrgIsolation(t *testing.T) {
 	mgr := newMgr(t)
 	ctx := context.Background()
-	a, _ := mgr.Get(ctx, "org-1", "shared")
-	b, _ := mgr.Get(ctx, "org-2", "shared")
+	a, _ := mgr.Get(ctx, store.Org("org-1"), "shared")
+	b, _ := mgr.Get(ctx, store.Org("org-2"), "shared")
 	_ = a.Put(ctx, "wf/shared/k/1", []byte("from-1"))
 	if _, ok, _ := b.Get(ctx, "wf/shared/k/1"); ok {
 		t.Fatal("org-2 saw org-1 data through same namespace name")
@@ -80,7 +80,7 @@ func TestShard_ConcurrentOpenSafe(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s, err := mgr.Get(ctx, "org", "ns")
+			s, err := mgr.Get(ctx, store.Org("org"), "ns")
 			if err != nil {
 				t.Errorf("Get: %v", err)
 				return
@@ -101,7 +101,7 @@ func TestShard_ConcurrentOpenSafe(t *testing.T) {
 func TestShard_PrefixScan(t *testing.T) {
 	mgr := newMgr(t)
 	ctx := context.Background()
-	s, _ := mgr.Get(ctx, "", "ns")
+	s, _ := mgr.Get(ctx, store.Org(""), "ns")
 	_ = s.Put(ctx, "wf/ns/a/1", []byte("1"))
 	_ = s.Put(ctx, "wf/ns/a/2", []byte("2"))
 	_ = s.Put(ctx, "wf/ns/b/1", []byte("3"))
@@ -119,15 +119,15 @@ func TestShard_PrefixScan(t *testing.T) {
 
 func TestShard_CloseAndReopen(t *testing.T) {
 	dir := t.TempDir()
-	mgr1, _ := store.New(dir)
+	mgr1, _ := store.New(dir, nil)
 	ctx := context.Background()
-	s1, _ := mgr1.Get(ctx, "org", "ns")
+	s1, _ := mgr1.Get(ctx, store.Org("org"), "ns")
 	_ = s1.Put(ctx, "wf/ns/k/1", []byte("persisted"))
 	_ = mgr1.Close()
 
-	mgr2, _ := store.New(dir)
+	mgr2, _ := store.New(dir, nil)
 	defer mgr2.Close()
-	s2, _ := mgr2.Get(ctx, "org", "ns")
+	s2, _ := mgr2.Get(ctx, store.Org("org"), "ns")
 	v, ok, err := s2.Get(ctx, "wf/ns/k/1")
 	if err != nil || !ok || string(v) != "persisted" {
 		t.Fatalf("reopen: ok=%v v=%q err=%v", ok, v, err)
@@ -138,9 +138,9 @@ func TestShard_ListShardsEnumerates(t *testing.T) {
 	mgr := newMgr(t)
 	ctx := context.Background()
 	for _, ns := range []string{"alpha", "beta", "gamma"} {
-		_, _ = mgr.Get(ctx, "org", ns)
+		_, _ = mgr.Get(ctx, store.Org("org"), ns)
 	}
-	shards, err := mgr.ListShards(ctx, "org")
+	shards, err := mgr.ListShards(ctx, store.Org("org"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestShard_IdleEvict(t *testing.T) {
 	t.Cleanup(func() { store.IdleEvictAfter = old })
 	mgr := newMgr(t)
 	ctx := context.Background()
-	_, _ = mgr.Get(ctx, "org", "scratch")
+	_, _ = mgr.Get(ctx, store.Org("org"), "scratch")
 	if mgr.OpenShardCount() != 1 {
 		t.Fatal("expected 1 open shard after Get")
 	}
@@ -172,7 +172,7 @@ func TestShard_ReplicatorAppliesFrames(t *testing.T) {
 	rep := replication.NewLocal()
 	mgr.WithReplicator(rep)
 	ctx := context.Background()
-	s, _ := mgr.Get(ctx, "org", "ns")
+	s, _ := mgr.Get(ctx, store.Org("org"), "ns")
 	if err := s.Put(ctx, "wf/ns/k/1", []byte("v")); err != nil {
 		t.Fatal(err)
 	}
@@ -184,19 +184,19 @@ func TestShard_ReplicatorAppliesFrames(t *testing.T) {
 
 func TestShard_ManagerRoundTripPath(t *testing.T) {
 	mgr := newMgr(t)
-	if mgr.ShardPath("", "ns") == "" {
+	if mgr.ShardPath(store.Org(""), "ns") == "" {
 		t.Fatal("expected non-empty path for sentinel org")
 	}
-	if got := filepath.Base(mgr.ShardPath("org-x", "alpha")); got != "alpha.db" {
+	if got := filepath.Base(mgr.ShardPath(store.Org("org-x"), "alpha")); got != "alpha.db" {
 		t.Fatalf("ShardPath base = %q, want alpha.db", got)
 	}
 }
 
 func TestShard_NsFromKey(t *testing.T) {
 	cases := []struct {
-		key  string
-		ns   string
-		ok   bool
+		key string
+		ns  string
+		ok  bool
 	}{
 		{"ns/foo", "foo", true},
 		{"wf/myns/wfid/runid", "myns", true},

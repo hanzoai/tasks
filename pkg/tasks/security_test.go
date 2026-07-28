@@ -17,8 +17,8 @@ func TestEngineWithOrg_KeyspaceIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := en.WithOrg("org-a")
-	b := en.WithOrg("org-b")
+	a := en.As(Org("org-a"))
+	b := en.As(Org("org-b"))
 
 	if err := a.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "shared", State: "NAMESPACE_STATE_REGISTERED"}}); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestEngineEmit_StampsOrgID(t *testing.T) {
 	en := newEngine(newStore())
 	_ = en.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "default", State: "NAMESPACE_STATE_REGISTERED"}})
 	_, ch := en.broker.subscribe()
-	scoped := en.WithOrg("org-x")
+	scoped := en.As(Org("org-x"))
 
 	// Bootstrap namespace under org-x so StartWorkflow finds it.
 	_ = scoped.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "default", State: "NAMESPACE_STATE_REGISTERED"}})
@@ -88,8 +88,8 @@ func TestEngineEmit_StampsOrgID(t *testing.T) {
 func TestVisibilityQuery_CannotWidenScope(t *testing.T) {
 	en := newEngine(newStore())
 	_ = en.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "default", State: "NAMESPACE_STATE_REGISTERED"}})
-	a := en.WithOrg("org-a")
-	b := en.WithOrg("org-b")
+	a := en.As(Org("org-a"))
+	b := en.As(Org("org-b"))
 	_ = a.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "default", State: "NAMESPACE_STATE_REGISTERED"}})
 	_ = b.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: "default", State: "NAMESPACE_STATE_REGISTERED"}})
 	_, _ = a.StartWorkflow("default", "wf-a", "", TypeRef{Name: "DemoA"}, "default", nil)

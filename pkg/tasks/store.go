@@ -13,17 +13,16 @@ import (
 )
 
 // store is the engine-facing facade. Each operation routes through a
-// per-(org, namespace) SQLite shard managed by storepkg.Manager. Keys
-// are parsed to determine routing — the canonical layout encodes the
+// per-(principal, namespace) SQLite shard managed by storepkg.Manager.
+// Keys are parsed to determine routing — the canonical layout encodes the
 // namespace as the second segment for every kind except `ns/<name>`
 // (which is the namespace's own registry row, stored in that
 // namespace's shard) and bare cross-namespace scans.
 //
-// orgID == "" preserves the embedded/dev path: shards live under
-// <root>/_/ (sentinel directory).
+// The zero principal is the root tenant: the embedded / dev path.
 type store struct {
-	mgr   *storepkg.Manager
-	orgID string
+	mgr       *storepkg.Manager
+	principal Principal
 }
 
 // newStore returns a sqlite-backed single-shard store rooted at a temp dir.
@@ -33,7 +32,7 @@ func newStore() *store {
 	if err != nil {
 		panic(fmt.Errorf("newStore: tempdir: %w", err))
 	}
-	mgr, err := storepkg.New(dir)
+	mgr, err := storepkg.New(dir, nil)
 	if err != nil {
 		panic(fmt.Errorf("newStore: %w", err))
 	}
@@ -45,14 +44,17 @@ func newStore() *store {
 //	(unset) | "sqlite"  → per-namespace SQLite shards under dataDir
 //	"memory"            → temp directory under os.TempDir() (volatile)
 //	any other value     → error
-func newStoreFromEnv(dataDir string) (*store, error) {
+//
+// master is the root key every shard's DEK is wrapped under; nil opens
+// shards plaintext.
+func newStoreFromEnv(dataDir string, master []byte) (*store, error) {
 	mode := os.Getenv("TASKSD_STORE")
 	switch mode {
 	case "", "sqlite":
 		if dataDir == "" {
 			return nil, fmt.Errorf("TASKSD_STORE=sqlite requires non-empty data dir")
 		}
-		mgr, err := storepkg.New(dataDir)
+		mgr, err := storepkg.New(dataDir, master)
 		if err != nil {
 			return nil, err
 		}
@@ -67,12 +69,12 @@ func newStoreFromEnv(dataDir string) (*store, error) {
 // Manager exposes the underlying shard manager (for migration / cluster diagnostics).
 func (s *store) Manager() *storepkg.Manager { return s.mgr }
 
-// withOrg returns a store view scoped to orgID; it shares the manager.
-func (s *store) withOrg(orgID string) *store {
-	if orgID == s.orgID {
+// as returns a store view scoped to p; it shares the manager.
+func (s *store) as(p Principal) *store {
+	if p == s.principal {
 		return s
 	}
-	return &store{mgr: s.mgr, orgID: orgID}
+	return &store{mgr: s.mgr, principal: p}
 }
 
 func (s *store) close() error {
@@ -89,7 +91,7 @@ func (s *store) shardFor(ctx context.Context, key string) (*storepkg.Shard, erro
 	if !ok {
 		return nil, fmt.Errorf("store: cannot route key %q", key)
 	}
-	return s.mgr.Get(ctx, s.orgID, ns)
+	return s.mgr.Get(ctx, s.principal, ns)
 }
 
 // put serializes v and writes to the resolved shard.
@@ -139,7 +141,7 @@ func (s *store) del(key string) error {
 func (s *store) list(prefix string, fn func(key string, body []byte) error) error {
 	ctx := context.Background()
 	if storepkg.IsCrossNamespacePrefix(prefix) {
-		shards, err := s.mgr.ListShards(ctx, s.orgID)
+		shards, err := s.mgr.ListShards(ctx, s.principal)
 		if err != nil {
 			return err
 		}
@@ -154,32 +156,31 @@ func (s *store) list(prefix string, fn func(key string, body []byte) error) erro
 	if ns == "" {
 		return fmt.Errorf("store.list: missing namespace in prefix %q", prefix)
 	}
-	sh, err := s.mgr.Get(ctx, s.orgID, ns)
+	sh, err := s.mgr.Get(ctx, s.principal, ns)
 	if err != nil {
 		return err
 	}
 	return sh.List(ctx, prefix, fn)
 }
 
-// listAllOrgs iterates entries with the given prefix across EVERY org's
-// shards — the root cron sweeper's view of the world. fn receives the
-// owning org alongside each entry so the caller can act through an
-// org-scoped engine view (WithOrg) and hit the right shard.
-func (s *store) listAllOrgs(prefix string, fn func(org, key string, body []byte) error) error {
+// listEveryTenant iterates entries with the given prefix across EVERY
+// tenant's shards — the root cron sweeper's view of the world. fn receives
+// the owning principal alongside each entry so the caller can act through
+// that tenant's engine view (engine.as) and hit the right shard.
+func (s *store) listEveryTenant(prefix string, fn func(p Principal, key string, body []byte) error) error {
 	ctx := context.Background()
-	orgs, err := s.mgr.ListOrgs(ctx)
+	tenants, err := s.mgr.ListPrincipals(ctx)
 	if err != nil {
 		return err
 	}
-	for _, org := range orgs {
-		shards, err := s.mgr.ListShards(ctx, org)
+	for _, p := range tenants {
+		shards, err := s.mgr.ListShards(ctx, p)
 		if err != nil {
 			return err
 		}
 		for _, sh := range shards {
-			org := org
 			if err := sh.List(ctx, prefix, func(key string, body []byte) error {
-				return fn(org, key, body)
+				return fn(p, key, body)
 			}); err != nil {
 				return err
 			}
