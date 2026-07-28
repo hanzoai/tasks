@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	storepkg "github.com/hanzoai/tasks/pkg/tasks/store"
 	"github.com/robfig/cron/v3"
 )
 
@@ -73,30 +74,30 @@ type engine struct {
 	cancelling *cancelTracker
 	workers    *workerRegistry
 	runMu      *keyedMutex // serializes advancing a single (org, ns, wf, run)
-	orgID      string      // "" = unscoped (embedded/dev). Stamped on every emitted Event.
+	principal  Principal   // zero = root tenant (embedded/dev). Its org is stamped on every emitted Event.
 }
 
 func newEngine(s *store) *engine {
 	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex()}
 }
 
-// WithOrg returns an engine view scoped to orgID. Reads and writes route
-// to the org's own per-namespace shard directory (store.withOrg); the
-// dispatcher/broker/worker registry stay SHARED, so org-scoped workflows
+// As returns an engine view scoped to the tenant p. Reads and writes route
+// to that tenant's own per-namespace shard directory (store.as); the
+// dispatcher/broker/worker registry stay SHARED, so a tenant's workflows
 // dispatch to whatever worker is subscribed on (ns, queue) regardless of
-// which view enqueued them. orgID == "" returns e unchanged (the root/
-// embedded view).
-func (e *engine) WithOrg(orgID string) *engine {
-	if orgID == "" {
+// which view enqueued them. The zero principal returns e unchanged (the
+// root / embedded view).
+func (e *engine) As(p Principal) *engine {
+	if p == e.principal {
 		return e
 	}
-	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, orgID: orgID}
+	return &engine{store: e.store.as(p), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, principal: p}
 }
 
 // emit publishes an event tagged with the engine's org so per-org SSE
 // filtering can trust OrgID. Use everywhere instead of e.broker.publish.
 func (e *engine) emit(ev Event) {
-	ev.OrgID = e.orgID
+	ev.OrgID = e.principal.Org
 	e.broker.publish(ev)
 }
 
@@ -137,6 +138,34 @@ func (e *engine) RegisterNamespace(ns Namespace) error {
 	return nil
 }
 
+// namespace returns ns's registry row, registering it on first use. A
+// namespace is an addressing fact, not a resource to provision: the shard
+// it names is created on demand (store.Manager.Get), so its registry row
+// is too. This is the ONE place a namespace comes into existence, and
+// every operation that needs one calls it instead of asking whether it
+// already exists.
+func (e *engine) namespace(name string) (*Namespace, error) {
+	if err := storepkg.ValidName(name); err != nil {
+		return nil, err
+	}
+	if n, ok, err := e.DescribeNamespace(name); err != nil {
+		return nil, err
+	} else if ok {
+		return n, nil
+	}
+	if err := e.RegisterNamespace(Namespace{NamespaceInfo: NamespaceInfo{Name: name}}); err != nil {
+		return nil, err
+	}
+	n, ok, err := e.DescribeNamespace(name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("namespace %q vanished after registration", name)
+	}
+	return n, nil
+}
+
 func (e *engine) DescribeNamespace(name string) (*Namespace, bool, error) {
 	var n Namespace
 	ok, err := e.store.get("ns/"+name, &n)
@@ -172,8 +201,8 @@ func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ Ty
 // fieldValue). conflictPolicy governs a live execution already existing
 // under workflowId (see resolveWorkflowIdConflict).
 func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, requestID string, searchAttrs map[string]any, memo any, conflictPolicy string) (*WorkflowExecution, error) {
-	if _, ok, _ := e.DescribeNamespace(ns); !ok {
-		return nil, fmt.Errorf("namespace %q not registered", ns)
+	if _, err := e.namespace(ns); err != nil {
+		return nil, err
 	}
 	if typ.Name == "" {
 		return nil, fmt.Errorf("workflow type required")
@@ -1298,8 +1327,8 @@ var reservedSearchAttrNames = map[string]bool{
 }
 
 func (e *engine) AddSearchAttribute(ns string, sa SearchAttribute) error {
-	if _, ok, _ := e.DescribeNamespace(ns); !ok {
-		return fmt.Errorf("namespace %q not registered", ns)
+	if _, err := e.namespace(ns); err != nil {
+		return err
 	}
 	if sa.Name == "" {
 		return fmt.Errorf("search attribute name required")
@@ -1573,7 +1602,7 @@ func (e *engine) sweepLeases() {
 	}
 	for _, ns := range namespaces {
 		name := ns.NamespaceInfo.Name
-		unlock := e.runMu.lock(e.orgID + "|claim|" + name)
+		unlock := e.runMu.lock(e.principal.String() + "|claim|" + name)
 		_ = e.reapExpiredLeases(name)
 		unlock()
 	}
@@ -1585,11 +1614,11 @@ func (e *engine) sweepSchedules() error {
 	// nest a query on the same single-connection SQLite shard and deadlock,
 	// so the scan only gathers.
 	type due struct {
-		org string
-		s   Schedule
+		principal Principal
+		s         Schedule
 	}
 	var dues []due
-	if err := e.store.listAllOrgs("sc/", func(org, _ string, body []byte) error {
+	if err := e.store.listEveryTenant("sc/", func(p Principal, _ string, body []byte) error {
 		var s Schedule
 		if err := unmarshal(body, &s); err != nil {
 			return nil // skip one corrupt record, never poison the sweep
@@ -1601,7 +1630,7 @@ func (e *engine) sweepSchedules() error {
 		if !ok || next.After(now) {
 			return nil
 		}
-		dues = append(dues, due{org: org, s: s})
+		dues = append(dues, due{principal: p, s: s})
 		return nil
 	}); err != nil {
 		return err
@@ -1613,7 +1642,7 @@ func (e *engine) sweepSchedules() error {
 	// quantize to the sweep cadence.
 	for _, d := range dues {
 		s := d.s
-		oe := e.WithOrg(d.org)
+		oe := e.As(d.principal)
 		if _, err := oe.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input); err != nil {
 			// Per-schedule isolation: a broken action (e.g. unregistered
 			// namespace) skips this entry and the sweep continues; it is

@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -31,15 +32,39 @@ import (
 	tasksui "github.com/hanzoai/tasks/ui"
 )
 
+// masterKeyEnv supplies the 32-byte root key every shard is encrypted
+// under, base64-encoded — the same encoding the platform's KMS hands to
+// every other Hanzo store. Unset leaves shards plaintext, which is the
+// zero-config dev posture; a set-but-malformed value is fatal, so a
+// misconfigured deployment refuses to boot rather than quietly writing
+// tenant state in the clear.
+const masterKeyEnv = "KMS_MASTER_KEY"
+
+// masterKey decodes masterKeyEnv.
+func masterKey() ([]byte, error) {
+	raw := strings.TrimSpace(os.Getenv(masterKeyEnv))
+	if raw == "" {
+		return nil, nil
+	}
+	k, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be base64: %w", masterKeyEnv, err)
+	}
+	if len(k) != store.MasterKeyLen {
+		return nil, fmt.Errorf("%s must decode to %d bytes, got %d", masterKeyEnv, store.MasterKeyLen, len(k))
+	}
+	return k, nil
+}
+
 // storeNew is a thin alias used by runMigrate so the rest of main.go
 // doesn't import the store package directly.
-func storeNew(dir string) (*store.Manager, error) { return store.New(dir) }
+func storeNew(dir string, master []byte) (*store.Manager, error) { return store.New(dir, master) }
 
 // newCoordinator is a thin closure-bound migration runner used by runMigrate.
-func newCoordinator(mgr *store.Manager, rep replication.Replicator) func(ctx context.Context, org, ns, from, to string) (*migration.Job, error) {
+func newCoordinator(mgr *store.Manager, rep replication.Replicator) func(ctx context.Context, principal, ns, from, to string) (*migration.Job, error) {
 	c := migration.NewCoordinator(mgr, rep)
-	return func(ctx context.Context, org, ns, from, to string) (*migration.Job, error) {
-		return c.Migrate(ctx, migration.Job{OrgID: org, Namespace: ns, From: from, To: to})
+	return func(ctx context.Context, principal, ns, from, to string) (*migration.Job, error) {
+		return c.Migrate(ctx, migration.Job{Principal: principal, Namespace: ns, From: from, To: to})
 	}
 }
 
@@ -78,8 +103,15 @@ func main() {
 		logger.Error("replicator", "err", err)
 		os.Exit(1)
 	}
+	master, err := masterKey()
+	if err != nil {
+		logger.Error("master key", "err", err)
+		os.Exit(1)
+	}
+
 	srv, err := tasks.Embed(ctx, tasks.EmbedConfig{
 		DataDir:         *dataDir,
+		MasterKey:       master,
 		ZAPPort:         *zapPort,
 		Namespace:       *ns,
 		Logger:          logger,
@@ -187,22 +219,34 @@ func envStr(k, def string) string {
 }
 
 // runMigrate is the `tasksd migrate ...` subcommand. Quiesces the
-// (org, namespace) shard via the consensus barrier, copies the
+// (tenant, namespace) shard via the consensus barrier, copies the
 // SQLite file under <dataDir>/_migrations/<id>/, and releases the
 // barrier. Idempotent.
 func runMigrate(args []string) {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	dataDir := fs.String("data", envStr("TASKSD_DATA_DIR", "./tasks-data"), "Tasks persistence directory")
-	org := fs.String("org", "", "Org id (empty = sentinel)")
+	org := fs.String("org", "", "Org id (empty = root tenant)")
+	project := fs.String("project", "", "Project id (optional)")
+	user := fs.String("user", "", "User id (optional)")
 	ns := fs.String("namespace", "", "Namespace to migrate")
 	to := fs.String("to", "", "Destination node id")
 	from := fs.String("from", "", "Source node id (annotation only)")
 	_ = fs.Parse(args)
 	if *ns == "" || *to == "" {
-		fmt.Fprintln(os.Stderr, "usage: tasksd migrate --org <id> --namespace <name> --to <node> [--from <node>]")
+		fmt.Fprintln(os.Stderr, "usage: tasksd migrate [--org <id> [--project <id> [--user <id>]]] --namespace <name> --to <node> [--from <node>]")
 		os.Exit(2)
 	}
-	mgr, err := storeNew(*dataDir)
+	principal := store.Principal{Org: *org, Project: *project, User: *user}
+	if err := principal.Valid(); err != nil {
+		fmt.Fprintln(os.Stderr, "migrate:", err)
+		os.Exit(2)
+	}
+	master, err := masterKey()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	mgr, err := storeNew(*dataDir, master)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "migrate:", err)
 		os.Exit(1)
@@ -211,7 +255,7 @@ func runMigrate(args []string) {
 	rep := replication.NewLocal()
 	mgr.WithReplicator(rep)
 	c := newCoordinator(mgr, rep)
-	job, err := c(context.Background(), *org, *ns, *from, *to)
+	job, err := c(context.Background(), principal.String(), *ns, *from, *to)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "migrate:", err)
 		os.Exit(1)

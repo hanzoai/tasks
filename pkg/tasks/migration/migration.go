@@ -42,7 +42,7 @@ const (
 // Job is a single migration unit.
 type Job struct {
 	ID         string    `json:"id"`
-	OrgID      string    `json:"org"`
+	Principal  string    `json:"principal"` // canonical "org/project/user"
 	Namespace  string    `json:"ns"`
 	From       string    `json:"from"`
 	To         string    `json:"to"`
@@ -72,7 +72,7 @@ func (c *Coordinator) Migrate(ctx context.Context, j Job) (*Job, error) {
 		return nil, fmt.Errorf("migration: namespace required")
 	}
 	if j.ID == "" {
-		j.ID = fmt.Sprintf("mig-%s-%s-%d", j.OrgID, j.Namespace, time.Now().UnixNano())
+		j.ID = fmt.Sprintf("mig-%s-%s-%d", j.Principal, j.Namespace, time.Now().UnixNano())
 	}
 	j.StartedAt = time.Now()
 	c.mu.Lock()
@@ -93,7 +93,7 @@ func (c *Coordinator) Migrate(ctx context.Context, j Job) (*Job, error) {
 	setStatus(StatusLocking, nil)
 	if c.rep != nil {
 		if _, err := c.rep.Propose(ctx, replication.Frame{
-			OrgID:     j.OrgID,
+			Principal: j.Principal,
 			Namespace: j.Namespace,
 			Op:        "migration.lock",
 			Key:       fmt.Sprintf("__migration/%s", j.ID),
@@ -106,7 +106,12 @@ func (c *Coordinator) Migrate(ctx context.Context, j Job) (*Job, error) {
 
 	// 2. WAL checkpoint + copy.
 	setStatus(StatusCopying, nil)
-	src, err := c.mgr.Get(ctx, j.OrgID, j.Namespace)
+	p, err := store.ParsePrincipal(j.Principal)
+	if err != nil {
+		setStatus(StatusFailed, err)
+		return &j, err
+	}
+	src, err := c.mgr.Get(ctx, p, j.Namespace)
 	if err != nil {
 		setStatus(StatusFailed, err)
 		return &j, err
@@ -115,7 +120,7 @@ func (c *Coordinator) Migrate(ctx context.Context, j Job) (*Job, error) {
 		setStatus(StatusFailed, err)
 		return &j, err
 	}
-	srcPath := c.mgr.ShardPath(j.OrgID, j.Namespace)
+	srcPath := c.mgr.ShardPath(p, j.Namespace)
 	dstPath := filepath.Join(c.mgr.RootDir(), "_migrations", j.ID, j.Namespace+".db")
 	n, err := store.CopyFile(dstPath, srcPath)
 	if err != nil {
@@ -132,7 +137,7 @@ func (c *Coordinator) Migrate(ctx context.Context, j Job) (*Job, error) {
 	// 4. Release the barrier.
 	if c.rep != nil {
 		if _, err := c.rep.Propose(ctx, replication.Frame{
-			OrgID:     j.OrgID,
+			Principal: j.Principal,
 			Namespace: j.Namespace,
 			Op:        "migration.unlock",
 			Key:       fmt.Sprintf("__migration/%s", j.ID),

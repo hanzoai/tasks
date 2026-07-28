@@ -34,7 +34,7 @@ var (
 // payload is the application-level mutation; ShardKey routes the
 // frame to the right namespace shard on apply.
 type Frame struct {
-	OrgID     string `json:"org"`
+	Principal string `json:"principal"` // canonical "org/project/user"
 	Namespace string `json:"ns"`
 	Seq       uint64 `json:"seq"`
 	Op        string `json:"op"`  // "put" | "del"

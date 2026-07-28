@@ -19,7 +19,7 @@ func TestCancelActivityForOrg(t *testing.T) {
 	defer emb.Stop(context.Background())
 
 	const org, ns = "acme", "gpu-jobs"
-	en := emb.engine.WithOrg(org)
+	en := emb.engine.As(Org(org))
 	if err := en.RegisterNamespace(Namespace{
 		NamespaceInfo: NamespaceInfo{Name: ns, State: "NAMESPACE_STATE_REGISTERED"},
 		Config:        NamespaceCfg{WorkflowExecutionRetentionTtl: "720h", APSLimit: 400},
@@ -66,7 +66,7 @@ func TestActivitiesPageForOrgWalksPastFirstPage(t *testing.T) {
 	defer emb.Stop(context.Background())
 
 	const org, ns, n = "acme", "gpu-jobs", 250
-	en := emb.engine.WithOrg(org)
+	en := emb.engine.As(Org(org))
 	if err := en.RegisterNamespace(Namespace{
 		NamespaceInfo: NamespaceInfo{Name: ns, State: "NAMESPACE_STATE_REGISTERED"},
 		Config:        NamespaceCfg{WorkflowExecutionRetentionTtl: "720h", APSLimit: 400},

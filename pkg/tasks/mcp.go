@@ -140,7 +140,7 @@ func mcpTools() []map[string]any {
 func (e *Embedded) mcpToolCall(w http.ResponseWriter, r *http.Request, req mcpRequest) {
 	// Scope every tool call to the caller's IAM-validated org. Empty org
 	// (embedded/dev) returns the unscoped engine — same surface as today.
-	en := e.engine.WithOrg(auth.OrgID(r.Context()))
+	en := e.engine.As(Org(auth.OrgID(r.Context())))
 	var p struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`

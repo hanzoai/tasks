@@ -264,10 +264,12 @@ func TestAdmin_SearchAttributes(t *testing.T) {
 			}
 		})
 	}
-	t.Run("not found", func(t *testing.T) {
-		code, _ := httpPost(t, srv.URL+"/v1/tasks/namespaces/ghost/search-attributes", `{"name":"X","type":"Keyword"}`)
-		if code != 404 {
-			t.Fatalf("code=%d want 404", code)
+	// An unseen namespace is registered on first use, so it serves rather
+	// than 404s. A name that cannot address a shard still does not.
+	t.Run("unseen namespace", func(t *testing.T) {
+		code, body := httpPost(t, srv.URL+"/v1/tasks/namespaces/ghost/search-attributes", `{"name":"X","type":"Keyword"}`)
+		if code != 200 {
+			t.Fatalf("code=%d want 200 body=%s", code, body)
 		}
 	})
 }

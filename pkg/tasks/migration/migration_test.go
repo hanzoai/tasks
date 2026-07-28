@@ -14,16 +14,16 @@ import (
 
 func TestMigration_HappyPath(t *testing.T) {
 	dir := t.TempDir()
-	mgr, _ := store.New(dir)
+	mgr, _ := store.New(dir, nil)
 	t.Cleanup(func() { _ = mgr.Close() })
 	rep := replication.NewLocal()
 	mgr.WithReplicator(rep)
 	ctx := context.Background()
-	sh, _ := mgr.Get(ctx, "org", "ns")
+	sh, _ := mgr.Get(ctx, store.Org("org"), "ns")
 	_ = sh.Put(ctx, "wf/ns/a/1", []byte("hello"))
 
 	c := migration.NewCoordinator(mgr, rep)
-	job, err := c.Migrate(ctx, migration.Job{OrgID: "org", Namespace: "ns", To: "node-2"})
+	job, err := c.Migrate(ctx, migration.Job{Principal: store.Org("org").String(), Namespace: "ns", To: "node-2"})
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -37,32 +37,32 @@ func TestMigration_HappyPath(t *testing.T) {
 
 func TestMigration_RejectsMissingFields(t *testing.T) {
 	dir := t.TempDir()
-	mgr, _ := store.New(dir)
+	mgr, _ := store.New(dir, nil)
 	t.Cleanup(func() { _ = mgr.Close() })
 	c := migration.NewCoordinator(mgr, replication.NewLocal())
-	if _, err := c.Migrate(context.Background(), migration.Job{OrgID: "x"}); err == nil {
+	if _, err := c.Migrate(context.Background(), migration.Job{Principal: store.Org("x").String()}); err == nil {
 		t.Fatal("expected error on empty namespace")
 	}
 }
 
 func TestMigration_DoubleMigrateSafe(t *testing.T) {
 	dir := t.TempDir()
-	mgr, _ := store.New(dir)
+	mgr, _ := store.New(dir, nil)
 	t.Cleanup(func() { _ = mgr.Close() })
 	rep := replication.NewLocal()
 	mgr.WithReplicator(rep)
 	ctx := context.Background()
-	sh, _ := mgr.Get(ctx, "org", "ns")
+	sh, _ := mgr.Get(ctx, store.Org("org"), "ns")
 	_ = sh.Put(ctx, "wf/ns/a/1", []byte("hello"))
 
 	c := migration.NewCoordinator(mgr, rep)
-	if _, err := c.Migrate(ctx, migration.Job{OrgID: "org", Namespace: "ns", To: "n2"}); err != nil {
+	if _, err := c.Migrate(ctx, migration.Job{Principal: store.Org("org").String(), Namespace: "ns", To: "n2"}); err != nil {
 		t.Fatal(err)
 	}
 	// Second migrate against a freshly-opened shard must succeed.
-	sh2, _ := mgr.Get(ctx, "org", "ns")
+	sh2, _ := mgr.Get(ctx, store.Org("org"), "ns")
 	_ = sh2.Put(ctx, "wf/ns/a/2", []byte("again"))
-	job2, err := c.Migrate(ctx, migration.Job{OrgID: "org", Namespace: "ns", To: "n3"})
+	job2, err := c.Migrate(ctx, migration.Job{Principal: store.Org("org").String(), Namespace: "ns", To: "n3"})
 	if err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestMigration_DoubleMigrateSafe(t *testing.T) {
 	}
 
 	// And the destination file actually exists.
-	if _, err := os.Stat(mgr.ShardPath("org", "ns")); err != nil {
+	if _, err := os.Stat(mgr.ShardPath(store.Org("org"), "ns")); err != nil {
 		t.Fatalf("source shard missing: %v", err)
 	}
 }

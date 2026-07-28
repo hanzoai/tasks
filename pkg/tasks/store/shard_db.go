@@ -26,7 +26,7 @@ import (
 // from put/del before local commit so the cluster sees the mutation
 // first.
 type Shard struct {
-	org        string
+	principal  Principal
 	ns         string
 	path       string
 	db         *db
@@ -69,11 +69,16 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `
 
-func openShard(path, org, ns string) (*Shard, error) {
+// openShard opens the shard file at path. A non-nil dek opens it at rest
+// encrypted; hanzoai/sqlite routes that through the live libsqlcipher codec
+// when one is linked and through its pure-Go SQLCipher codec envelope when
+// one is not, so a keyed shard is ciphertext on every build and there is
+// nothing here to branch on.
+func openShard(path string, p Principal, ns string, dek []byte) (*Shard, error) {
 	// WAL + busy_timeout + synchronous=NORMAL + foreign_keys are set by schemaSQL
 	// below (explicit PRAGMA statements), so they apply on both backends rather
 	// than relying on driver-specific DSN params.
-	conn, err := hanzosqlite.OpenDB(path, nil)
+	conn, err := hanzosqlite.OpenDB(path, dek)
 	if err != nil {
 		return nil, fmt.Errorf("store.openShard: open %s: %w", path, err)
 	}
@@ -83,11 +88,8 @@ func openShard(path, org, ns string) (*Shard, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("store.openShard: schema: %w", err)
 	}
-	s := &Shard{org: org, ns: ns, path: path, db: conn}
+	s := &Shard{principal: p, ns: ns, path: path, db: conn}
 	s.last.Store(time.Now().UnixNano())
-	if org == SentinelOrg {
-		s.org = ""
-	}
 	return s, nil
 }
 
@@ -97,8 +99,8 @@ func (s *Shard) touch() { s.last.Store(time.Now().UnixNano()) }
 // lastUsed returns the time the shard was last touched.
 func (s *Shard) lastUsed() time.Time { return time.Unix(0, s.last.Load()) }
 
-// Org returns the shard's org id ("" for sentinel).
-func (s *Shard) Org() string { return s.org }
+// Principal returns the tenant that owns the shard.
+func (s *Shard) Principal() Principal { return s.principal }
 
 // Namespace returns the shard's namespace.
 func (s *Shard) Namespace() string { return s.ns }
@@ -118,15 +120,21 @@ func (s *Shard) Close() error {
 	return s.db.Close()
 }
 
-// Checkpoint forces a WAL truncation without releasing the
-// connection. Used by the migration tool to make the on-disk file
-// fully self-contained before copy.
+// Checkpoint makes the on-disk file fully self-contained: it truncates the
+// WAL and, for an encrypted shard the pure-Go codec envelope backs, seals
+// the committed pages back into the ciphertext file. The seal is a
+// successful no-op for a shard that persists per commit (the live codec and
+// plaintext paths), so callers never ask which one they hold. Used by the
+// migration tool before a copy and by the manager's sweep, which is what
+// bounds an envelope-backed shard's exposure to an unclean exit.
 func (s *Shard) Checkpoint() error {
 	if s.closed.Load() {
 		return ErrClosed
 	}
-	_, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);")
-	return err
+	if _, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);"); err != nil {
+		return err
+	}
+	return hanzosqlite.Checkpoint(s.db)
 }
 
 // Put writes value at key. If a Replicator is installed it runs
@@ -138,7 +146,7 @@ func (s *Shard) Put(ctx context.Context, key string, value []byte) error {
 	}
 	s.touch()
 	frame := replication.Frame{
-		OrgID:     s.org,
+		Principal: s.principal.String(),
 		Namespace: s.ns,
 		Op:        "put",
 		Key:       key,
@@ -171,7 +179,7 @@ func (s *Shard) Del(ctx context.Context, key string) error {
 	}
 	s.touch()
 	frame := replication.Frame{
-		OrgID:     s.org,
+		Principal: s.principal.String(),
 		Namespace: s.ns,
 		Op:        "del",
 		Key:       key,
