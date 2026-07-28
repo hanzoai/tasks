@@ -24,12 +24,12 @@ func NewSelector(ctx Context) Selector {
 }
 
 type selectorCase struct {
-	kind    int // 0 = future, 1 = receive, 2 = default
-	future  Future
-	futCB   func(Future)
-	ch      ReceiveChannel
-	chCB    func(ReceiveChannel, bool)
-	defCB   func()
+	kind   int // 0 = future, 1 = receive, 2 = default
+	future Future
+	futCB  func(Future)
+	ch     ReceiveChannel
+	chCB   func(ReceiveChannel, bool)
+	defCB  func()
 }
 
 const (

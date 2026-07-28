@@ -49,4 +49,4 @@ RUN apk add --no-cache ca-certificates && mkdir -p /data
 COPY --from=go-build /tasksd /usr/local/bin/tasksd
 EXPOSE 9999 7243
 ENTRYPOINT ["tasksd"]
-CMD ["--zap-port", "9999", "--http", ":7243", "--data", "/data"]
+CMD ["--zap", ":9999", "--http", ":7243", "--data", "/data"]

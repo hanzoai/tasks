@@ -25,7 +25,7 @@ import (
 func dialLocal(t *testing.T, port int) client.Client {
 	t.Helper()
 	cli, err := client.Dial(client.Options{
-		HostPort:    fmt.Sprintf("127.0.0.1:%d", port),
+		Address:     fmt.Sprintf("127.0.0.1:%d", port),
 		Namespace:   "default",
 		DialTimeout: 5 * time.Second,
 	})
@@ -107,7 +107,7 @@ func TestDurable_ActivityRetryBackoff(t *testing.T) {
 	flakyMu.Unlock()
 
 	port := freePort(t)
-	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{ZAPPort: port})
+	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", port)})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestDurable_ActivityRetryExhaustion_FailsWorkflow(t *testing.T) {
 	exhaustAttempts.Store(0)
 
 	port := freePort(t)
-	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{ZAPPort: port})
+	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", port)})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestDurable_CrashRecovery_ReachesCompleted(t *testing.T) {
 
 	// Embed A + worker A: drive the activity in-flight, then simulate a crash.
 	portA := freePort(t)
-	embA, err := tasks.Embed(ctx, tasks.EmbedConfig{ZAPPort: portA, DataDir: dir})
+	embA, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", portA), DataDir: dir})
 	if err != nil {
 		t.Fatalf("embed A: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestDurable_CrashRecovery_ReachesCompleted(t *testing.T) {
 	// runs the now-deterministic activity to completion.
 	recovered.Store(true)
 	portB := freePort(t)
-	embB, err := tasks.Embed(ctx, tasks.EmbedConfig{ZAPPort: portB, DataDir: dir})
+	embB, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", portB), DataDir: dir})
 	if err != nil {
 		t.Fatalf("embed B: %v", err)
 	}

@@ -14,12 +14,12 @@ import (
 
 // EmbedResult captures the lifecycle of an in-process daemon dial.
 type EmbedResult struct {
-	Port           int
-	HealthService  string
-	HealthStatus   string
-	StartedID      string
-	StartedRunID   string
-	ListedCount    int
+	Port          int
+	HealthService string
+	HealthStatus  string
+	StartedID     string
+	StartedRunID  string
+	ListedCount   int
 }
 
 // Embed boots tasks.Embed in-process on an ephemeral port, dials it via
@@ -38,7 +38,7 @@ func Embed(ctx context.Context) (*EmbedResult, error) {
 	_ = l.Close()
 
 	srv, err := tasks.Embed(ctx, tasks.EmbedConfig{
-		ZAPPort:   port,
+		Address:   fmt.Sprintf(":%d", port),
 		Namespace: "default",
 	})
 	if err != nil {
@@ -47,7 +47,7 @@ func Embed(ctx context.Context) (*EmbedResult, error) {
 	defer func() { _ = srv.Stop(context.Background()) }()
 
 	c, err := client.Dial(client.Options{
-		HostPort:    fmt.Sprintf("127.0.0.1:%d", port),
+		Address:     fmt.Sprintf("127.0.0.1:%d", port),
 		Namespace:   "default",
 		DialTimeout: 3 * time.Second,
 		CallTimeout: 3 * time.Second,

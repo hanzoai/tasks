@@ -62,9 +62,9 @@ func (f *childFuture) Get(ctx Context, valPtr any) error {
 	return f.result.Get(ctx, valPtr)
 }
 
-func (f *childFuture) IsReady() bool                       { return f.result.IsReady() }
-func (f *childFuture) ReadyCh() <-chan struct{}            { return f.result.ReadyCh() }
-func (f *childFuture) GetChildWorkflowExecution() Future   { return f.execution }
+func (f *childFuture) IsReady() bool                     { return f.result.IsReady() }
+func (f *childFuture) ReadyCh() <-chan struct{}          { return f.result.ReadyCh() }
+func (f *childFuture) GetChildWorkflowExecution() Future { return f.execution }
 
 // ExecuteChildWorkflow is the workflow-code entry point. It delegates
 // to CoroutineEnv.ExecuteChildWorkflow, which in workerEnv forwards

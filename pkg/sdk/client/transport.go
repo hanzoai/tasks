@@ -15,12 +15,12 @@ import "context"
 //
 // Server-push wire model (replaces long-poll, 2026-04-28):
 //
-//   Workers Subscribe once per (namespace, taskQueue, kind); the server
-//   pushes Deliver{Workflow,Activity}Task as work arrives, and pushes
-//   DeliverActivityResult to the workflow's worker when an activity
-//   completes. There is no polling. The authoritative wire shapes live
-//   in pkg/tasks/dispatch.go (workflowTaskDeliveryJSON,
-//   activityTaskDeliveryJSON, activityResultDeliveryJSON).
+//	Workers Subscribe once per (namespace, taskQueue, kind); the server
+//	pushes Deliver{Workflow,Activity}Task as work arrives, and pushes
+//	DeliverActivityResult to the workflow's worker when an activity
+//	completes. There is no polling. The authoritative wire shapes live
+//	in pkg/tasks/dispatch.go (workflowTaskDeliveryJSON,
+//	activityTaskDeliveryJSON, activityResultDeliveryJSON).
 //
 // Append-only across releases; never reuse a value. 0x00A0 and 0x00A1
 // were repurposed from Poll{Workflow,Activity}Task to
@@ -72,12 +72,12 @@ const (
 	FieldWorkerBuildID = 32
 
 	// WorkflowTask response fields.
-	FieldTaskToken         = 0
-	FieldWorkflowID        = 8
-	FieldRunID             = 16
-	FieldWorkflowTypeName  = 24
-	FieldHistoryBytes      = 32
-	FieldNextPageToken     = 40
+	FieldTaskToken        = 0
+	FieldWorkflowID       = 8
+	FieldRunID            = 16
+	FieldWorkflowTypeName = 24
+	FieldHistoryBytes     = 32
+	FieldNextPageToken    = 40
 
 	// ActivityTask response fields.
 	FieldActivityID            = 8
@@ -90,10 +90,10 @@ const (
 	FieldActivityRunID         = 64
 
 	// Respond request fields.
-	FieldCommandsBytes = 8  // workflow task completed
-	FieldResultBytes   = 8  // activity task completed
-	FieldFailureBytes  = 8  // activity task failed
-	FieldDetailsBytes  = 8  // heartbeat
+	FieldCommandsBytes = 8 // workflow task completed
+	FieldResultBytes   = 8 // activity task completed
+	FieldFailureBytes  = 8 // activity task failed
+	FieldDetailsBytes  = 8 // heartbeat
 
 	// Response fields.
 	FieldRespStatus          = 0
@@ -107,11 +107,11 @@ const (
 //
 // Wire model (server-push, 2026-04-28):
 //
-//   The worker subscribes once per (namespace, taskQueue, kind) and
-//   registers OnWorkflowTask / OnActivityTask / OnActivityResult
-//   callbacks. The server pushes work as it arrives. The worker
-//   responds via Respond{Workflow,Activity}Task{Completed,Failed} and
-//   RecordActivityTaskHeartbeat — same as before. There is no polling.
+//	The worker subscribes once per (namespace, taskQueue, kind) and
+//	registers OnWorkflowTask / OnActivityTask / OnActivityResult
+//	callbacks. The server pushes work as it arrives. The worker
+//	responds via Respond{Workflow,Activity}Task{Completed,Failed} and
+//	RecordActivityTaskHeartbeat — same as before. There is no polling.
 type WorkerTransport interface {
 	// Close tears down the underlying node. Safe to call more than
 	// once.
@@ -203,11 +203,11 @@ type StartChildWorkflowResponse struct {
 
 // PollWorkflowTaskRequest mirrors schema/tasks.zap:PollWorkflowTaskRequest.
 type PollWorkflowTaskRequest struct {
-	Namespace      string
-	TaskQueueName  string
-	TaskQueueKind  int8
-	Identity       string
-	WorkerBuildID  string
+	Namespace     string
+	TaskQueueName string
+	TaskQueueKind int8
+	Identity      string
+	WorkerBuildID string
 }
 
 // PollActivityTaskRequest mirrors schema/tasks.zap:PollActivityTaskRequest.
@@ -232,15 +232,15 @@ type WorkflowTask struct {
 // encoded Payloads; the worker's activity dispatcher decodes it into
 // the registered function's arg types.
 type ActivityTask struct {
-	TaskToken              []byte
-	WorkflowID             string
-	RunID                  string
-	ActivityID             string
-	ActivityTypeName       string
-	Input                  []byte
-	ScheduledTimeMs        int64
-	StartToCloseTimeoutMs  int64
-	HeartbeatTimeoutMs     int64
+	TaskToken             []byte
+	WorkflowID            string
+	RunID                 string
+	ActivityID            string
+	ActivityTypeName      string
+	Input                 []byte
+	ScheduledTimeMs       int64
+	StartToCloseTimeoutMs int64
+	HeartbeatTimeoutMs    int64
 }
 
 // RespondWorkflowTaskCompletedRequest carries a serialised command list.

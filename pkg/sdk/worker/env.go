@@ -679,4 +679,3 @@ func (e *workerEnv) PendingUpserts() []map[string]any {
 	e.pendingUpserts = nil
 	return out
 }
-

@@ -179,10 +179,10 @@ func (e *engine) DeleteDeploymentVersion(ns, name, buildId string) (*Deployment,
 // "disabled" state from `enabled:false`.
 func (e *engine) QueryArchival(_, _, _ string) (map[string]any, error) {
 	return map[string]any{
-		"enabled":    false,
-		"executions": []any{},
+		"enabled":       false,
+		"executions":    []any{},
 		"nextPageToken": "",
-		"error":      "archival disabled",
+		"error":         "archival disabled",
 	}, nil
 }
 

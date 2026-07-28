@@ -68,14 +68,14 @@ func TestE2E_WorkflowExecutesActivityAndCompletes(t *testing.T) {
 	defer cancel()
 
 	port := freePort(t)
-	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{ZAPPort: port})
+	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", port)})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	defer emb.Stop(ctx)
 
 	cli, err := client.Dial(client.Options{
-		HostPort:    fmt.Sprintf("127.0.0.1:%d", port),
+		Address:     fmt.Sprintf("127.0.0.1:%d", port),
 		Namespace:   "default",
 		DialTimeout: 5 * time.Second,
 	})
@@ -149,7 +149,7 @@ func TestE2E_WorkflowExecutesActivityAndCompletes(t *testing.T) {
 // the React UI does, with no worker registered (so the workflow stays
 // in RUNNING until terminated).
 func TestE2E_HTTPLifecycle(t *testing.T) {
-	emb, err := tasks.Embed(context.Background(), tasks.EmbedConfig{ZAPPort: 0})
+	emb, err := tasks.Embed(context.Background(), tasks.EmbedConfig{Address: ""})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

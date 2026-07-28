@@ -34,8 +34,12 @@ var base64Std = base64.StdEncoding
 
 // EmbedConfig configures the in-process Tasks server.
 type EmbedConfig struct {
-	DataDir   string       // "" → "./tasks-data" (reserved; memdb today)
-	ZAPPort   int          // 0 → 9999
+	DataDir string // "" → "./tasks-data" (reserved; memdb today)
+	// Address is where the ZAP listener binds. A filesystem path binds a
+	// unix socket — the right shape for service-to-service traffic that
+	// never leaves the host, and one that needs no port. Anything else is
+	// a host:port TCP address; "" → ":9999".
+	Address   string
 	Namespace string       // "" → "default"
 	Logger    *slog.Logger // nil → slog.Default()
 	// MasterKey is the 32-byte root key every shard is encrypted under.
@@ -125,7 +129,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	node := zap.NewNode(zap.NodeConfig{
 		NodeID:      "tasks-embed",
 		ServiceType: "_tasks._tcp",
-		Port:        cfg.ZAPPort,
+		Address:     cfg.Address,
 		Logger:      cfg.Logger,
 		NoDiscovery: true,
 	})
@@ -193,12 +197,12 @@ func wireSend(opcode uint16, body []byte) (*zap.Message, error) {
 	return zap.Parse(frame)
 }
 
-// ZAPPort returns the bound ZAP port of the loopback listener.
-func (e *Embedded) ZAPPort() int {
+// Address returns where the loopback ZAP listener is bound.
+func (e *Embedded) Address() string {
 	if e == nil {
-		return 0
+		return ""
 	}
-	return e.cfg.ZAPPort
+	return e.cfg.Address
 }
 
 // View is an org-scoped, in-process control-plane handle on the embedded
@@ -286,7 +290,7 @@ func (e *Embedded) nodeSnapshot() []*zap.Node {
 	return out
 }
 
-// ServeGated starts a SECOND ZAP listener on 0.0.0.0:port that exposes the SAME
+// ServeGated starts a SECOND ZAP listener at addr that exposes the SAME
 // engine to out-of-process callers under mandatory identity gating: every request
 // must carry an auth_token that validates against validator (RequireIdentity), and
 // its engine view is org-scoped to the token owner (CONTRACT §6). The loopback
@@ -296,7 +300,7 @@ func (e *Embedded) nodeSnapshot() []*zap.Node {
 // delivery. A nil validator is refused: exposing durable execution ungated across
 // the cluster is never correct. Call once, after Embed; Stop tears down every
 // listener.
-func (e *Embedded) ServeGated(ctx context.Context, port int, validator *auth.Validator) error {
+func (e *Embedded) ServeGated(ctx context.Context, addr string, validator *auth.Validator) error {
 	if e == nil {
 		return errors.New("tasks: ServeGated on nil Embedded")
 	}
@@ -306,7 +310,7 @@ func (e *Embedded) ServeGated(ctx context.Context, port int, validator *auth.Val
 	n := zap.NewNode(zap.NodeConfig{
 		NodeID:      "tasks-embed-gated",
 		ServiceType: "_tasks._tcp",
-		Port:        port,
+		Address:     addr,
 		Logger:      e.cfg.Logger,
 		NoDiscovery: true,
 	})
@@ -314,7 +318,7 @@ func (e *Embedded) ServeGated(ctx context.Context, port int, validator *auth.Val
 		n.Handle(op, h)
 	}
 	if err := n.Start(); err != nil {
-		return fmt.Errorf("tasks: gated zap start on :%d: %w", port, err)
+		return fmt.Errorf("tasks: gated zap start on %s: %w", addr, err)
 	}
 	e.nodesMu.Lock()
 	e.nodes = append(e.nodes, n)

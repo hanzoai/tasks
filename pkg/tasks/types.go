@@ -23,12 +23,12 @@ type NamespaceInfo struct {
 }
 
 type NamespaceCfg struct {
-	WorkflowExecutionRetentionTtl string `json:"workflowExecutionRetentionTtl"` // "720h"
-	APSLimit                      int    `json:"apsLimit"`                      // actions per second
-	HistoryArchivalState          string `json:"historyArchivalState,omitempty"`
-	HistoryArchivalUri            string `json:"historyArchivalUri,omitempty"`
-	VisibilityArchivalState       string `json:"visibilityArchivalState,omitempty"`
-	VisibilityArchivalUri         string `json:"visibilityArchivalUri,omitempty"`
+	WorkflowExecutionRetentionTtl string            `json:"workflowExecutionRetentionTtl"` // "720h"
+	APSLimit                      int               `json:"apsLimit"`                      // actions per second
+	HistoryArchivalState          string            `json:"historyArchivalState,omitempty"`
+	HistoryArchivalUri            string            `json:"historyArchivalUri,omitempty"`
+	VisibilityArchivalState       string            `json:"visibilityArchivalState,omitempty"`
+	VisibilityArchivalUri         string            `json:"visibilityArchivalUri,omitempty"`
 	CustomData                    map[string]string `json:"customData,omitempty"`
 }
 
@@ -94,7 +94,7 @@ type ScheduleAction struct {
 }
 
 type ScheduleState struct {
-	Paused bool `json:"paused"`
+	Paused bool   `json:"paused"`
 	Note   string `json:"note,omitempty"`
 }
 

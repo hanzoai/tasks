@@ -46,29 +46,29 @@ type WorkflowRunGetOptions struct {
 // for the v1 JSON wire. Exported so callers of DescribeWorkflow /
 // ListWorkflows can inspect the result without pulling upstream types.
 type WorkflowExecutionInfo struct {
-	WorkflowID    string            `json:"workflow_id"`
-	RunID         string            `json:"run_id"`
-	WorkflowType  string            `json:"workflow_type"`
-	StartTime     time.Time         `json:"start_time,omitempty"`
-	CloseTime     time.Time         `json:"close_time,omitempty"`
-	Status        WorkflowStatus    `json:"status"`
-	HistoryLength int64             `json:"history_length"`
-	TaskQueue     string            `json:"task_queue,omitempty"`
-	Memo          map[string]any    `json:"memo,omitempty"`
+	WorkflowID    string         `json:"workflow_id"`
+	RunID         string         `json:"run_id"`
+	WorkflowType  string         `json:"workflow_type"`
+	StartTime     time.Time      `json:"start_time,omitempty"`
+	CloseTime     time.Time      `json:"close_time,omitempty"`
+	Status        WorkflowStatus `json:"status"`
+	HistoryLength int64          `json:"history_length"`
+	TaskQueue     string         `json:"task_queue,omitempty"`
+	Memo          map[string]any `json:"memo,omitempty"`
 }
 
 // WorkflowStatus mirrors the `status` Int8 in schema/tasks.zap.
 type WorkflowStatus int8
 
 const (
-	WorkflowStatusUnspecified     WorkflowStatus = 0
-	WorkflowStatusRunning         WorkflowStatus = 1
-	WorkflowStatusCompleted       WorkflowStatus = 2
-	WorkflowStatusFailed          WorkflowStatus = 3
-	WorkflowStatusCanceled        WorkflowStatus = 4
-	WorkflowStatusTerminated      WorkflowStatus = 5
-	WorkflowStatusContinuedAsNew  WorkflowStatus = 6
-	WorkflowStatusTimedOut        WorkflowStatus = 7
+	WorkflowStatusUnspecified    WorkflowStatus = 0
+	WorkflowStatusRunning        WorkflowStatus = 1
+	WorkflowStatusCompleted      WorkflowStatus = 2
+	WorkflowStatusFailed         WorkflowStatus = 3
+	WorkflowStatusCanceled       WorkflowStatus = 4
+	WorkflowStatusTerminated     WorkflowStatus = 5
+	WorkflowStatusContinuedAsNew WorkflowStatus = 6
+	WorkflowStatusTimedOut       WorkflowStatus = 7
 )
 
 // ListWorkflowsResponse is returned by ListWorkflows.
@@ -80,16 +80,16 @@ type ListWorkflowsResponse struct {
 // startWorkflowRequest is the v1 JSON shape mapped onto schema/tasks.zap
 // StartWorkflowRequest. Native ZAP serde replaces JSON in a follow-up.
 type startWorkflowRequest struct {
-	Namespace    string       `json:"namespace"`
-	WorkflowID   string       `json:"workflow_id"`
-	WorkflowType string       `json:"workflow_type"`
-	TaskQueue    string       `json:"task_queue"`
-	Input        []any        `json:"input,omitempty"`
-	RetryPolicy  *retryPolicy `json:"retry_policy,omitempty"`
-	Timeouts     timeouts     `json:"timeouts,omitempty"`
+	Namespace    string         `json:"namespace"`
+	WorkflowID   string         `json:"workflow_id"`
+	WorkflowType string         `json:"workflow_type"`
+	TaskQueue    string         `json:"task_queue"`
+	Input        []any          `json:"input,omitempty"`
+	RetryPolicy  *retryPolicy   `json:"retry_policy,omitempty"`
+	Timeouts     timeouts       `json:"timeouts,omitempty"`
 	Memo         map[string]any `json:"memo,omitempty"`
-	CronSchedule string       `json:"cron_schedule,omitempty"`
-	Identity     string       `json:"identity,omitempty"`
+	CronSchedule string         `json:"cron_schedule,omitempty"`
+	Identity     string         `json:"identity,omitempty"`
 }
 
 type retryPolicy struct {

@@ -31,12 +31,12 @@ import (
 type Status string
 
 const (
-	StatusPending  Status = "pending"
-	StatusLocking  Status = "locking"
-	StatusCopying  Status = "copying"
+	StatusPending   Status = "pending"
+	StatusLocking   Status = "locking"
+	StatusCopying   Status = "copying"
 	StatusReplaying Status = "replaying"
 	StatusReleased  Status = "released"
-	StatusFailed   Status = "failed"
+	StatusFailed    Status = "failed"
 )
 
 // Job is a single migration unit.

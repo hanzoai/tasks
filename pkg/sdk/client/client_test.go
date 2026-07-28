@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,10 +67,20 @@ func (s *stubTransport) Handle(opcode uint16, fn func(from string, body []byte))
 	_ = fn
 }
 
-func TestDialRequiresHostPort(t *testing.T) {
+// Dial needs an address. It does not need a PORT: a filesystem path is a
+// valid address and dials a unix socket.
+func TestDialRequiresAddress(t *testing.T) {
 	t.Parallel()
 	if _, err := Dial(Options{}); err == nil {
-		t.Fatal("expected Dial to reject empty Options")
+		t.Fatal("expected Dial to reject Options with no address")
+	}
+	// A socket path is refused for being absent, never for being portless.
+	_, err := Dial(Options{Address: filepath.Join(t.TempDir(), "absent.sock")})
+	if err == nil {
+		t.Fatal("expected Dial to fail against a socket nothing is serving")
+	}
+	if strings.Contains(err.Error(), "missing port") {
+		t.Fatalf("a socket path must not be parsed as host:port: %v", err)
 	}
 }
 

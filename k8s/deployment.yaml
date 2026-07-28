@@ -38,7 +38,7 @@ spec:
           image: ghcr.io/hanzoai/tasks:v3.3.1
           imagePullPolicy: IfNotPresent
           args:
-            - --zap-port=9999
+            - --zap=:9999
             - --http=:7243
             - --data=/data
             - --namespace=$(TASKS_NAMESPACE)

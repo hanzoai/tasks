@@ -103,7 +103,7 @@ import (
 )
 
 cli, err := tasksclient.Dial(tasksclient.Options{
-    HostPort:  os.Getenv("TASKS_ADDR"),     // "tasks.hanzo.svc:9999"
+    Address:   os.Getenv("TASKS_ADDR"),     // "tasks.hanzo.svc:9999" or "/run/tasks.sock"
     Namespace: tenantNamespace(orgID),       // see §6
 })
 if err != nil {
@@ -154,7 +154,9 @@ ID — that is your idempotency token.
 
 ## 5. ZAP transport
 
-Production: ZAP only. `tasksd` listens on TCP/9999 by default; the SDK
+Production: ZAP only. `tasksd` listens on TCP/9999 by default -- or on a
+unix socket when `--zap` is given a path, which is the right shape when
+caller and engine share a host; the SDK
 dials directly. No HTTP, no JSON envelope on the hot path, no gRPC.
 
 Local dev: `TASKS_ADDR=""` switches the SDK to in-process mode (no

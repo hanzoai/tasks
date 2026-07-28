@@ -175,7 +175,6 @@ func TestDispatcher_QueuesUntilSubscribe(t *testing.T) {
 	}
 }
 
-
 // TestDispatcher_PrunesDeadPeerOnSendFailure proves the self-healing delivery
 // path: a leaked subscription whose worker has disconnected (Send fails, since
 // luxfi/zap exposes no disconnect hook) is pruned on the failed push and the

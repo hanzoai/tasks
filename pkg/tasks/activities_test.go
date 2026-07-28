@@ -158,7 +158,7 @@ func TestHTTP_Activities_FailFlow(t *testing.T) {
 	en, h := httpFixture(t)
 	a, _ := en.StartActivity("default", "a-f", "", TypeRef{Name: "T"}, "q", nil, nil, "", "", "", "", "", "")
 	run := a.Execution.RunId
-	code, _ := httpDo(t, h, http.MethodPost, "/v1/tasks/namespaces/default/activities/a-f/"+run+"/fail", map[string]any{"cause": "boom"}, )
+	code, _ := httpDo(t, h, http.MethodPost, "/v1/tasks/namespaces/default/activities/a-f/"+run+"/fail", map[string]any{"cause": "boom"})
 	if code != 200 {
 		t.Fatalf("fail code=%d", code)
 	}

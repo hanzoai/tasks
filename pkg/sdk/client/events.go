@@ -41,7 +41,7 @@ type Event struct {
 // is canceled or the connection drops. Cancel ctx to stop.
 //
 // httpAddr is the daemon's HTTP listener (e.g. "127.0.0.1:7243").
-// Pass empty to use http://<HostPort host>:7243 — the canonical sibling
+// Pass empty to use http://<Address host>:7243 — the canonical sibling
 // port shipped by tasksd alongside ZAP :9999.
 func SubscribeEvents(ctx context.Context, httpAddr string) (<-chan Event, error) {
 	if httpAddr == "" {

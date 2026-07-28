@@ -21,7 +21,7 @@ import (
 )
 
 type Event struct {
-	Kind       string `json:"kind"`        // workflow.started|workflow.canceled|workflow.terminated|workflow.signaled|schedule.created|schedule.paused|schedule.resumed|schedule.deleted|namespace.registered|batch.started
+	Kind       string `json:"kind"`             // workflow.started|workflow.canceled|workflow.terminated|workflow.signaled|schedule.created|schedule.paused|schedule.resumed|schedule.deleted|namespace.registered|batch.started
 	OrgID      string `json:"org_id,omitempty"` // tenant scope; "" = unscoped (embedded/dev)
 	Namespace  string `json:"namespace,omitempty"`
 	WorkflowID string `json:"workflow_id,omitempty"`
@@ -37,10 +37,10 @@ type Event struct {
 // rather than blocking the publisher. Designed for single-process tasks;
 // distributed fan-out lands when persistence does.
 type broker struct {
-	mu       sync.RWMutex
-	nextID   atomic.Uint64
-	subs     map[uint64]chan Event
-	bufSize  int
+	mu      sync.RWMutex
+	nextID  atomic.Uint64
+	subs    map[uint64]chan Event
+	bufSize int
 }
 
 func newBroker() *broker {

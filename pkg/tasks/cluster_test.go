@@ -13,7 +13,7 @@ import (
 )
 
 func TestCluster_StatusAndHealth(t *testing.T) {
-	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0, NodeID: "n1"})
+	emb, err := Embed(context.Background(), EmbedConfig{Address: "", NodeID: "n1"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCluster_StatusAndHealth(t *testing.T) {
 }
 
 func TestCluster_MigrateEndpoint(t *testing.T) {
-	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0, NodeID: "n1"})
+	emb, err := Embed(context.Background(), EmbedConfig{Address: "", NodeID: "n1"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

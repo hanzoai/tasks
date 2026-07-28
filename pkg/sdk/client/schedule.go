@@ -146,9 +146,9 @@ type updateScheduleRequest struct {
 }
 
 type triggerScheduleRequest struct {
-	Namespace      string `json:"namespace"`
-	ScheduleID     string `json:"schedule_id"`
-	OverlapPolicy  string `json:"overlap_policy,omitempty"`
+	Namespace     string `json:"namespace"`
+	ScheduleID    string `json:"schedule_id"`
+	OverlapPolicy string `json:"overlap_policy,omitempty"`
 }
 
 type describeScheduleRequest struct {
@@ -158,17 +158,17 @@ type describeScheduleRequest struct {
 
 // DescribeScheduleResponse is the v1 wire response for DescribeSchedule.
 type DescribeScheduleResponse struct {
-	Schedule Schedule       `json:"schedule"`
-	Info     ScheduleInfo   `json:"info"`
+	Schedule Schedule     `json:"schedule"`
+	Info     ScheduleInfo `json:"info"`
 }
 
 // ScheduleInfo carries runtime state for a schedule.
 type ScheduleInfo struct {
-	ActionCount        int64 `json:"action_count"`
-	MissedCatchupCount int64 `json:"missed_catchup_count"`
-	OverlapSkipped     int64 `json:"overlap_skipped"`
-	BufferDropped      int64 `json:"buffer_dropped"`
-	BufferSize         int64 `json:"buffer_size"`
+	ActionCount        int64               `json:"action_count"`
+	MissedCatchupCount int64               `json:"missed_catchup_count"`
+	OverlapSkipped     int64               `json:"overlap_skipped"`
+	BufferDropped      int64               `json:"buffer_dropped"`
+	BufferSize         int64               `json:"buffer_size"`
 	RunningWorkflows   []ScheduleListEntry `json:"running_workflows,omitempty"`
 }
 
