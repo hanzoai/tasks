@@ -105,6 +105,9 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		router.SetMembership(routing.NodeID(nodeID), []routing.NodeID{routing.NodeID(nodeID)})
 	}
 	en := newEngine(st)
+	// The background sweepers have no caller to return an error to, so the
+	// host's logger is the only way their failures reach anyone.
+	en.log = cfg.Logger
 	migr := migration.NewCoordinator(st.mgr, repl)
 
 	// Bootstrap default namespace so the UI has something to render
