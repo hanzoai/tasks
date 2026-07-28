@@ -136,7 +136,7 @@ func TestNewClient_RejectsTransportConflict(t *testing.T) {
 	}
 }
 
-func TestNewClient_DefaultsHostPortSentinel(t *testing.T) {
+func TestNewClient_DefaultsAddressSentinel(t *testing.T) {
 	d := &fakeDispatcher{}
 	c, err := NewClient(d, client.Options{Namespace: "default"})
 	if err != nil {
@@ -153,9 +153,9 @@ func TestNewClient_DefaultsHostPortSentinel(t *testing.T) {
 		t.Skip("fake dispatcher echo accidentally satisfied health decode")
 	}
 	// We only assert that the failure is from response decode, not
-	// from HostPort dial — the latter would be "Options.HostPort is
+	// from Address dial — the latter would be "Options.Address is
 	// required" before any RPC is issued.
-	if got := err.Error(); got == "hanzo/tasks/client: Options.HostPort is required when no Transport is injected" {
-		t.Fatalf("inproc.NewClient should not require HostPort, got %v", err)
+	if got := err.Error(); got == "hanzo/tasks/client: Options.Address is required when no Transport is injected" {
+		t.Fatalf("inproc.NewClient should not require Address, got %v", err)
 	}
 }

@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -29,7 +30,7 @@ func bootServer(t *testing.T) (*Embedded, string) {
 	t.Helper()
 	ctx := context.Background()
 	port := pickPort(t)
-	emb, err := Embed(ctx, EmbedConfig{ZAPPort: port})
+	emb, err := Embed(ctx, EmbedConfig{Address: fmt.Sprintf(":%d", port)})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

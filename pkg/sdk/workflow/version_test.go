@@ -199,11 +199,13 @@ type fakeMetrics struct {
 	counters map[string]int64
 }
 
-func newFake() *fakeMetrics                                { return &fakeMetrics{counters: make(map[string]int64)} }
+func newFake() *fakeMetrics                                               { return &fakeMetrics{counters: make(map[string]int64)} }
 func (f *fakeMetrics) WithTags(map[string]string) workflow.MetricsHandler { return f }
-func (f *fakeMetrics) Counter(name string) workflow.MetricsCounter        { return &fakeCounter{f: f, name: name} }
-func (f *fakeMetrics) Gauge(string) workflow.MetricsGauge                 { return &fakeGauge{} }
-func (f *fakeMetrics) Timer(string) workflow.MetricsTimer                 { return &fakeTimer{} }
+func (f *fakeMetrics) Counter(name string) workflow.MetricsCounter {
+	return &fakeCounter{f: f, name: name}
+}
+func (f *fakeMetrics) Gauge(string) workflow.MetricsGauge { return &fakeGauge{} }
+func (f *fakeMetrics) Timer(string) workflow.MetricsTimer { return &fakeTimer{} }
 
 type fakeCounter struct {
 	f    *fakeMetrics

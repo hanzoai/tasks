@@ -122,7 +122,7 @@ func (t *Transport) Close() error {
 // both an explicit Transport and a Dispatcher is ambiguous and is
 // rejected.
 //
-// opts.HostPort is ignored for inproc (no dial happens). All other
+// opts.Address is ignored for inproc (no dial happens). All other
 // fields (Namespace, Identity, CallTimeout, ...) flow through to
 // [client.Dial] unchanged.
 func NewClient(dispatcher Dispatcher, opts client.Options) (client.Client, error) {
@@ -130,11 +130,11 @@ func NewClient(dispatcher Dispatcher, opts client.Options) (client.Client, error
 		return nil, errors.New("hanzo/tasks/inproc: opts.Transport must be nil — use either inproc or a Transport, not both")
 	}
 	opts.Transport = NewTransport(dispatcher)
-	// HostPort is required by Dial when no Transport is set; we set
+	// Address is required by Dial when no Transport is set; we set
 	// the Transport above, so the value is ignored downstream. Pass a
 	// sentinel so logs are unambiguous.
-	if opts.HostPort == "" {
-		opts.HostPort = "inproc://frontend"
+	if opts.Address == "" {
+		opts.Address = "inproc://frontend"
 	}
 	return client.Dial(opts)
 }

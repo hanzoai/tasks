@@ -242,10 +242,10 @@ func Dial(opts Options) (Client, error) {
 
 	tr := opts.Transport
 	if tr == nil {
-		if opts.HostPort == "" {
-			return nil, errors.New("hanzo/tasks/client: Options.HostPort is required when no Transport is injected")
+		if opts.Address == "" {
+			return nil, errors.New("hanzo/tasks/client: Options.Address is required when no Transport is injected")
 		}
-		zt, err := newZAPTransport(opts.HostPort, opts.DialTimeout, id, opts.Token)
+		zt, err := newZAPTransport(opts.Address, opts.DialTimeout, id, opts.Token)
 		if err != nil {
 			return nil, err
 		}
@@ -368,6 +368,8 @@ func newZAPTransport(addr string, dialTimeout time.Duration, nodeID string, toke
 	var rb [4]byte
 	_, _ = cryptorand.Read(rb[:])
 	nodeID = nodeID + "-" + hex.EncodeToString(rb[:])
+	// The client only dials; it binds an ephemeral TCP port of its own so
+	// the peer can push deliveries back to it.
 	node := zap.NewNode(zap.NodeConfig{
 		NodeID:      nodeID,
 		ServiceType: "_tasks._tcp",

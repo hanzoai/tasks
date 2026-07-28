@@ -12,12 +12,12 @@ import (
 // subscribers — the same code path the quasar driver uses on accept,
 // so callers cannot tell the difference.
 type LocalReplicator struct {
-	mu          sync.RWMutex
-	handlers    []Handler
-	accepted    uint64
-	rejected    uint64
-	frameSeqMu  sync.Mutex
-	nextSeq     uint64
+	mu         sync.RWMutex
+	handlers   []Handler
+	accepted   uint64
+	rejected   uint64
+	frameSeqMu sync.Mutex
+	nextSeq    uint64
 }
 
 // NewLocal returns a single-node Replicator.

@@ -531,10 +531,10 @@ func (e *engine) CreateVersion(ns, name, buildId, description, compute, image st
 // DeploymentVersionPatch is metadata-only — buildId and CreateTime are
 // immutable.
 type DeploymentVersionPatch struct {
-	Description *string            `json:"description,omitempty"`
-	Compute     *string            `json:"compute,omitempty"`
-	Image       *string            `json:"image,omitempty"`
-	Env         map[string]string  `json:"env,omitempty"`
+	Description *string           `json:"description,omitempty"`
+	Compute     *string           `json:"compute,omitempty"`
+	Image       *string           `json:"image,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
 }
 
 // UpdateVersion patches metadata on a deployment version. buildId is

@@ -12,7 +12,7 @@ import (
 // in the caller's shard, is rejected once the job is terminal, and never reaches
 // across the org boundary — the same tenancy contract ActivitiesForOrg reads under.
 func TestCancelActivityForOrg(t *testing.T) {
-	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0})
+	emb, err := Embed(context.Background(), EmbedConfig{Address: ""})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestCancelActivityForOrg(t *testing.T) {
 // activity, not just the hash-ordered first 100 ActivitiesForOrg caps at — the
 // truncation that hid live jobs and dropped online workers on a busy org.
 func TestActivitiesPageForOrgWalksPastFirstPage(t *testing.T) {
-	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0})
+	emb, err := Embed(context.Background(), EmbedConfig{Address: ""})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

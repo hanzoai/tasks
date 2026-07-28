@@ -42,7 +42,9 @@ go build ./cmd/tasksd/
 
 ### Live at tasks.hanzo.ai
 - **Cluster**: hanzo-k8s (do-sfo3-hanzo-k8s), namespace `hanzo`
-- **Server**: `ghcr.io/hanzoai/tasks:latest` -- ZAP on 9999, HTTP on 7243
+- **Server**: `ghcr.io/hanzoai/tasks:latest` -- ZAP on 9999, HTTP on 7243.
+  `--zap` takes an ADDRESS: `:9999` for TCP, or a path to bind a unix
+  socket for service-to-service traffic that never leaves the host.
 - **UI**: `ghcr.io/hanzoai/tasks-ui:latest` -- port 8080
 - **Database**: PostgreSQL at `sql.hanzo.svc:5432` (databases: `tasks`, `tasks_visibility`)
 - **Secrets**: KMS-managed via `tasks-secrets` (POSTGRES_PASSWORD, TASKS_AUTH_SECRET, IAM_CLIENT_SECRET)
@@ -155,7 +157,7 @@ schema/tasks.zap # canonical wire schema
 ```
 
 Build proof: `go build ./cmd/tasksd` → 10 MB native binary, 208 deps.
-Boot proof: `tasksd --zap-port 9999 --http :7243` listens on both,
+Boot proof: `tasksd --zap :9999 --http :7243` listens on both,
 serves `/healthz`, `/v1/tasks/health`, `/_/tasks/*` (UI), responds to
 ZAP opcodes 0x0050–0x00A5 from `pkg/sdk/client`.
 

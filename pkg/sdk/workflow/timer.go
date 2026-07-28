@@ -48,10 +48,10 @@ func NewTimer(ctx Context, d time.Duration) Future {
 // time.Timer. Exported so the worker package (a sibling) can reuse
 // the same implementation without reaching into package internals.
 //
-// - d <= 0 settles the Future with (nil, nil) immediately.
-// - Otherwise, a per-timer goroutine parks on the timer's channel
-//   alongside the supplied doneCh. If doneCh closes first, the Future
-//   settles with errFn() — typically the scope's cancel error.
+//   - d <= 0 settles the Future with (nil, nil) immediately.
+//   - Otherwise, a per-timer goroutine parks on the timer's channel
+//     alongside the supplied doneCh. If doneCh closes first, the Future
+//     settles with errFn() — typically the scope's cancel error.
 //
 // Cancellation semantics: a closed doneCh always wins over a fired
 // timer in the rare race where both are observable simultaneously.

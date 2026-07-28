@@ -3,7 +3,7 @@
 // its helpers (ExecuteActivity, GetSignalChannel, NewSelector, …)
 // to express durable orchestration.
 //
-// Layering
+// # Layering
 //
 // The package is DELIBERATELY THIN. All runtime behaviour —
 // deterministic time, activity dispatch, signal queues, selector

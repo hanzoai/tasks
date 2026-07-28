@@ -20,9 +20,12 @@ import (
 // Options configures Dial. Fields mirror the upstream Temporal Options
 // surface so callers can swap import paths without changing arguments.
 type Options struct {
-	// HostPort is the "host:port" address of the Hanzo Tasks frontend
-	// exposing the ZAP transport (default port 9999).
-	HostPort string
+	// Address is where the Hanzo Tasks frontend exposes its ZAP
+	// transport. A filesystem path dials a unix socket — the right shape
+	// for service-to-service traffic that never leaves the host, and one
+	// that needs no port. Anything else is a host:port TCP address.
+	// Required unless Transport is injected.
+	Address string
 
 	// Namespace scopes every RPC issued by the returned Client. Empty
 	// string is rewritten to "default" at Dial time.

@@ -92,25 +92,25 @@ func TestE2E_ServeGated_DurableWorkflow_RequiresIdentity(t *testing.T) {
 	js := gatedJWKS(t, key, "kid-1")
 	validator := auth.NewValidator(auth.JWTConfig{JWKSURL: js.URL, Issuer: "https://hanzo.id", TTL: time.Minute})
 
-	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{ZAPPort: freePort(t)})
+	emb, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", freePort(t))})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	defer emb.Stop(ctx)
 
 	// ServeGated refuses to expose the engine without a validator.
-	if err := emb.ServeGated(ctx, freePort(t), nil); err == nil {
+	if err := emb.ServeGated(ctx, fmt.Sprintf(":%d", freePort(t)), nil); err == nil {
 		t.Fatal("ServeGated accepted a nil validator; want refusal")
 	}
 
 	gatedPort := freePort(t)
-	if err := emb.ServeGated(ctx, gatedPort, validator); err != nil {
+	if err := emb.ServeGated(ctx, fmt.Sprintf(":%d", gatedPort), validator); err != nil {
 		t.Fatalf("serve gated: %v", err)
 	}
 	gatedAddr := fmt.Sprintf("127.0.0.1:%d", gatedPort)
 
 	// A caller WITHOUT a token is refused durable execution on the gated listener.
-	anon, err := client.Dial(client.Options{HostPort: gatedAddr, Namespace: "default", DialTimeout: 5 * time.Second})
+	anon, err := client.Dial(client.Options{Address: gatedAddr, Namespace: "default", DialTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("dial anon: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestE2E_ServeGated_DurableWorkflow_RequiresIdentity(t *testing.T) {
 	// A caller WITH a valid token runs a real durable workflow, org-scoped to owner.
 	tok := gatedSign(t, key, "kid-1", "https://hanzo.id", "acme")
 	cli, err := client.Dial(client.Options{
-		HostPort:    gatedAddr,
+		Address:     gatedAddr,
 		Namespace:   "default",
 		DialTimeout: 5 * time.Second,
 		Token:       client.StaticToken(tok),

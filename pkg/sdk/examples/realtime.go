@@ -16,10 +16,10 @@ import (
 // RealtimeResult captures what arrived on the SSE stream during the
 // demo window: every workflow.* event for the workflows we started.
 type RealtimeResult struct {
-	StartedCount  int
-	EventsCaught  int
-	StartEvents   int
-	CancelEvents  int
+	StartedCount int
+	EventsCaught int
+	StartEvents  int
+	CancelEvents int
 }
 
 // Realtime boots an embedded daemon, opens an SSE subscription via
@@ -44,7 +44,7 @@ func Realtime(parent context.Context) (*RealtimeResult, error) {
 	bootCtx, bootCancel := context.WithCancel(parent)
 	defer bootCancel()
 	srv, err := tasks.Embed(bootCtx, tasks.EmbedConfig{
-		ZAPPort:   port,
+		Address:   fmt.Sprintf(":%d", port),
 		Namespace: "default",
 	})
 	if err != nil {
@@ -74,7 +74,7 @@ func Realtime(parent context.Context) (*RealtimeResult, error) {
 
 	// Dial via ZAP and fire a couple state changes.
 	c, err := client.Dial(client.Options{
-		HostPort:    fmt.Sprintf("127.0.0.1:%d", port),
+		Address:     fmt.Sprintf("127.0.0.1:%d", port),
 		Namespace:   "default",
 		DialTimeout: 1 * time.Second,
 		CallTimeout: 1 * time.Second,

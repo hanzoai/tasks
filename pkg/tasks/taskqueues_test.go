@@ -13,7 +13,7 @@ import (
 )
 
 func TestTaskQueuesAndWorkers(t *testing.T) {
-	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0})
+	emb, err := Embed(context.Background(), EmbedConfig{Address: ""})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestTaskQueuesAndWorkers(t *testing.T) {
 }
 
 func TestWorkflowHistoryAndQuery(t *testing.T) {
-	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0})
+	emb, err := Embed(context.Background(), EmbedConfig{Address: ""})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

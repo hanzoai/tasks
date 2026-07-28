@@ -74,7 +74,7 @@ func main() {
 		return
 	}
 	var (
-		zapPort    = flag.Int("zap-port", envInt("TASKS_ZAP_PORT", 9999), "ZAP listener port")
+		zapAddr    = flag.String("zap", envStr("TASKS_ZAP_ADDR", ":9999"), "ZAP listen address: a host:port, or a path to bind a unix socket")
 		httpAddr   = flag.String("http", envStr("TASKS_HTTP_ADDR", ":7243"), "HTTP listen address (UI + healthz)")
 		dataDir    = flag.String("data", envStr("TASKSD_DATA_DIR", envStr("TASKS_DATA_DIR", "./tasks-data")), "Tasks persistence directory")
 		ns         = flag.String("namespace", envStr("TASKS_NAMESPACE", "default"), "Default namespace")
@@ -112,7 +112,7 @@ func main() {
 	srv, err := tasks.Embed(ctx, tasks.EmbedConfig{
 		DataDir:         *dataDir,
 		MasterKey:       master,
-		ZAPPort:         *zapPort,
+		Address:         *zapAddr,
 		Namespace:       *ns,
 		Logger:          logger,
 		JWTValidator:    validator,
@@ -126,7 +126,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer srv.Stop(context.Background())
-	logger.Info("zap listener", "port", srv.ZAPPort(), "service", "_tasks._tcp")
+	logger.Info("zap listener", "addr", srv.Address(), "service", "_tasks._tcp")
 
 	httpSrv := &http.Server{
 		Addr:              *httpAddr,
@@ -314,14 +314,4 @@ func stringOr(a, b string) string {
 		return a
 	}
 	return b
-}
-
-func envInt(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
-		var n int
-		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
-			return n
-		}
-	}
-	return def
 }

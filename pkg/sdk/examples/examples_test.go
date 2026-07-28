@@ -24,14 +24,14 @@ func boot(t *testing.T) (client.Client, func()) {
 	t.Helper()
 	port := freePort(t)
 	srv, err := tasks.Embed(context.Background(), tasks.EmbedConfig{
-		ZAPPort:   port,
+		Address:   fmt.Sprintf(":%d", port),
 		Namespace: "default",
 	})
 	if err != nil {
 		t.Fatalf("tasks.Embed: %v", err)
 	}
 	c, err := client.Dial(client.Options{
-		HostPort:    fmt.Sprintf("127.0.0.1:%d", port),
+		Address:     fmt.Sprintf("127.0.0.1:%d", port),
 		Namespace:   "default",
 		DialTimeout: 3 * time.Second,
 		CallTimeout: 3 * time.Second,

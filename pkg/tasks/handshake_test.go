@@ -211,7 +211,7 @@ func TestQueryPush_WorkerTimeout(t *testing.T) {
 
 func adminFixture(t *testing.T) (*Embedded, *httptest.Server) {
 	t.Helper()
-	emb, err := Embed(context.Background(), EmbedConfig{ZAPPort: 0})
+	emb, err := Embed(context.Background(), EmbedConfig{Address: ""})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -247,9 +247,9 @@ func httpPost(t *testing.T, url, body string) (int, []byte) {
 func TestAdmin_SearchAttributes(t *testing.T) {
 	_, srv := adminFixture(t)
 	cases := []struct {
-		name   string
-		body   string
-		code   int
+		name string
+		body string
+		code int
 	}{
 		{"ok", `{"name":"OrderId","type":"Keyword"}`, 200},
 		{"duplicate", `{"name":"OrderId","type":"Keyword"}`, 409},

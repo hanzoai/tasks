@@ -650,7 +650,7 @@ func (stubEnv) MutableSideEffect(_ string, fn func(ctx Context) any, _ func(a, b
 	}
 	return EncodePayload(fn(ctx))
 }
-func (stubEnv) MetricsHandler() MetricsHandler          { return nil }
+func (stubEnv) MetricsHandler() MetricsHandler              { return nil }
 func (stubEnv) UpsertSearchAttributes(map[string]any) error { return nil }
 
 // activityName derives the activity's registered name. For function
