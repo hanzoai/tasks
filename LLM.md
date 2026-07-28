@@ -17,6 +17,33 @@ Durable workflow execution engine for AI agent orchestration.
 ## Known gaps
 - **Terminal standalone-activity GC is unimplemented.** Completed/failed/canceled standalone activities under the `act/<ns>/` key family (and their `ahist/<ns>/…` history) are never pruned — the namespace `WorkflowExecutionRetentionTtl` (default `720h`) has **no sweeper enforcing it** for standalone activities. The store therefore grows unbounded with volume (one row per job, e.g. every `studio.render` in the `gpu-jobs` namespace), and every `ListActivities` / `ActivitiesForOrg` / `ActivitiesPageForOrg` scans the full set. Consumers can bound the READ (cloud's fleet queue recency-sorts + caps terminal history, and now walks all pages via `ActivitiesPageForOrg`), but the underlying storage + scan cost still grow. **Fix (queued v1.51.4):** a background sweeper alongside `runScheduler` that deletes terminal standalone activities older than the namespace retention TTL, plus their history — idempotent, org-shard-scoped. Surfaced in the hanzoai/cloud per-GPU-queue review.
 
+## Cron sweeper observability (v1.52.2)
+
+The sweeper reports what it cannot return to a caller. Three `slog` messages
+off `EmbedConfig.Logger` (`slog.Default()` when unset), all from
+`pkg/tasks/engine.go`:
+
+| Message | Level | Meaning |
+|---------|-------|---------|
+| `tasks: cron schedule action failed` | ERROR | One schedule's `StartWorkflow` failed. Carries `org`, `namespace`, `scheduleId`, `workflowType`, `taskQueue`, `consecutiveFailures`, `error`. |
+| `tasks: cron schedule action recovered` | INFO | A previously failing schedule fired. Carries `afterConsecutiveFailures`. |
+| `tasks: schedule sweep failed, no schedule fired this tick` | ERROR | The whole sweep failed — cron is dead for every org at once. |
+
+Alert on the first; `consecutiveFailures` is the "how long has this been
+dead" number. Per-schedule **isolation is unchanged** — a broken entry is
+still skipped and retried next sweep; only the silence is gone.
+
+Throttle: first failure, then one line per `sweepFailThrottle` (60) sweeps
+≈ 5 min. A failed fire is deliberately not re-anchored, so it retries every
+5s tick; unthrottled that is ~17k lines/day/schedule. The counter clears on
+success and on `DeleteSchedule`, so a relapse alerts immediately.
+
+Why this exists: cloud's `clients/cron` fired a JobWorkflow whose activity
+re-read the entry's ConfigMap; the cloud ServiceAccount had no RBAC to read
+ConfigMaps, so every fire failed for **11 days** across six nightly backups
+while the engine emitted nothing and every dashboard read healthy. It was
+found only by hand-reading the engine's durable records.
+
 ## Quick Start
 ```bash
 go build ./cmd/tasksd/

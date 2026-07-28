@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -74,10 +75,19 @@ type engine struct {
 	workers    *workerRegistry
 	runMu      *keyedMutex // serializes advancing a single (org, ns, wf, run)
 	orgID      string      // "" = unscoped (embedded/dev). Stamped on every emitted Event.
+	// log reports what the background sweepers cannot return to a caller.
+	// Always non-nil (newEngine defaults it, WithOrg carries it, Embed
+	// overrides it with EmbedConfig.Logger), so no call site needs a guard.
+	log *slog.Logger
+	// schedFails throttles per-schedule cron failure reporting. Shared
+	// across WithOrg views like broker/disp/workers, because the root
+	// sweeper fires every org's schedules through a throwaway per-org view
+	// and the count must follow the schedule, not the view.
+	schedFails *scheduleFailTracker
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex()}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex(), log: slog.Default(), schedFails: newScheduleFailTracker()}
 }
 
 // WithOrg returns an engine view scoped to orgID. Reads and writes route
@@ -90,7 +100,7 @@ func (e *engine) WithOrg(orgID string) *engine {
 	if orgID == "" {
 		return e
 	}
-	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, orgID: orgID}
+	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, orgID: orgID, log: e.log, schedFails: e.schedFails}
 }
 
 // emit publishes an event tagged with the engine's org so per-org SSE
@@ -1265,6 +1275,10 @@ func (e *engine) ListSchedules(ns string) ([]Schedule, error) {
 }
 
 func (e *engine) DeleteSchedule(ns, id string) error {
+	// Drop the failure throttle with the row it belongs to. A schedule
+	// deleted while broken never fires again, so nothing else would ever
+	// clear its counter.
+	e.schedFails.ok(scheduleKey(e.orgID, ns, id))
 	return e.store.del(fmt.Sprintf("sc/%s/%s", ns, id))
 }
 
@@ -1542,6 +1556,66 @@ func (e *engine) ListIdentities(ns string) ([]Identity, error) {
 
 // ── cron sweeper ────────────────────────────────────────────────────
 
+// sweepFailThrottle is how many consecutive failures of one schedule pass
+// between log lines after the first. A schedule whose action fails is NOT
+// re-anchored (see sweepSchedules), so it stays due and retries on every
+// 5s tick: unthrottled that is ~17k identical lines per day per broken
+// schedule, which buries the signal as thoroughly as silence did. 60
+// sweeps ≈ 5 minutes, so any 15-minute dashboard window still holds at
+// least three lines.
+const sweepFailThrottle = 60
+
+// scheduleKey identifies a schedule across every org's shard. Also the
+// tracker key, so counts follow the schedule and not the engine view.
+func scheduleKey(org, ns, id string) string { return org + "|" + ns + "|" + id }
+
+// sweepAllKey tracks whole-sweep failures under the same throttle as a
+// single broken schedule. CreateSchedule rejects an empty namespace and an
+// empty scheduleId, so this all-empty triple can never collide with a real
+// schedule's key.
+var sweepAllKey = scheduleKey("", "", "")
+
+// scheduleFailTracker counts consecutive fire failures per schedule so the
+// sweeper can alert on the first one and throttle the rest.
+type scheduleFailTracker struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+func newScheduleFailTracker() *scheduleFailTracker {
+	return &scheduleFailTracker{n: map[string]int{}}
+}
+
+// fail records a failure for key and reports the consecutive-failure count
+// plus whether this one should be logged: the FIRST failure (the alert),
+// then every sweepFailThrottle-th (the heartbeat, carrying whatever the
+// current error text is).
+//
+// Deliberately NOT "log whenever the error text changes": StartWorkflow
+// failures can embed the freshly minted random runId (store.put's "cannot
+// route key %q" path), so a text-change rule would fire on every sweep and
+// restore exactly the flood this throttle exists to prevent. A failure mode
+// that shifts instead surfaces on the next heartbeat, ≤5 minutes later.
+func (f *scheduleFailTracker) fail(key string) (int, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.n[key]++
+	n := f.n[key]
+	return n, n == 1 || n%sweepFailThrottle == 0
+}
+
+// ok clears key and reports how many consecutive failures preceded it
+// (0 = it was already healthy). Clearing is what makes a schedule that
+// breaks again alert immediately instead of waiting out the throttle, and
+// it is what keeps the map from growing once a schedule is fixed.
+func (f *scheduleFailTracker) ok(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.n[key]
+	delete(f.n, key)
+	return n
+}
+
 // runScheduler ticks every 5s and fires due schedules through StartWorkflow.
 // Cron specs are parsed via robfig/cron with seconds-optional 5/6-field
 // syntax; first invalid spec is skipped without aborting the sweep.
@@ -1553,11 +1627,29 @@ func (e *engine) runScheduler(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			_ = e.sweepSchedules()
-			e.sweepCanceling()
-			e.sweepLeases()
+			e.sweepOnce()
 		}
 	}
+}
+
+// sweepOnce runs one scheduler tick. Split out of runScheduler's select so
+// tests can drive a tick without waiting on the 5s ticker.
+//
+// The sweep error used to be dropped on the floor (`_ = e.sweepSchedules()`).
+// That made a TOTAL sweep failure — the store refusing the cross-org scan,
+// say — indistinguishable from a quiet night: cron stops firing for every
+// org at once and nothing anywhere says so.
+func (e *engine) sweepOnce() {
+	if err := e.sweepSchedules(); err != nil {
+		if n, report := e.schedFails.fail(sweepAllKey); report {
+			e.log.Error("tasks: schedule sweep failed, no schedule fired this tick",
+				"org", e.orgID, "consecutiveFailures", n, "error", err)
+		}
+	} else {
+		e.schedFails.ok(sweepAllKey)
+	}
+	e.sweepCanceling()
+	e.sweepLeases()
 }
 
 // sweepLeases reaps expired activity leases across every namespace the
@@ -1614,11 +1706,43 @@ func (e *engine) sweepSchedules() error {
 	for _, d := range dues {
 		s := d.s
 		oe := e.WithOrg(d.org)
+		key := scheduleKey(d.org, s.Namespace, s.ScheduleId)
 		if _, err := oe.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input); err != nil {
 			// Per-schedule isolation: a broken action (e.g. unregistered
 			// namespace) skips this entry and the sweep continues; it is
 			// re-attempted next sweep.
+			//
+			// Isolation must not mean SILENCE. cloud's clients/cron fires a
+			// JobWorkflow per entry; when its activity could not read the
+			// entry's ConfigMap (the cloud ServiceAccount was missing the
+			// RBAC) every fire failed for 11 days while the engine reported
+			// nothing and every dashboard read healthy — six nightly backups
+			// produced nothing and it was caught only by hand-reading the
+			// engine's durable records. So every field needed to act on it
+			// goes on the line: which org, which namespace, which schedule,
+			// what it was trying to start and where, and how long it has
+			// been failing.
+			if n, report := e.schedFails.fail(key); report {
+				e.log.Error("tasks: cron schedule action failed",
+					"org", d.org,
+					"namespace", s.Namespace,
+					"scheduleId", s.ScheduleId,
+					"workflowType", s.Action.WorkflowType.Name,
+					"taskQueue", s.Action.TaskQueue,
+					"consecutiveFailures", n,
+					"error", err)
+			}
 			continue
+		}
+		if n := e.schedFails.ok(key); n > 0 {
+			// Closes the loop the throttle opens: without a recovery line an
+			// operator cannot tell a schedule that was fixed from one whose
+			// next throttled error line simply has not come round yet.
+			e.log.Info("tasks: cron schedule action recovered",
+				"org", d.org,
+				"namespace", s.Namespace,
+				"scheduleId", s.ScheduleId,
+				"afterConsecutiveFailures", n)
 		}
 		s.Info.ActionCount++
 		s.Info.UpdateTime = now.Format(time.RFC3339)
