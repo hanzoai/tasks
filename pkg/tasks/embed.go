@@ -216,18 +216,6 @@ func (e *Embedded) Address() string {
 // route back to the owning shard via the task's org.
 type View struct{ en *engine }
 
-// mustPrincipal decodes a principal carried on a dispatch token. The token
-// was minted from a live engine view, so an undecodable one is a lost
-// tenant, not a caller error: fall back to the root tenant rather than drop
-// the delivery.
-func mustPrincipal(s string) Principal {
-	p, err := storepkg.ParsePrincipal(s)
-	if err != nil {
-		return Principal{}
-	}
-	return p
-}
-
 // Principal is the tenant a store view is scoped to: an org, optionally
 // narrowed to a project and a user. The zero value is the root tenant.
 type Principal = storepkg.Principal
@@ -2081,7 +2069,7 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 		// Apply on the org that owns the run: org-scoped runs live in a prefixed
 		// store partition rootEn cannot see. The root principal (unscoped /
 		// loopback) makes As a no-op, so the in-process path is unchanged.
-		oe := en.As(mustPrincipal(t.principal))
+		oe := en.As(t.principal)
 		// Apply the decider's command batch. kind=2 (scheduleActivity)
 		// carries the deterministic seq + activity spec — this is where a
 		// workflow-driven activity enters the durable, event-sourced path.
@@ -2135,7 +2123,7 @@ func respondActivityCompletedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.As(mustPrincipal(pt.principal)).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
+		if err := en.As(pt.principal).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)
@@ -2149,7 +2137,7 @@ func respondActivityFailedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.As(mustPrincipal(pt.principal)).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
+		if err := en.As(pt.principal).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)
