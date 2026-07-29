@@ -52,6 +52,10 @@ import (
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
 )
 
+// shardSuffix names a shard file. One namespace, one file, one suffix —
+// the manager builds paths with it and the upgrade recognises them by it.
+const shardSuffix = ".db"
+
 // IdleEvictAfter sets how long an open shard may sit unused before the
 // manager closes it. Mutable for tests.
 var IdleEvictAfter = 10 * time.Minute
@@ -157,7 +161,7 @@ func (m *Manager) Get(ctx context.Context, p Principal, ns string) (*Shard, erro
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("store.Get: mkdir %s: %w", dir, err)
 	}
-	path := filepath.Join(dir, ns+".db")
+	path := filepath.Join(dir, ns+shardSuffix)
 	dek, err := shardDEK(path, p, m.master)
 	if err != nil {
 		return nil, err
@@ -237,10 +241,10 @@ func (m *Manager) ListShards(ctx context.Context, p Principal) ([]*Shard, error)
 	out := make([]*Shard, 0, len(entries))
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasSuffix(name, ".db") || strings.HasPrefix(name, "-") {
+		if !strings.HasSuffix(name, shardSuffix) || strings.HasPrefix(name, "-") {
 			continue
 		}
-		ns := strings.TrimSuffix(name, ".db")
+		ns := strings.TrimSuffix(name, shardSuffix)
 		s, err := m.Get(ctx, p, ns)
 		if err != nil {
 			return nil, err
@@ -343,7 +347,7 @@ func CopyFile(dst, src string) (int64, error) {
 
 // ShardPath returns the on-disk file for (principal, ns).
 func (m *Manager) ShardPath(p Principal, ns string) string {
-	return filepath.Join(m.rootDir, p.dir(), ns+".db")
+	return filepath.Join(m.rootDir, p.dir(), ns+shardSuffix)
 }
 
 // Replicator returns the currently-installed driver, or nil.

@@ -69,9 +69,17 @@ func newCoordinator(mgr *store.Manager, rep replication.Replicator) func(ctx con
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		runMigrate(os.Args[2:])
-		return
+	// Two subcommands, two axes. `migrate` moves ONE shard between NODES;
+	// `upgrade` moves EVERY shard forward into the layout this binary reads.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "migrate":
+			runMigrate(os.Args[2:])
+			return
+		case "upgrade":
+			runUpgrade(os.Args[2:])
+			return
+		}
 	}
 	var (
 		zapAddr    = flag.String("zap", envStr("TASKS_ZAP_ADDR", ":9999"), "ZAP listen address: a host:port, or a path to bind a unix socket")
@@ -216,6 +224,32 @@ func envStr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// runUpgrade is the `tasksd upgrade --data <dir>` subcommand: the one-time
+// move of a store written before shards were principal-addressed into the
+// layout this binary reads (store.Upgrade). Idempotent, so a deploy can run
+// it unconditionally ahead of the daemon; it prints what it moved and exits
+// non-zero on anything it refused to do.
+func runUpgrade(args []string) {
+	fs := flag.NewFlagSet("upgrade", flag.ExitOnError)
+	dataDir := fs.String("data", envStr("TASKSD_DATA_DIR", "./tasks-data"), "Tasks persistence directory")
+	_ = fs.Parse(args)
+	master, err := masterKey()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	moves, upgradeErr := store.Upgrade(*dataDir, master)
+	if moves == nil {
+		moves = []store.Move{}
+	}
+	out, _ := json.MarshalIndent(moves, "", "  ")
+	fmt.Println(string(out))
+	if upgradeErr != nil {
+		fmt.Fprintln(os.Stderr, "upgrade:", upgradeErr)
+		os.Exit(1)
+	}
 }
 
 // runMigrate is the `tasksd migrate ...` subcommand. Quiesces the

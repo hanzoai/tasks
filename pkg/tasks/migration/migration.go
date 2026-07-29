@@ -13,7 +13,7 @@
 //  4. Release the lock with another Propose (Op="unlock"); the
 //     destination becomes the live shard owner.
 //
-// CLI: tasksd migrate --org <id> --namespace <name> --to <node>
+// CLI: tasksd migrate [--org <id> [--project <id> [--user <id>]]] --namespace <name> --to <node>
 package migration
 
 import (
