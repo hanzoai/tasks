@@ -256,6 +256,21 @@ func (v View) DescribeActivity(ns, activityID, runID string) (*StandaloneActivit
 	return v.en.DescribeActivity(ns, activityID, runID)
 }
 
+// FailureStreaks returns what is broken in ns right now, worst first: one
+// durable row per activity/workflow identity that has failed every attempt
+// since it last succeeded. Empty means nothing is failing.
+//
+// This is the read that was missing. cloud's clients/cron fired a JobWorkflow
+// whose activity failed on every one of 4489 fires across 11 days while the
+// engine's only output was an SSE event nobody was subscribed to; the six
+// nightly backups it silently skipped were found by hand-reading SQLite. A
+// host polls this instead — each row carries org, namespace, workflow and
+// activity type, task queue, originating scheduleId, consecutive failures,
+// how long it has been failing, the last error, and a run to go read.
+func (v View) FailureStreaks(ns string) ([]FailureStreak, error) {
+	return v.en.FailureStreaks(ns)
+}
+
 // nodeSnapshot returns a copy of the current listener set under the lock so the
 // server-push loop never races ServeGated appending a gated listener.
 func (e *Embedded) nodeSnapshot() []*zap.Node {
