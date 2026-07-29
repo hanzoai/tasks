@@ -4,8 +4,10 @@ package tasks_test
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +76,28 @@ func TestE2E_UnixSocket(t *testing.T) {
 	}
 	if desc.WorkflowID != "wf-over-socket" {
 		t.Fatalf("described %+v", desc)
+	}
+}
+
+// A socket path over the kernel's sockaddr_un ceiling is refused with a
+// message naming the path, its size and the limit. Left to the kernel it is
+// "bind: invalid argument" and nothing else, which is a long afternoon when
+// the socket lives under a deployment's data directory.
+func TestEmbedRefusesAnOversizedSocketPath(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, strings.Repeat("s", 108-len(dir)-1)+".sock")
+	_, err := tasks.Embed(context.Background(), tasks.EmbedConfig{Address: sock})
+	if err == nil {
+		t.Fatalf("Embed on a %d-byte socket path returned nil", len(sock))
+	}
+	for _, want := range []string{"sun_path", sock} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not name %q", err, want)
+		}
+	}
+	// The kernel's own answer, so the test fails if the ceiling ever moves.
+	if _, lerr := net.Listen("unix", sock); lerr == nil {
+		t.Fatalf("the kernel bound %d bytes; the limit this refusal encodes is wrong", len(sock))
 	}
 }
 

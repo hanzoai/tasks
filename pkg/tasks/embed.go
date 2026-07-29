@@ -80,6 +80,26 @@ type Embedded struct {
 }
 
 // Embed starts the Tasks server. Stop before exit.
+// sunPath is the size of sockaddr_un.sun_path, so a socket path may be at
+// most sunPath-1 bytes plus its NUL. The kernel rejects a longer one with
+// EADDRINUSE's less helpful cousin — bind: invalid argument — naming
+// neither the path, the limit, nor the fact that a limit was involved. A
+// deployment that puts its socket under a data directory sits a few nested
+// directories from that ceiling, so say it here instead of leaving it to be
+// discovered.
+const sunPath = 108
+
+// checkAddress refuses an address that cannot be bound, before zap tries.
+// Which addresses are sockets is zap's rule (Network), asked rather than
+// restated, so the two can never disagree about what a path is.
+func checkAddress(addr string) error {
+	if zap.Network(addr) != "unix" || len(addr) < sunPath {
+		return nil
+	}
+	return fmt.Errorf("tasks: socket path is %d bytes, over the %d the kernel allows (sockaddr_un.sun_path is %d including its NUL): %s",
+		len(addr), sunPath-1, sunPath, addr)
+}
+
 func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	if cfg.DataDir == "" {
 		// Per-process scratch directory keeps tests / multiple
@@ -96,6 +116,9 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if err := checkAddress(cfg.Address); err != nil {
+		return nil, err
 	}
 
 	st, err := newStoreFromEnv(cfg.DataDir, cfg.MasterKey)
@@ -312,6 +335,9 @@ func (e *Embedded) ServeGated(ctx context.Context, addr string, validator *auth.
 	}
 	if validator == nil {
 		return errors.New("tasks: ServeGated requires a validator; refusing to expose durable execution ungated")
+	}
+	if err := checkAddress(addr); err != nil {
+		return err
 	}
 	n := zap.NewNode(zap.NodeConfig{
 		NodeID:      "tasks-embed-gated",

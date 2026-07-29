@@ -158,7 +158,11 @@ go build ./cmd/tasksd/
 - **Cluster**: hanzo-k8s (do-sfo3-hanzo-k8s), namespace `hanzo`
 - **Server**: `ghcr.io/hanzoai/tasks:latest` -- ZAP on 9999, HTTP on 7243.
   `--zap` takes an ADDRESS: `:9999` for TCP, or a path to bind a unix
-  socket for service-to-service traffic that never leaves the host.
+  socket for service-to-service traffic that never leaves the host. A
+  socket path must fit `sockaddr_un.sun_path` — 107 bytes plus its NUL —
+  which a socket nested under a deployment's data directory can exceed;
+  `Embed` and `ServeGated` refuse an oversized one by name, because the
+  kernel's own answer is `bind: invalid argument` and nothing more.
 - **UI**: `ghcr.io/hanzoai/tasks-ui:latest` -- port 8080
 - **Database**: PostgreSQL at `sql.hanzo.svc:5432` (databases: `tasks`, `tasks_visibility`)
 - **Secrets**: KMS-managed via `tasks-secrets` (POSTGRES_PASSWORD, TASKS_AUTH_SECRET, IAM_CLIENT_SECRET)
@@ -395,6 +399,41 @@ never touches ciphertext. A keyed shard is ciphertext on every build:
 its pure-Go SQLCipher envelope when one is not. On the envelope the file
 is sealed at checkpoint/close rather than per commit, which is what the
 manager's sweep bounds. Unset leaves shards plaintext (dev).
+
+### Upgrading a store written before principals — `tasksd upgrade`
+
+An older binary addressed a shard by org alone (`<data>/<org>/<ns>.db`,
+`<data>/_/<ns>.db` for the unscoped tenant). This one reads three levels
+down, so on the first boot after the upgrade it finds nothing, creates
+empty shards beside the full ones, enumerates zero tenants, and no
+schedule fires again — silently. Nothing is destroyed; the bytes are one
+directory up.
+
+    tasksd upgrade --data <dir>
+
+inserts the two sentinel levels uniformly (`<data>/X/*.db` →
+`<data>/X/_/_/`, including `_` → `_/_/_`). A rename within one
+filesystem: no page rewritten, no re-encryption. Journals move before
+their database, so a run that stops half way never leaves a database
+without the WAL holding its last commits. Idempotent — a moved shard
+leaves nothing behind — so a deploy can run it unconditionally ahead of
+the daemon.
+
+Two refusals, both loud, both non-destructive:
+
+- **A master key is set.** Pre-upgrade shards are plaintext and moving
+  one does not encrypt it; the next boot would wrap a fresh DEK around a
+  file it then failed to decrypt. Move first with `KMS_MASTER_KEY`
+  unset, encrypt second.
+- **A destination is occupied** (`store.ErrOccupied`). The only way to
+  get there is booting this binary before the move ran, which creates an
+  EMPTY shard where the full one belongs — and anything started after
+  that boot is in the empty one. Both files are kept, the other tenants
+  still move, and the operator picks which is authoritative.
+
+`upgrade` and `migrate` are different axes and stay separate:
+`upgrade` moves EVERY shard forward in time (layout), `migrate` moves ONE
+shard across space (nodes).
 
 ### What is genuinely missing (the real gap)
 
