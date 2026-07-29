@@ -21,7 +21,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
-// IAMClaims is the subset of Casdoor/hanzo.id claims tasksd cares about.
+// IAMClaims is the subset of the hanzo.id token claims tasksd cares about.
 // `owner` is the org slug (X-Org-Id), `sub` is the user id (X-User-Id),
 // `email` is the user email (X-User-Email), `project` is the validated
 // project slug (X-Project-Id) — the third leg of the org/project/user
