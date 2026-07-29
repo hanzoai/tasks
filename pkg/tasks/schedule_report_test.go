@@ -180,13 +180,13 @@ func TestScheduleSweepReportsOrgOnBrokenAction(t *testing.T) {
 // flood. A failed fire is deliberately NOT re-anchored, so the entry stays
 // due and is retried on every 5s tick — unthrottled that is a line every
 // 5 seconds forever, which hides the signal just as well as silence.
-// First failure alerts, then one line per sweepFailThrottle sweeps.
+// First failure alerts, then one line per failReportThrottle sweeps.
 func TestScheduleSweepThrottlesRepeatFailures(t *testing.T) {
 	en := newEngine(newStore())
 	logs := captureLogs(en)
 	brokenSchedule(t, en, "ghost", "loud", "GhostProbe", "q")
 
-	for i := 0; i < sweepFailThrottle; i++ {
+	for i := 0; i < failReportThrottle; i++ {
 		if err := en.sweepSchedules(); err != nil {
 			t.Fatalf("sweepSchedules #%d: %v", i+1, err)
 		}
@@ -195,10 +195,10 @@ func TestScheduleSweepThrottlesRepeatFailures(t *testing.T) {
 	fails := withMsg(logs(), msgActionFailed)
 	if len(fails) != 2 {
 		t.Fatalf("log lines after %d failing sweeps = %d, want 2 (first + one throttled heartbeat)",
-			sweepFailThrottle, len(fails))
+			failReportThrottle, len(fails))
 	}
 	wantFields(t, fails[0], map[string]any{"consecutiveFailures": 1})
-	wantFields(t, fails[1], map[string]any{"consecutiveFailures": sweepFailThrottle})
+	wantFields(t, fails[1], map[string]any{"consecutiveFailures": failReportThrottle})
 }
 
 // TestScheduleSweepReportsRecoveryAndRelapse walks the whole tracker
@@ -305,14 +305,14 @@ func TestSweepOnceReportsSweepError(t *testing.T) {
 
 	// The same throttle applies: a permanently unhappy store must not log
 	// on every one of the 5s ticks either.
-	for i := 0; i < sweepFailThrottle; i++ {
+	for i := 0; i < failReportThrottle; i++ {
 		en.sweepOnce()
 	}
 
 	sweeps := withMsg(logs(), msgSweepFailed)
 	if len(sweeps) != 2 {
 		t.Fatalf("sweep-failure lines after %d failing ticks = %d, want 2 (first + one throttled heartbeat); records: %v",
-			sweepFailThrottle, len(sweeps), logs())
+			failReportThrottle, len(sweeps), logs())
 	}
 	wantFields(t, sweeps[0], map[string]any{"level": "ERROR", "consecutiveFailures": 1})
 	if errText, _ := sweeps[0]["error"].(string); errText == "" {

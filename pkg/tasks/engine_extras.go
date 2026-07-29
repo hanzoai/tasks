@@ -32,7 +32,10 @@ func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, 
 			}
 		}
 	}
-	wf, err := e.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input)
+	// Same schedule stamp the sweeper applies — a manual trigger produces a
+	// run of the same schedule and must be traceable to it identically.
+	wf, err := e.startWorkflowFull(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "",
+		map[string]any{searchAttrScheduleID: s.ScheduleId}, nil, "")
 	if err != nil {
 		return nil, err
 	}

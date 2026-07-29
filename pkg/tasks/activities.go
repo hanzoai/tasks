@@ -407,6 +407,16 @@ func (e *engine) activityTerminal(ns, activityID, runID, status, eventType, evKi
 	}
 	out, _, _ := e.DescribeActivity(ns, activityID, runID)
 	e.emit(Event{Kind: evKind, Namespace: ns, WorkflowID: activityID, RunID: runID, Data: out})
+	// Standalone activities reach here from the fleet queue (fn.run,
+	// studio.render) and from the lease reaper. Same rule as the durable
+	// path: FAILED is evidence, COMPLETED ends the streak, and CANCELED is
+	// neither a fault nor a success so it leaves the streak alone.
+	switch status {
+	case activityStateFailed:
+		e.recordFailure(standaloneFailureIdentity(ns, a), false, cause)
+	case activityStateCompleted:
+		e.clearFailure(standaloneFailureIdentity(ns, a))
+	}
 	return nil
 }
 
