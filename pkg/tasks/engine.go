@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hanzoai/tasks/pkg/sdk/temporal"
 	"github.com/robfig/cron/v3"
 )
 
@@ -79,15 +80,17 @@ type engine struct {
 	// Always non-nil (newEngine defaults it, WithOrg carries it, Embed
 	// overrides it with EmbedConfig.Logger), so no call site needs a guard.
 	log *slog.Logger
-	// schedFails throttles per-schedule cron failure reporting. Shared
-	// across WithOrg views like broker/disp/workers, because the root
-	// sweeper fires every org's schedules through a throwaway per-org view
-	// and the count must follow the schedule, not the view.
-	schedFails *scheduleFailTracker
+	// fails throttles failure reporting — cron schedules here, activities
+	// and workflows in failure.go, one tracker because there is one throttle
+	// rule. Shared across WithOrg views like broker/disp/workers, because the
+	// root sweeper fires every org's schedules through a throwaway per-org
+	// view and the count must follow the work, not the view; keys are
+	// org-qualified for the same reason.
+	fails *failTracker
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex(), log: slog.Default(), schedFails: newScheduleFailTracker()}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex(), log: slog.Default(), fails: newFailTracker(failReportThrottle)}
 }
 
 // WithOrg returns an engine view scoped to orgID. Reads and writes route
@@ -100,7 +103,7 @@ func (e *engine) WithOrg(orgID string) *engine {
 	if orgID == "" {
 		return e
 	}
-	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, orgID: orgID, log: e.log, schedFails: e.schedFails}
+	return &engine{store: e.store.withOrg(orgID), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, orgID: orgID, log: e.log, fails: e.fails}
 }
 
 // emit publishes an event tagged with the engine's org so per-org SSE
@@ -382,7 +385,31 @@ func (e *engine) terminalTransition(ns, workflowId, runId, status, evKind, event
 		RunID:      wf.Execution.RunId,
 		Data:       wf,
 	})
+	// The other half of the silent path. An activity-level report cannot see
+	// a decider that faults before it schedules anything (bad input, a panic
+	// on episode 0): that workflow fails with no activity record to speak for
+	// it, which is the same class of bug as the 11-day incident with an even
+	// thinner trail. CANCELED/TERMINATED are operator actions, not faults, so
+	// they neither record nor clear.
+	switch status {
+	case "WORKFLOW_EXECUTION_STATUS_FAILED":
+		e.recordFailure(workflowFailureIdentity(ns, wf), false, workflowFailureText(attrs))
+	case "WORKFLOW_EXECUTION_STATUS_COMPLETED":
+		e.clearFailure(workflowFailureIdentity(ns, wf))
+	}
 	return wf, nil
+}
+
+// workflowFailureText renders the failure a terminal transition recorded into
+// history. attrs["failure"] carries the encoded envelope the decider sent;
+// decoding it yields the message a human reads, and temporal.Decode is
+// fail-secure on hostile or absent bytes.
+func workflowFailureText(attrs map[string]any) string {
+	s, _ := attrs["failure"].(string)
+	if s == "" {
+		return ""
+	}
+	return temporal.Decode([]byte(s)).Error()
 }
 
 func isTerminal(status string) bool {
@@ -1278,7 +1305,7 @@ func (e *engine) DeleteSchedule(ns, id string) error {
 	// Drop the failure throttle with the row it belongs to. A schedule
 	// deleted while broken never fires again, so nothing else would ever
 	// clear its counter.
-	e.schedFails.ok(scheduleKey(e.orgID, ns, id))
+	e.fails.ok(scheduleKey(e.orgID, ns, id))
 	return e.store.del(fmt.Sprintf("sc/%s/%s", ns, id))
 }
 
@@ -1556,15 +1583,6 @@ func (e *engine) ListIdentities(ns string) ([]Identity, error) {
 
 // ── cron sweeper ────────────────────────────────────────────────────
 
-// sweepFailThrottle is how many consecutive failures of one schedule pass
-// between log lines after the first. A schedule whose action fails is NOT
-// re-anchored (see sweepSchedules), so it stays due and retries on every
-// 5s tick: unthrottled that is ~17k identical lines per day per broken
-// schedule, which buries the signal as thoroughly as silence did. 60
-// sweeps ≈ 5 minutes, so any 15-minute dashboard window still holds at
-// least three lines.
-const sweepFailThrottle = 60
-
 // scheduleKey identifies a schedule across every org's shard. Also the
 // tracker key, so counts follow the schedule and not the engine view.
 func scheduleKey(org, ns, id string) string { return org + "|" + ns + "|" + id }
@@ -1574,47 +1592,6 @@ func scheduleKey(org, ns, id string) string { return org + "|" + ns + "|" + id }
 // empty scheduleId, so this all-empty triple can never collide with a real
 // schedule's key.
 var sweepAllKey = scheduleKey("", "", "")
-
-// scheduleFailTracker counts consecutive fire failures per schedule so the
-// sweeper can alert on the first one and throttle the rest.
-type scheduleFailTracker struct {
-	mu sync.Mutex
-	n  map[string]int
-}
-
-func newScheduleFailTracker() *scheduleFailTracker {
-	return &scheduleFailTracker{n: map[string]int{}}
-}
-
-// fail records a failure for key and reports the consecutive-failure count
-// plus whether this one should be logged: the FIRST failure (the alert),
-// then every sweepFailThrottle-th (the heartbeat, carrying whatever the
-// current error text is).
-//
-// Deliberately NOT "log whenever the error text changes": StartWorkflow
-// failures can embed the freshly minted random runId (store.put's "cannot
-// route key %q" path), so a text-change rule would fire on every sweep and
-// restore exactly the flood this throttle exists to prevent. A failure mode
-// that shifts instead surfaces on the next heartbeat, ≤5 minutes later.
-func (f *scheduleFailTracker) fail(key string) (int, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.n[key]++
-	n := f.n[key]
-	return n, n == 1 || n%sweepFailThrottle == 0
-}
-
-// ok clears key and reports how many consecutive failures preceded it
-// (0 = it was already healthy). Clearing is what makes a schedule that
-// breaks again alert immediately instead of waiting out the throttle, and
-// it is what keeps the map from growing once a schedule is fixed.
-func (f *scheduleFailTracker) ok(key string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	n := f.n[key]
-	delete(f.n, key)
-	return n
-}
 
 // runScheduler ticks every 5s and fires due schedules through StartWorkflow.
 // Cron specs are parsed via robfig/cron with seconds-optional 5/6-field
@@ -1641,12 +1618,12 @@ func (e *engine) runScheduler(stop <-chan struct{}) {
 // org at once and nothing anywhere says so.
 func (e *engine) sweepOnce() {
 	if err := e.sweepSchedules(); err != nil {
-		if n, report := e.schedFails.fail(sweepAllKey); report {
+		if n, report := e.fails.fail(sweepAllKey); report {
 			e.log.Error("tasks: schedule sweep failed, no schedule fired this tick",
 				"org", e.orgID, "consecutiveFailures", n, "error", err)
 		}
 	} else {
-		e.schedFails.ok(sweepAllKey)
+		e.fails.ok(sweepAllKey)
 	}
 	e.sweepCanceling()
 	e.sweepLeases()
@@ -1707,7 +1684,13 @@ func (e *engine) sweepSchedules() error {
 		s := d.s
 		oe := e.WithOrg(d.org)
 		key := scheduleKey(d.org, s.Namespace, s.ScheduleId)
-		if _, err := oe.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input); err != nil {
+		// Stamp the originating schedule on the run. The 11-day incident's
+		// fault was one layer below this call — StartWorkflow succeeded 4489
+		// times while the ACTIVITY it started failed every time — and without
+		// this attribute the failure report one layer down can only say "some
+		// JobWorkflow is broken", never "the nightly backup has not run".
+		if _, err := oe.startWorkflowFull(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "",
+			map[string]any{searchAttrScheduleID: s.ScheduleId}, nil, ""); err != nil {
 			// Per-schedule isolation: a broken action (e.g. unregistered
 			// namespace) skips this entry and the sweep continues; it is
 			// re-attempted next sweep.
@@ -1722,7 +1705,13 @@ func (e *engine) sweepSchedules() error {
 			// goes on the line: which org, which namespace, which schedule,
 			// what it was trying to start and where, and how long it has
 			// been failing.
-			if n, report := e.schedFails.fail(key); report {
+			//
+			// A failed fire is deliberately NOT re-anchored, so the entry
+			// stays due and retries on every 5s tick — unthrottled that is
+			// ~17k identical lines per day per broken schedule. At
+			// failReportThrottle=60 the heartbeat is one line per ≈5 minutes,
+			// so any 15-minute dashboard window still holds at least three.
+			if n, report := e.fails.fail(key); report {
 				e.log.Error("tasks: cron schedule action failed",
 					"org", d.org,
 					"namespace", s.Namespace,
@@ -1734,7 +1723,7 @@ func (e *engine) sweepSchedules() error {
 			}
 			continue
 		}
-		if n := e.schedFails.ok(key); n > 0 {
+		if n := e.fails.ok(key); n > 0 {
 			// Closes the loop the throttle opens: without a recovery line an
 			// operator cannot tell a schedule that was fixed from one whose
 			// next throttled error line simply has not come round yet.
