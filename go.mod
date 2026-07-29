@@ -13,7 +13,7 @@ require (
 	github.com/hanzoai/sqlite v0.4.0
 	github.com/luxfi/consensus v1.36.3
 	github.com/luxfi/log v1.4.3
-	github.com/luxfi/zap v1.2.7-0.20260728232025-5bce57952415
+	github.com/luxfi/zap v1.2.7
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/time v0.15.0
 )
