@@ -13,9 +13,123 @@ Durable workflow execution engine for AI agent orchestration.
 - Old v2.x and v3.x tags (transition era) were deleted on 2026-04-30. Old v1.x tags (`v1.0.0`–`v1.42.0`) are upstream-Temporal-era artifacts and remain in git history for blame.
 - New Hanzo-Tasks releases continue from `v1.43.0` and bump minor for features, patch for fixes.
 - `v1.51.2` added `Embedded.CancelActivityForOrg`; `v1.51.3` added `Embedded.ActivitiesPageForOrg` — the org-scoped cancel + paginated read cloud's fleet queue surface (hanzoai/cloud `clients/visor`) depends on.
+- `v1.52.3` added `View.FailureStreaks(ns)` + the `FailureStreak` type — the durable "what is broken right now" read a host polls instead of hand-decoding SQLite.
 
 ## Known gaps
 - **Terminal standalone-activity GC is unimplemented.** Completed/failed/canceled standalone activities under the `act/<ns>/` key family (and their `ahist/<ns>/…` history) are never pruned — the namespace `WorkflowExecutionRetentionTtl` (default `720h`) has **no sweeper enforcing it** for standalone activities. The store therefore grows unbounded with volume (one row per job, e.g. every `studio.render` in the `gpu-jobs` namespace), and every `ListActivities` / `ActivitiesForOrg` / `ActivitiesPageForOrg` scans the full set. Consumers can bound the READ (cloud's fleet queue recency-sorts + caps terminal history, and now walks all pages via `ActivitiesPageForOrg`), but the underlying storage + scan cost still grow. **Fix (queued v1.51.4):** a background sweeper alongside `runScheduler` that deletes terminal standalone activities older than the namespace retention TTL, plus their history — idempotent, org-shard-scoped. Surfaced in the hanzoai/cloud per-GPU-queue review.
+
+## Cron sweeper observability (v1.52.2)
+
+The sweeper reports what it cannot return to a caller. Three `slog` messages
+off `EmbedConfig.Logger` (`slog.Default()` when unset), all from
+`pkg/tasks/engine.go`:
+
+| Message | Level | Meaning |
+|---------|-------|---------|
+| `tasks: cron schedule action failed` | ERROR | One schedule's fire did not reach a worker. Carries `org`, `namespace`, `scheduleId`, `workflowType`, `taskQueue`, `consecutiveFailures`, `error`. |
+| `tasks: cron schedule action recovered` | INFO | A previously failing schedule fired and reached a worker. Carries `afterConsecutiveFailures`. |
+| `tasks: schedule sweep failed, no schedule fired this tick` | ERROR | The whole sweep failed — cron is dead for every org at once. |
+
+A fire fails in one of two ways, and both produce the same line because the
+operator's question is the same: **the start itself errored**, or **the start
+succeeded and no worker is subscribed to `(namespace, taskQueue)`** — the run
+exists and nothing will ever execute it. The `error` field says which. The
+second half catches a cron naming a namespace nobody serves (namespaces are
+created on first use, so a typo is no longer a start error), a schedule whose
+worker died, and a task queue renamed out from under an entry. The check is
+made AFTER the start, because enqueueing prunes subscriptions whose peer the
+transport can no longer reach.
+
+Alert on the first; `consecutiveFailures` is the "how long has this been
+dead" number. Per-schedule **isolation is unchanged** — a broken entry is
+still skipped and retried next sweep; only the silence is gone.
+
+Anchoring follows the start, not the report: a fire that ERRORED is not
+re-anchored (it stays due and retries every tick), a fire that STARTED is
+re-anchored even when it went unreached — the run exists, and re-firing on
+the strength of a report would spawn one every 5s.
+
+Throttle: first failure, then one line per `failReportThrottle` (60) sweeps.
+Unthrottled a broken 5s-tick schedule is ~17k lines/day. The counter clears
+on a reached fire and on `DeleteSchedule`, so a relapse alerts immediately.
+
+Why this exists: cloud's `clients/cron` fired a JobWorkflow whose activity
+re-read the entry's ConfigMap; the cloud ServiceAccount had no RBAC to read
+ConfigMaps, so every fire failed for **11 days** across six nightly backups
+while the engine emitted nothing and every dashboard read healthy. It was
+found only by hand-reading the engine's durable records.
+
+## Activity / workflow failure observability (v1.52.3)
+
+The sweeper fix above covers the SCHEDULER. It does not cover the incident:
+`StartWorkflow` **succeeded** all 4489 times, so the scheduler was healthy
+and correctly silent — the fault was one layer down, in the ACTIVITY. That
+layer's only output was `e.emit(Event{Kind:"activity.failed"})` into the SSE
+broker: ephemeral, dropped when nobody is subscribed, and nobody was.
+
+**Guarantee: durable evidence, plus throttled log lines.** Both, not either.
+
+### Durable — `fail/<ns>/<fingerprint>`, read via `View.FailureStreaks(ns)`
+
+One `FailureStreak` row per failing identity, upserted on every failure and
+**deleted on the first success**. It needs no subscriber and survives
+restart, so `ConsecutiveFailures` can say `4489` where an in-memory counter
+would have said `1`. A non-empty listing IS the list of what is broken; the
+keyspace is bounded by how much is broken now, not by how often it failed
+(so it does not have the unbounded-growth problem noted under Known gaps).
+
+Identity is the recurring **shape** of the work — `(workflowType,
+activityType, taskQueue, scheduleId)` — never the run: every cron fire mints
+a fresh runId, so a run-keyed counter can never say "dead for 11 days".
+Each row carries `org`, `namespace`, `workflowType`, `activityType`,
+`taskQueue`, `scheduleId`, `consecutiveFailures`, `attempt`, `retrying`,
+`persistent`, `firstFailureTime`, `lastFailureTime`, `lastError`, and
+`lastWorkflowId`/`lastRunId` to go read.
+
+`ActivityType` empty ⇒ the **workflow itself** failed (a decider that faults
+before scheduling anything — the hole an activity-only report would leave).
+
+### Log lines — `pkg/tasks/failure.go`
+
+| Message | Level | Meaning |
+|---------|-------|---------|
+| `tasks: activity failed` | WARN | An activity attempt failed. `retrying` says whether the engine will try again. |
+| `tasks: activity failing persistently` | **ERROR** | **Alert on this.** Failing continuously for ≥ `failPersistentAfter` (15 min). |
+| `tasks: activity recovered` | INFO | Streak ended. Carries `afterConsecutiveFailures`. |
+| `tasks: workflow failed` / `… failing persistently` / `… recovered` | WARN / ERROR / INFO | Same three, for a workflow failing with no activity to blame. |
+
+**WARN vs ERROR is the distinction the incident turned on**: "failed once and
+will retry" is normal operation and must not page anyone; "has failed every
+attempt for a long time" is the outage. Persistence is measured by **age,
+not count** — a nightly backup reaches a count of only 2 in two days yet is
+unambiguously broken, while one run burning its 10 default attempts (≈5.5
+min of backoff) must not trip it. The persistent **transition** always
+reports, whatever the throttle says; waiting for failure #60 would be the
+original bug wearing a different hat.
+
+### Throttle
+
+`shouldReport` is the one rule for the whole package (schedules included):
+first failure, then every `failReportThrottle` (60). Measured: 180 failures
+→ **4 lines**; stubbing the throttle off → 180. The throttle bounds LINES
+only — the durable count stays exact.
+
+Two counters on purpose: the in-memory `failTracker` is the throttle
+authority (a store that is itself failing cannot starve it into reporting
+every occurrence, and a restart makes a still-broken activity re-alert once
+after a deploy), while the durable row is the evidence and always supplies
+the count on the line.
+
+### Not changed
+
+Retry and isolation **semantics are identical** — which branch is taken,
+when, and how many times. `TestFailureReportingPreservesRetrySemantics`
+pins the attempt count, terminal status, history events and dispatch count.
+The SSE `emit` calls all remain.
+
+Schedule-started runs now carry a `ScheduleId` search attribute (sweeper and
+`TriggerSchedule`), which is what lets a failure name the dead cron entry —
+and makes `ScheduleId = "nightly-backup"` a queryable filter over executions.
 
 ## Quick Start
 ```bash

@@ -117,6 +117,9 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		router.SetMembership(routing.NodeID(nodeID), []routing.NodeID{routing.NodeID(nodeID)})
 	}
 	en := newEngine(st)
+	// The background sweepers have no caller to return an error to, so the
+	// host's logger is the only way their failures reach anyone.
+	en.log = cfg.Logger
 	migr := migration.NewCoordinator(st.mgr, repl)
 
 	// Bootstrap the root tenant's default namespace so the UI has
@@ -266,6 +269,21 @@ func (v View) StartActivity(ns, activityID, runID string, typ TypeRef, taskQueue
 // DescribeActivity loads one standalone activity in ns; ok=false when absent.
 func (v View) DescribeActivity(ns, activityID, runID string) (*StandaloneActivity, bool, error) {
 	return v.en.DescribeActivity(ns, activityID, runID)
+}
+
+// FailureStreaks returns what is broken in ns right now, worst first: one
+// durable row per activity/workflow identity that has failed every attempt
+// since it last succeeded. Empty means nothing is failing.
+//
+// This is the read that was missing. cloud's clients/cron fired a JobWorkflow
+// whose activity failed on every one of 4489 fires across 11 days while the
+// engine's only output was an SSE event nobody was subscribed to; the six
+// nightly backups it silently skipped were found by hand-reading SQLite. A
+// host polls this instead — each row carries org, namespace, workflow and
+// activity type, task queue, originating scheduleId, consecutive failures,
+// how long it has been failing, the last error, and a run to go read.
+func (v View) FailureStreaks(ns string) ([]FailureStreak, error) {
+	return v.en.FailureStreaks(ns)
 }
 
 // nodeSnapshot returns a copy of the current listener set under the lock so the

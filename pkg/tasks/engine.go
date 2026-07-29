@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/hanzoai/tasks/pkg/sdk/temporal"
 	storepkg "github.com/hanzoai/tasks/pkg/tasks/store"
 	"github.com/robfig/cron/v3"
 )
@@ -75,10 +77,21 @@ type engine struct {
 	workers    *workerRegistry
 	runMu      *keyedMutex // serializes advancing a single (org, ns, wf, run)
 	principal  Principal   // zero = root tenant (embedded/dev). Its org is stamped on every emitted Event.
+	// log reports what the background sweepers cannot return to a caller.
+	// Always non-nil (newEngine defaults it, As carries it, Embed overrides
+	// it with EmbedConfig.Logger), so no call site needs a guard.
+	log *slog.Logger
+	// fails throttles failure reporting — cron schedules here, activities
+	// and workflows in failure.go, one tracker because there is one throttle
+	// rule. Shared across tenant views like broker/disp/workers, because the
+	// root sweeper fires every tenant's schedules through a throwaway view
+	// and the count must follow the work, not the view; keys are
+	// principal-qualified for the same reason.
+	fails *failTracker
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex()}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex(), log: slog.Default(), fails: newFailTracker(failReportThrottle)}
 }
 
 // As returns an engine view scoped to the tenant p. Reads and writes route
@@ -91,7 +104,7 @@ func (e *engine) As(p Principal) *engine {
 	if p == e.principal {
 		return e
 	}
-	return &engine{store: e.store.as(p), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, principal: p}
+	return &engine{store: e.store.as(p), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, principal: p, log: e.log, fails: e.fails}
 }
 
 // emit publishes an event tagged with the engine's org so per-org SSE
@@ -401,7 +414,31 @@ func (e *engine) terminalTransition(ns, workflowId, runId, status, evKind, event
 		RunID:      wf.Execution.RunId,
 		Data:       wf,
 	})
+	// The other half of the silent path. An activity-level report cannot see
+	// a decider that faults before it schedules anything (bad input, a panic
+	// on episode 0): that workflow fails with no activity record to speak for
+	// it, which is the same class of bug as the 11-day incident with an even
+	// thinner trail. CANCELED/TERMINATED are operator actions, not faults, so
+	// they neither record nor clear.
+	switch status {
+	case "WORKFLOW_EXECUTION_STATUS_FAILED":
+		e.recordFailure(workflowFailureIdentity(ns, wf), false, workflowFailureText(attrs))
+	case "WORKFLOW_EXECUTION_STATUS_COMPLETED":
+		e.clearFailure(workflowFailureIdentity(ns, wf))
+	}
 	return wf, nil
+}
+
+// workflowFailureText renders the failure a terminal transition recorded into
+// history. attrs["failure"] carries the encoded envelope the decider sent;
+// decoding it yields the message a human reads, and temporal.Decode is
+// fail-secure on hostile or absent bytes.
+func workflowFailureText(attrs map[string]any) string {
+	s, _ := attrs["failure"].(string)
+	if s == "" {
+		return ""
+	}
+	return temporal.Decode([]byte(s)).Error()
 }
 
 func isTerminal(status string) bool {
@@ -1294,6 +1331,10 @@ func (e *engine) ListSchedules(ns string) ([]Schedule, error) {
 }
 
 func (e *engine) DeleteSchedule(ns, id string) error {
+	// Drop the failure throttle with the row it belongs to. A schedule
+	// deleted while broken never fires again, so nothing else would ever
+	// clear its counter.
+	e.fails.ok(scheduleKey(e.principal, ns, id))
 	return e.store.del(fmt.Sprintf("sc/%s/%s", ns, id))
 }
 
@@ -1571,6 +1612,88 @@ func (e *engine) ListIdentities(ns string) ([]Identity, error) {
 
 // ── cron sweeper ────────────────────────────────────────────────────
 
+// scheduleKey identifies a schedule across every tenant's shard. Also the
+// tracker key, so counts follow the schedule and not the engine view.
+func scheduleKey(p Principal, ns, id string) string { return p.String() + "|" + ns + "|" + id }
+
+// sweepAllKey tracks whole-sweep failures under the same throttle as a
+// single broken schedule. CreateSchedule rejects an empty namespace and an
+// empty scheduleId, so this all-empty triple can never collide with a real
+// schedule's key.
+var sweepAllKey = scheduleKey(Principal{}, "", "")
+
+// The cron sweeper's report messages. Consts rather than literals so a test
+// asserting on them cannot drift from the line the engine actually writes.
+const (
+	msgActionFailed    = "tasks: cron schedule action failed"
+	msgActionRecovered = "tasks: cron schedule action recovered"
+	msgSweepFailed     = "tasks: schedule sweep failed, no schedule fired this tick"
+)
+
+// unreached names the fault in a fire that STARTED but has nowhere to go:
+// the workflow task is enqueued on (ns, queue) and sits in the dispatcher's
+// backlog until some worker subscribes. nil when a live subscriber is there
+// to take it.
+//
+// This is what a cron entry naming a namespace nobody serves looks like now
+// that a namespace is created on demand: the start succeeds, the run is
+// recorded, and nothing ever executes it. It is also what a schedule whose
+// worker died looks like, and a schedule whose task queue was renamed — the
+// three shapes of "the nightly backup did not run" that no start-time check
+// can see. Ask AFTER the start, because the enqueue prunes subscriptions
+// whose peer the transport can no longer reach (deliverWFLocked): a worker
+// that died without unsubscribing is gone from the registry by the time we
+// look.
+func (e *engine) unreached(ns, queue string) error {
+	if e.disp != nil && e.disp.HasSubscribers(ns, queue, kindWorkflow) {
+		return nil
+	}
+	return fmt.Errorf("%w %q in namespace %q", ErrNoWorkersSubscribed, queue, ns)
+}
+
+// reportFire is the ONE place a schedule fire's outcome is reported. A nil
+// fault closes any open streak; a non-nil one opens or extends it, throttled.
+//
+// Isolation must not mean SILENCE. cloud's clients/cron fires a JobWorkflow
+// per entry; when its activity could not read the entry's ConfigMap (the
+// cloud ServiceAccount was missing the RBAC) every fire failed for 11 days
+// while the engine reported nothing and every dashboard read healthy — six
+// nightly backups produced nothing and it was caught only by hand-reading
+// the engine's durable records. So every field needed to act on it goes on
+// the line: which org, which namespace, which schedule, what it was trying
+// to start and where, and how long it has been failing.
+//
+// Throttled because a broken schedule stays broken: at a 5s tick that is
+// ~17k identical lines a day, which buries the signal as thoroughly as
+// silence did. At failReportThrottle=60 the heartbeat is one line per ≈5
+// minutes, so any 15-minute dashboard window still holds at least three.
+func (e *engine) reportFire(p Principal, s Schedule, fault error) {
+	key := scheduleKey(p, s.Namespace, s.ScheduleId)
+	if fault == nil {
+		if n := e.fails.ok(key); n > 0 {
+			// Closes the loop the throttle opens: without a recovery line an
+			// operator cannot tell a schedule that was fixed from one whose
+			// next throttled error line simply has not come round yet.
+			e.log.Info(msgActionRecovered,
+				"org", p.Org,
+				"namespace", s.Namespace,
+				"scheduleId", s.ScheduleId,
+				"afterConsecutiveFailures", n)
+		}
+		return
+	}
+	if n, report := e.fails.fail(key); report {
+		e.log.Error(msgActionFailed,
+			"org", p.Org,
+			"namespace", s.Namespace,
+			"scheduleId", s.ScheduleId,
+			"workflowType", s.Action.WorkflowType.Name,
+			"taskQueue", s.Action.TaskQueue,
+			"consecutiveFailures", n,
+			"error", fault)
+	}
+}
+
 // runScheduler ticks every 5s and fires due schedules through StartWorkflow.
 // Cron specs are parsed via robfig/cron with seconds-optional 5/6-field
 // syntax; first invalid spec is skipped without aborting the sweep.
@@ -1582,11 +1705,29 @@ func (e *engine) runScheduler(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			_ = e.sweepSchedules()
-			e.sweepCanceling()
-			e.sweepLeases()
+			e.sweepOnce()
 		}
 	}
+}
+
+// sweepOnce runs one scheduler tick. Split out of runScheduler's select so
+// tests can drive a tick without waiting on the 5s ticker.
+//
+// The sweep error used to be dropped on the floor (`_ = e.sweepSchedules()`).
+// That made a TOTAL sweep failure — the store refusing the cross-org scan,
+// say — indistinguishable from a quiet night: cron stops firing for every
+// org at once and nothing anywhere says so.
+func (e *engine) sweepOnce() {
+	if err := e.sweepSchedules(); err != nil {
+		if n, report := e.fails.fail(sweepAllKey); report {
+			e.log.Error(msgSweepFailed,
+				"org", e.principal.Org, "consecutiveFailures", n, "error", err)
+		}
+	} else {
+		e.fails.ok(sweepAllKey)
+	}
+	e.sweepCanceling()
+	e.sweepLeases()
 }
 
 // sweepLeases reaps expired activity leases across every namespace the
@@ -1643,10 +1784,27 @@ func (e *engine) sweepSchedules() error {
 	for _, d := range dues {
 		s := d.s
 		oe := e.As(d.principal)
-		if _, err := oe.StartWorkflow(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input); err != nil {
-			// Per-schedule isolation: a broken action (e.g. unregistered
-			// namespace) skips this entry and the sweep continues; it is
-			// re-attempted next sweep.
+		// Stamp the originating schedule on the run. The 11-day incident's
+		// fault was one layer below this call — StartWorkflow succeeded 4489
+		// times while the ACTIVITY it started failed every time — and without
+		// this attribute the failure report one layer down can only say "some
+		// JobWorkflow is broken", never "the nightly backup has not run".
+		wf, startErr := oe.startWorkflowFull(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "",
+			map[string]any{searchAttrScheduleID: s.ScheduleId}, nil, "")
+		fault := startErr
+		if fault == nil {
+			fault = e.unreached(s.Namespace, wf.TaskQueue)
+		}
+		e.reportFire(d.principal, s, fault)
+		if startErr != nil {
+			// Per-schedule isolation: a broken action skips this entry and
+			// the sweep continues; it is re-attempted next sweep.
+			//
+			// A failed fire is deliberately NOT re-anchored, so the entry
+			// stays due and retries on every 5s tick. A fire that STARTED is
+			// re-anchored even when it went unreached, because the run
+			// exists: re-firing it every tick would spawn a run every 5s on
+			// the strength of a report.
 			continue
 		}
 		s.Info.ActionCount++

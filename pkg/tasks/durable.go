@@ -278,8 +278,13 @@ func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, result, f
 	if rec.isTerminal() {
 		return nil // duplicate / already resolved
 	}
+	// One read serves two jobs: the terminal guard below, and the failure
+	// identity — the report has to name the SHAPE of the work (workflow type,
+	// task queue, originating schedule), because a runId names nothing an
+	// operator can act on and is freshly minted on every cron fire anyway.
+	wfe, wfOK, _ := e.DescribeWorkflow(ns, wf, run)
 	// Never advance a workflow that already reached a terminal state.
-	if wfe, ok, _ := e.DescribeWorkflow(ns, wf, run); ok && isTerminal(wfe.Status) {
+	if wfOK && isTerminal(wfe.Status) {
 		return nil
 	}
 
@@ -297,13 +302,28 @@ func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, result, f
 			return err
 		}
 		e.emit(Event{Kind: "activity.completed", Namespace: ns, WorkflowID: wf, RunID: run, Data: map[string]any{"seq": seq}})
+		// One success ends the streak: "failed every attempt" is the alertable
+		// condition, so anything that succeeds is by definition not it.
+		e.clearFailure(activityFailureIdentity(wfe, ns, wf, run, rec))
 		return e.scheduleWorkflowTask(ns, wf, run)
 	}
 
 	// Failure — retry per policy, else terminal.
+	//
+	// Both branches report. The emit() below reaches an SSE subscriber if one
+	// happens to be attached and is dropped on the floor otherwise; that was
+	// the ONLY output this path had while cloud's RunJobActivity failed on
+	// every fire for 11 days. recordFailure writes a durable row and a
+	// throttled line instead. Retry semantics are untouched — which branch is
+	// taken, when, and how many times is decided exactly as before.
+	failID := activityFailureIdentity(wfe, ns, wf, run, rec)
+	terr := temporal.Decode(failure)
 	pol := effectiveRetryPolicy(rec.RetryPolicy)
-	if pol.ShouldRetry(temporal.Decode(failure), int32(rec.Attempt)) {
+	if pol.ShouldRetry(terr, int32(rec.Attempt)) {
 		delay := pol.NextInterval(int32(rec.Attempt))
+		// retrying=true: "failed once, will try again" — the case that must
+		// NOT read like the 11-day outage.
+		e.recordFailure(failID, true, terr.Error())
 		rec.Attempt++
 		rec.Status = wfActScheduled
 		rec.Failure = append(json.RawMessage(nil), failure...) // last failure (observability)
@@ -328,6 +348,9 @@ func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, result, f
 		return err
 	}
 	e.emit(Event{Kind: "activity.failed", Namespace: ns, WorkflowID: wf, RunID: run, Data: map[string]any{"seq": seq, "attempts": rec.Attempt}})
+	// retrying=false: this run's activity is dead. In the incident every fire
+	// ended here, 4489 times, in silence.
+	e.recordFailure(failID, false, terr.Error())
 	return e.scheduleWorkflowTask(ns, wf, run)
 }
 
