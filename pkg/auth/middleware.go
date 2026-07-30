@@ -72,7 +72,7 @@ func RequireIdentity(v *edge.Verifier, require bool) func(http.Handler) http.Han
 					// ONE mint, from the one place that decides it — including the two admin
 					// scopes, which this service never minted at all and which its handlers
 					// therefore could not have read even where they should.
-					edge.Inject(r.Header, claims, "", nil)
+					edge.Apply(r.Header, claims, "", nil)
 
 					org, _ = claims.EffectiveOrg("")
 					project = claims.Project

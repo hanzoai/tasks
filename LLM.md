@@ -343,7 +343,11 @@ membership set, so it is not a person and holds neither admin scope.
 
 Per-org store scoping is `engine.As(Org(auth.OrgID(ctx)))`, resolved through
 `Claims.EffectiveOrg("")` on BOTH transports — the one function that answers "which
-org does this act in". tasksd honours no org switch, so that resolves the home org.
+org does this act in". tasksd honours no org switch, so that resolves the home org,
+which is the first entry of the SIGNED MEMBERSHIP SET. It is deliberately NOT the
+`owner` claim: IAM stamps the org of the APPLICATION a token was minted through
+there, so reading it would make a person's namespace follow whichever app they
+signed in through. A token with no membership set states no org and is refused.
 The frontend scopes to the ORG; a host wanting project- or user-level isolation asks
 for it explicitly via `Embedded.View(Principal{Org, Project, User})`.
 
