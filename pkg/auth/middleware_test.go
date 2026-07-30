@@ -393,3 +393,38 @@ func TestWhiteLabelIssuerIsAdmitted(t *testing.T) {
 		t.Error("an untrusted issuer was admitted")
 	}
 }
+
+// A token with no membership set resolves NO org, so tasksd refuses it when
+// identity is required.
+//
+// The org used to come from the `owner` claim, which carries the org of the
+// APPLICATION the token was minted through (IAM's Sign stamps app.Organization) —
+// so a person's namespace followed whichever app they signed in through, and
+// engine.As(Org(...)) scoped their durable state to it. The org is the first entry
+// of the signed membership set now, and there is no fallback: a token that does not
+// state the subject's org gets none.
+func TestRequireIdentity_NoMembershipSetIsRefused(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := jwksServer(t, key, "kid-1")
+	v := NewValidator(JWTConfig{JWKSURL: js.URL, Issuer: testIssuer, TTL: time.Minute})
+
+	legacy := iamClaims("some-app-org", "alice", "a@hanzo.ai", "", time.Now().Add(time.Hour))
+	legacy.Orgs = nil // minted before IAM emitted the claim
+
+	var reached bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true })
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/foo", nil)
+	req.Header.Set(HeaderAuthorization, "Bearer "+signedToken(t, key, "kid-1", legacy))
+	rec := httptest.NewRecorder()
+	RequireIdentity(v, true)(next).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 — a token stating no org must not scope a namespace", rec.Code)
+	}
+	if reached {
+		t.Error("the handler ran for a principal with no org")
+	}
+}

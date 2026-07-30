@@ -10,7 +10,7 @@ retract (
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/hanzoai/authz v1.10.25
+	github.com/hanzoai/authz v1.10.26
 	github.com/hanzoai/sqlite v0.4.0
 	github.com/luxfi/consensus v1.36.3
 	github.com/luxfi/log v1.5.0
