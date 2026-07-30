@@ -22,6 +22,7 @@ import (
 
 	"strings"
 
+	"github.com/hanzoai/authz/edge"
 	"github.com/hanzoai/tasks/pkg/auth"
 	"github.com/hanzoai/tasks/pkg/tasks"
 	"github.com/hanzoai/tasks/pkg/tasks/migration"
@@ -168,7 +169,7 @@ func main() {
 // /healthz, /v1/tasks/health, and /_/tasks/* are intentionally
 // unauthenticated: probes and the SPA shell run before any session
 // exists.
-func buildHTTP(ns string, srv *tasks.Embedded, validator *auth.Validator, requireID bool) http.Handler {
+func buildHTTP(ns string, srv *tasks.Embedded, validator *edge.Verifier, requireID bool) http.Handler {
 	mux := http.NewServeMux()
 
 	probe := func(w http.ResponseWriter, r *http.Request) {

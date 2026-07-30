@@ -9,10 +9,11 @@ retract (
 )
 
 require (
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/hanzoai/authz v1.10.24
 	github.com/hanzoai/sqlite v0.4.0
 	github.com/luxfi/consensus v1.36.3
-	github.com/luxfi/log v1.4.3
+	github.com/luxfi/log v1.5.0
 	github.com/luxfi/zap v1.2.7
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/time v0.15.0
@@ -69,6 +70,7 @@ require (
 )
 
 require (
+	github.com/dop251/goja v0.0.0-20260627200808-0b76000cabdb // indirect
 	github.com/hanzoai/csqlite v0.1.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/luxfi/bft v0.1.5 // indirect

@@ -13,8 +13,11 @@ import (
 	"testing"
 	"time"
 
-	gojose "github.com/go-jose/go-jose/v4"
-	"github.com/go-jose/go-jose/v4/jwt"
+	"encoding/base64"
+	"math/big"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/hanzoai/authz"
 
 	"github.com/hanzoai/tasks/pkg/auth"
 	"github.com/hanzoai/tasks/pkg/sdk/client"
@@ -42,8 +45,10 @@ func gatedHello(ctx workflow.Context, name string) (string, error) {
 // gatedJWKS hosts a JWKS for key+kid, mirroring hanzo.id's signing surface.
 func gatedJWKS(t *testing.T, key *rsa.PrivateKey, kid string) *httptest.Server {
 	t.Helper()
-	set := gojose.JSONWebKeySet{Keys: []gojose.JSONWebKey{{
-		Key: key.Public(), KeyID: kid, Algorithm: string(gojose.RS256), Use: "sig",
+	set := map[string]any{"keys": []map[string]any{{
+		"kty": "RSA", "kid": kid, "use": "sig", "alg": "RS256",
+		"n": base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
+		"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.PublicKey.E)).Bytes()),
 	}}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -53,28 +58,27 @@ func gatedJWKS(t *testing.T, key *rsa.PrivateKey, kid string) *httptest.Server {
 	return srv
 }
 
-// gatedSign issues a JWT with owner=<org> signed by key, the shape hanzo.id mints.
+// gatedSign issues a JWT for a PERSON in owner, the shape hanzo.id mints: the
+// home-org membership set is present, which is what marks the principal human. It
+// signs with golang-jwt, the library IAM signs with and hanzoai/authz verifies with.
 func gatedSign(t *testing.T, key *rsa.PrivateKey, kid, issuer, owner string) string {
 	t.Helper()
-	signer, err := gojose.NewSigner(
-		gojose.SigningKey{Algorithm: gojose.RS256, Key: key},
-		(&gojose.SignerOptions{}).WithType("JWT").WithHeader("kid", kid),
-	)
+	claims := &authz.Claims{
+		Owner:             owner,
+		PreferredUsername: "u1",
+		Orgs:              []authz.Membership{{Org: owner, Role: authz.Member}},
+	}
+	claims.Issuer = issuer
+	claims.Subject = "u1"
+	claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(time.Hour))
+
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = kid
+	raw, err := tok.SignedString(key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := struct {
-		jwt.Claims
-		Owner string `json:"owner"`
-	}{
-		Claims: jwt.Claims{Issuer: issuer, Subject: "u1", Expiry: jwt.NewNumericDate(time.Now().Add(time.Hour))},
-		Owner:  owner,
-	}
-	tok, err := jwt.Signed(signer).Claims(claims).Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tok
+	return raw
 }
 
 // TestE2E_ServeGated_DurableWorkflow_RequiresIdentity proves the cutover property:

@@ -16,13 +16,19 @@ package auth
 import (
 	"context"
 	"net/http"
+
+	"github.com/hanzoai/authz"
+	"github.com/hanzoai/authz/edge"
 )
 
+// The identity header names are the ESTATE's, not this service's: one list, named
+// by the party that mints their values (hanzoai/authz), so tasksd cannot come to
+// disagree with the edge about what X-Org-Id means.
 const (
-	HeaderOrgID     = "X-Org-Id"
-	HeaderProjectID = "X-Project-Id"
-	HeaderUserID    = "X-User-Id"
-	HeaderUserEmail = "X-User-Email"
+	HeaderOrgID     = authz.HeaderOrg
+	HeaderProjectID = authz.HeaderProject
+	HeaderUserID    = authz.HeaderUser
+	HeaderUserEmail = authz.HeaderUserEmail
 
 	HeaderAuthorization = "Authorization"
 )
@@ -36,20 +42,6 @@ const (
 	ctxKeyUserEmail
 )
 
-// mintedHeaders are the identity headers tasksd considers authoritative
-// only when minted from a validated JWT. They are stripped from every
-// inbound request before any downstream code sees them.
-var mintedHeaders = []string{HeaderOrgID, HeaderProjectID, HeaderUserID, HeaderUserEmail}
-
-// stripIdentityHeaders deletes every minted identity header. Called
-// unconditionally on every request — the strip-list ⊇ mint-list contract
-// guarantees no client-supplied identity ever reaches the handler.
-func stripIdentityHeaders(h http.Header) {
-	for _, k := range mintedHeaders {
-		h.Del(k)
-	}
-}
-
 // RequireIdentity returns middleware that:
 //  1. Strips any client-supplied X-Org-Id / X-User-Id / X-User-Email.
 //  2. If a Bearer JWT is present, validates it via v and mints fresh
@@ -60,36 +52,33 @@ func stripIdentityHeaders(h http.Header) {
 // every request passes through with empty identity ctx — useful for
 // tests and the in-process embedder. When v is nil and require=true,
 // every request is rejected (closed-by-default).
-func RequireIdentity(v *Validator, require bool) func(http.Handler) http.Handler {
+func RequireIdentity(v *edge.Verifier, require bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			stripIdentityHeaders(r.Header)
+			// The FULL estate strip, not the four names this service happens to read.
+			// A header tasksd does not mint but does not delete either is one a client can
+			// set and something downstream may believe — X-User-IsAdmin, X-Scope,
+			// X-Billing-Account-Id and the retired names were all passing straight through.
+			// The claimed org is discarded: tasksd honours no org switch, so a selection is
+			// an intent with nothing to grant it.
+			edge.Strip(r.Header)
 
 			var (
 				org, project, user, email string
 				authed                    bool
 			)
 			if v != nil {
-				if bearer := r.Header.Get(HeaderAuthorization); bearer != "" {
-					claims, err := v.Validate(r.Context(), bearer)
-					if err == nil && claims != nil {
-						org = claims.Owner
-						project = claims.Project
-						user = claims.Subject
-						if user == "" {
-							user = claims.PreferredUsername
-						}
-						email = claims.Email
-						authed = true
-						r.Header.Set(HeaderOrgID, org)
-						r.Header.Set(HeaderUserID, user)
-						if project != "" {
-							r.Header.Set(HeaderProjectID, project)
-						}
-						if email != "" {
-							r.Header.Set(HeaderUserEmail, email)
-						}
-					}
+				if claims, err := v.Verify(r.Header); err == nil && claims != nil {
+					// ONE mint, from the one place that decides it — including the two admin
+					// scopes, which this service never minted at all and which its handlers
+					// therefore could not have read even where they should.
+					edge.Inject(r.Header, claims, "", nil)
+
+					org, _ = claims.EffectiveOrg("")
+					project = claims.Project
+					user = claims.UserID()
+					email = claims.Email
+					authed = org != ""
 				}
 			}
 

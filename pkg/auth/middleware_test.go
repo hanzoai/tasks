@@ -12,39 +12,54 @@ import (
 	"testing"
 	"time"
 
-	gojose "github.com/go-jose/go-jose/v4"
-	"github.com/go-jose/go-jose/v4/jwt"
+	"encoding/base64"
+	"math/big"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/hanzoai/authz"
 )
 
-// signedToken returns a JWT signed with key for use against a Validator
-// configured with the matching JWKS server.
-func signedToken(t *testing.T, key *rsa.PrivateKey, kid string, claims any) string {
+// signedToken returns a JWT signed with key, naming it by kid.
+//
+// It signs with golang-jwt — the library IAM SIGNS with and hanzoai/authz verifies
+// with. Minting with a different library than the one under test is how a test comes
+// to certify a reader nobody runs.
+func signedToken(t *testing.T, key *rsa.PrivateKey, kid string, claims jwt.Claims) string {
 	t.Helper()
-	signer, err := gojose.NewSigner(
-		gojose.SigningKey{Algorithm: gojose.RS256, Key: key},
-		(&gojose.SignerOptions{}).WithType("JWT").WithHeader("kid", kid),
-	)
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = kid
+	raw, err := tok.SignedString(key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, err := jwt.Signed(signer).Claims(claims).Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tok
+	return raw
 }
+
+// iamClaims is the shape IAM actually signs for a person: the home-org membership
+// set is present, which is what marks the principal HUMAN rather than a machine.
+func iamClaims(owner, sub, email, project string, exp time.Time) *authz.Claims {
+	c := &authz.Claims{
+		Owner: owner, Email: email, Project: project,
+		PreferredUsername: sub,
+		Orgs:              []authz.Membership{{Org: owner, Role: authz.Member}},
+	}
+	c.Issuer = testIssuer
+	c.Subject = sub
+	c.ExpiresAt = jwt.NewNumericDate(exp)
+	c.IssuedAt = jwt.NewNumericDate(time.Now().Add(-time.Minute))
+	return c
+}
+
+const testIssuer = "https://hanzo.id"
 
 // jwksServer hosts a JWKS for the given key+kid, mirroring hanzo.id.
 func jwksServer(t *testing.T, key *rsa.PrivateKey, kid string) *httptest.Server {
 	t.Helper()
-	jwks := gojose.JSONWebKeySet{
-		Keys: []gojose.JSONWebKey{{
-			Key:       key.Public(),
-			KeyID:     kid,
-			Algorithm: string(gojose.RS256),
-			Use:       "sig",
-		}},
-	}
+	jwks := map[string]any{"keys": []map[string]any{{
+		"kty": "RSA", "kid": kid, "use": "sig", "alg": "RS256",
+		"n": base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
+		"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.PublicKey.E)).Bytes()),
+	}}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(jwks)
@@ -103,18 +118,8 @@ func TestRequireIdentity_ValidJWT_MintsHeaders(t *testing.T) {
 	js := jwksServer(t, key, "kid-1")
 	v := NewValidator(JWTConfig{JWKSURL: js.URL, Issuer: "https://hanzo.id", TTL: time.Minute})
 
-	now := time.Now()
-	tok := signedToken(t, key, "kid-1", IAMClaims{
-		Claims: jwt.Claims{
-			Issuer:   "https://hanzo.id",
-			Subject:  "user-123",
-			Expiry:   jwt.NewNumericDate(now.Add(time.Hour)),
-			IssuedAt: jwt.NewNumericDate(now),
-		},
-		Owner:   "hanzo",
-		Project: "acme-app",
-		Email:   "z@hanzo.ai",
-	})
+	tok := signedToken(t, key, "kid-1",
+		iamClaims("hanzo", "user-123", "z@hanzo.ai", "acme-app", time.Now().Add(time.Hour)))
 
 	var gotOrg, gotProject, gotUser, gotEmail string
 	var headerOrg, headerProject, headerUser, headerEmail string
@@ -217,14 +222,9 @@ func TestRequireIdentity_WrongIssuer_Rejects(t *testing.T) {
 	js := jwksServer(t, key, "kid-1")
 	v := NewValidator(JWTConfig{JWKSURL: js.URL, Issuer: "https://hanzo.id"})
 
-	now := time.Now()
-	tok := signedToken(t, key, "kid-1", IAMClaims{
-		Claims: jwt.Claims{
-			Issuer: "https://evil.example",
-			Expiry: jwt.NewNumericDate(now.Add(time.Hour)),
-		},
-		Owner: "hanzo",
-	})
+	foreign := iamClaims("hanzo", "user-123", "", "", time.Now().Add(time.Hour))
+	foreign.Issuer = "https://evil.example"
+	tok := signedToken(t, key, "kid-1", foreign)
 	h := RequireIdentity(v, true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/foo", nil)
 	req.Header.Set(HeaderAuthorization, "Bearer "+tok)
@@ -232,5 +232,106 @@ func TestRequireIdentity_WrongIssuer_Rejects(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401 for wrong issuer; got %d", rec.Code)
+	}
+}
+
+// tasksd strips the WHOLE estate identity set, not just the four names it reads.
+//
+// It used to strip exactly X-Org-Id / X-Project-Id / X-User-Id / X-User-Email, so
+// every other minted name — X-User-IsAdmin and X-User-Permissions (the platform and
+// money signals), X-User-Owner, X-Billing-Account-Id, X-Scope, X-Workspace-Id, and
+// the retired names — passed through from the client untouched. tasksd terminates
+// identity itself (its ingress routes straight to the Service), so nothing upstream
+// was deleting them either.
+func TestRequireIdentity_StripsTheWholeEstateSet(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := jwksServer(t, key, "kid-1")
+	v := NewValidator(JWTConfig{JWKSURL: js.URL, Issuer: testIssuer, TTL: time.Minute})
+
+	seen := map[string]string{}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, h := range append(append([]string{}, authz.Headers...), authz.Retired...) {
+			seen[h] = r.Header.Get(h)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/foo", nil)
+	for _, h := range append(append([]string{}, authz.Headers...), authz.Retired...) {
+		req.Header.Set(h, "forged")
+	}
+	// An ordinary member: entitled to none of the authority headers.
+	req.Header.Set(HeaderAuthorization, "Bearer "+signedToken(t, key, "kid-1",
+		iamClaims("hanzo", "user-123", "z@hanzo.ai", "", time.Now().Add(time.Hour))))
+
+	rec := httptest.NewRecorder()
+	RequireIdentity(v, true)(next).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid token refused with %d", rec.Code)
+	}
+
+	for _, h := range []string{
+		authz.HeaderUserAdmin, authz.HeaderUserOrgAdmin, authz.HeaderUserPermissions,
+		authz.HeaderScope, authz.HeaderScopeRole, authz.HeaderWorkspace,
+		authz.HeaderBillingAccount,
+	} {
+		if seen[h] != "" {
+			t.Errorf("forged %s survived as %q", h, seen[h])
+		}
+	}
+	for _, h := range authz.Retired {
+		if seen[h] != "" {
+			t.Errorf("retired %s survived as %q", h, seen[h])
+		}
+	}
+	// What the token DID earn is re-minted, so the strip is not just deletion.
+	if seen[authz.HeaderOrg] != "hanzo" {
+		t.Errorf("%s = %q, want hanzo", authz.HeaderOrg, seen[authz.HeaderOrg])
+	}
+	if seen[authz.HeaderUserOwner] != "hanzo" {
+		t.Errorf("%s = %q, want hanzo", authz.HeaderUserOwner, seen[authz.HeaderUserOwner])
+	}
+}
+
+// An admin-org MACHINE reaches tasksd with no authority. IAM's client_credentials
+// grant signs no membership set, which is the machine signal; before this, tasksd
+// had no machine predicate at all and would have minted its `owner` as the org while
+// letting a forged X-User-IsAdmin ride through untouched.
+func TestRequireIdentity_AdminOrgMachineCarriesNoAuthority(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := jwksServer(t, key, "kid-1")
+	v := NewValidator(JWTConfig{JWKSURL: js.URL, Issuer: testIssuer, TTL: time.Minute})
+
+	machine := iamClaims(authz.AdminOrg, authz.AdminOrg+"/kms-sync", "", "", time.Now().Add(time.Hour))
+	machine.Orgs = nil // no membership set: IAM's client_credentials shape
+	machine.IsAdmin = true
+
+	seen := map[string]string{}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen[authz.HeaderUserAdmin] = r.Header.Get(authz.HeaderUserAdmin)
+		seen[authz.HeaderUserOrgAdmin] = r.Header.Get(authz.HeaderUserOrgAdmin)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/foo", nil)
+	req.Header.Set(authz.HeaderUserAdmin, "true") // forged, on top of the real token
+	req.Header.Set(HeaderAuthorization, "Bearer "+signedToken(t, key, "kid-1", machine))
+
+	rec := httptest.NewRecorder()
+	RequireIdentity(v, true)(next).ServeHTTP(rec, req)
+
+	if seen[authz.HeaderUserAdmin] != "" {
+		t.Errorf("an admin-org machine reached the handler with %s=%q",
+			authz.HeaderUserAdmin, seen[authz.HeaderUserAdmin])
+	}
+	if seen[authz.HeaderUserOrgAdmin] != "" {
+		t.Errorf("an admin-org machine reached the handler with %s=%q",
+			authz.HeaderUserOrgAdmin, seen[authz.HeaderUserOrgAdmin])
 	}
 }

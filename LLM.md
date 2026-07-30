@@ -312,24 +312,47 @@ Pure stdlib utilities that survive the rip: `aggregate`, `auth`, `build`,
 `tasktoken`, `timer`, `util`, `versioninfo`. These are candidates for
 further pruning once the native engine settles.
 
-### Auth: IAM only (v3.5.0+, 2026-04-29)
+### Auth: IAM only, through the estate's one reader
 
-tasksd validates `Authorization: Bearer <jwt>` directly against IAM
-JWKS — no gateway dependency required. The strip+mint pattern is the
-trust boundary:
+tasksd validates `Authorization: Bearer <jwt>` itself — no gateway required — and
+the strip+mint pattern is the trust boundary. What it does NOT do any more is hold
+its own reading of that contract.
 
-- Inbound `X-Org-Id` / `X-User-Id` / `X-User-Email` are unconditionally
-  deleted on every request (`auth.stripIdentityHeaders`).
-- If a Bearer JWT is present, the token is parsed (RS256/ES256/...) and
-  verified against keys fetched from `TASKSD_JWKS_URL`. Issuer and
-  audience are checked against `TASKSD_JWT_ISSUER` / `TASKSD_JWT_AUDIENCE`.
-- On success, `X-Org-Id` is minted from the `owner` claim, `X-User-Id`
-  from `sub`, `X-User-Email` from `email`. Per-org store scoping uses
-  `engine.As(Org(auth.OrgID(ctx)))`. The frontend scopes to the ORG; a
-  host that wants project- or user-level isolation asks for it explicitly
-  via `Embedded.View(Principal{Org, Project, User})`.
-- `TASKSD_REQUIRE_IDENTITY=true` (production) rejects requests without
-  a validated JWT. Default false keeps embedded/dev path functional.
+**The reader is `hanzoai/authz` + `hanzoai/authz/edge`.** `pkg/auth` is down to the
+part that is genuinely tasksd's: which environment variables the policy comes from.
+It had 190 lines of JWKS cache and JWT verification, and two defects a shared reader
+does not have:
+
+- it verified against **every key** in the published set and took the first that
+  worked, so a token naming `kid` A was accepted on a signature from key B. Naming a
+  key is what `kid` is for.
+- its issuer comparison was **conditional on the configured issuer being non-empty**,
+  so an unset `TASKSD_JWT_ISSUER` accepted tokens from any issuer instead of failing
+  closed.
+
+It also stripped only the four names it reads. Every other minted header —
+`X-User-IsAdmin` and `X-User-Permissions` (the platform and money signals),
+`X-User-Owner`, `X-Billing-Account-Id`, `X-Scope`, `X-Workspace-Id`, and the retired
+names — passed through from the client untouched, and since tasksd's ingress routes
+straight to the Service, nothing upstream was deleting them either. It now strips
+`authz.Headers` ∪ `authz.Retired` and mints through `edge.Inject`, so the strip list
+IS the mint list.
+
+And it gains a machine predicate it never had: a `client_credentials` token carries no
+membership set, so it is not a person and holds neither admin scope.
+
+Per-org store scoping is `engine.As(Org(auth.OrgID(ctx)))`, resolved through
+`Claims.EffectiveOrg("")` on BOTH transports — the one function that answers "which
+org does this act in". tasksd honours no org switch, so that resolves the home org.
+The frontend scopes to the ORG; a host wanting project- or user-level isolation asks
+for it explicitly via `Embedded.View(Principal{Org, Project, User})`.
+
+`TASKSD_REQUIRE_IDENTITY=true` (production) rejects requests without a validated JWT.
+Default false keeps the embedded/dev path working.
+
+Cost, measured: 342 linked packages and an 18.3 MB binary, DOWN from 345 and 18.6 MB
+— dropping go-jose more than paid for the leaf. (The "10 MB, 208 deps" figure earlier
+in this document was already stale before this change.)
 
 Production env (do-sfo3-hanzo-k8s/hanzo):
 ```
@@ -338,12 +361,11 @@ TASKSD_JWT_ISSUER=https://hanzo.id
 TASKSD_REQUIRE_IDENTITY=true
 ```
 
-History — pre-v3.5.0, the middleware trusted client-supplied X-* headers
-under the assumption that hanzoai/gateway sat between ingress and tasksd.
-The actual ingress topology routed direct to the tasks Service, leaving
-`X-Org-Id` spoofable on `tasks-api.hanzo.ai`. v3.5.0 makes tasksd
-self-sufficient: gateway can still front it for rate limiting / billing,
-but it is no longer the sole trust boundary.
+History — pre-v3.5.0 the middleware trusted client-supplied `X-*` headers on the
+assumption that hanzoai/gateway sat between ingress and tasksd. The actual topology
+routed direct to the Service, leaving `X-Org-Id` spoofable on `tasks-api.hanzo.ai`.
+v3.5.0 made tasksd self-sufficient; this change makes it self-sufficient *without*
+being a fourth opinion about what an IAM token means.
 
 ## Durable Engine — true state + Phase-2 event-sourcing design
 
