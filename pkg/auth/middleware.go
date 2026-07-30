@@ -2,7 +2,7 @@
 
 // Package auth — identity-header middleware. The trust boundary is the
 // IAM JWT: tasksd validates every Authorization: Bearer <jwt> against
-// JWKS, mints X-Org-Id / X-User-Id / X-User-Email from validated claims,
+// JWKS, writes X-Org-Id / X-User-Id / X-User-Email from validated claims,
 // and unconditionally strips any client-supplied identity headers. There
 // is no header-pass-through trust path; client-supplied identity headers
 // are never honored.
@@ -22,7 +22,7 @@ import (
 )
 
 // The identity header names are the ESTATE's, not this service's: one list, named
-// by the party that mints their values (hanzoai/authz), so tasksd cannot come to
+// by the party that writes their values (hanzoai/authz), so tasksd cannot come to
 // disagree with the edge about what X-Org-Id means.
 const (
 	HeaderOrgID     = authz.HeaderOrg
@@ -44,7 +44,7 @@ const (
 
 // RequireIdentity returns middleware that:
 //  1. Strips any client-supplied X-Org-Id / X-User-Id / X-User-Email.
-//  2. If a Bearer JWT is present, validates it via v and mints fresh
+//  2. If a Bearer JWT is present, validates it via v and writes fresh
 //     identity headers + ctx values from the claims.
 //  3. If require=true and no validated identity emerged, returns 401.
 //
@@ -56,7 +56,7 @@ func RequireIdentity(v *edge.Verifier, require bool) func(http.Handler) http.Han
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The FULL estate strip, not the four names this service happens to read.
-			// A header tasksd does not mint but does not delete either is one a client can
+			// A header tasksd does not write but does not delete either is one a client can
 			// set and something downstream may believe — X-User-IsAdmin, X-Scope,
 			// X-Billing-Account-Id and the retired names were all passing straight through.
 			// The claimed org is discarded: tasksd honours no org switch, so a selection is
@@ -69,8 +69,8 @@ func RequireIdentity(v *edge.Verifier, require bool) func(http.Handler) http.Han
 			)
 			if v != nil {
 				if claims, err := v.Verify(r.Header); err == nil && claims != nil {
-					// ONE mint, from the one place that decides it — including the two admin
-					// scopes, which this service never minted at all and which its handlers
+					// ONE write, from the one place that decides it — including the two admin
+					// scopes, which this service never wrote at all and which its handlers
 					// therefore could not have read even where they should.
 					edge.Apply(r.Header, claims, "", nil)
 
@@ -100,8 +100,8 @@ func RequireIdentity(v *edge.Verifier, require bool) func(http.Handler) http.Han
 // WithIdentity returns a context carrying an ALREADY-VALIDATED identity, for a
 // caller that terminates the IAM trust boundary itself and embeds the Tasks HTTP
 // surface in-process — e.g. the unified hanzoai/cloud binary, where the gateway
-// validates the JWT and mints X-Org-Id / X-User-Id (HIP-0026) before the request
-// ever reaches this handler. It is the in-process twin of RequireIdentity's mint
+// validates the JWT and writes X-Org-Id / X-User-Id (HIP-0026) before the request
+// ever reaches this handler. It is the in-process twin of RequireIdentity's write
 // step: the engine reads org/user/email via OrgID/UserID/UserEmail identically,
 // whether the identity was validated by the JWT path here or by a trusted
 // upstream. Passing empty strings yields the unscoped (dev) context, the same as
@@ -115,18 +115,18 @@ func WithIdentity(ctx context.Context, org, project, user, email string) context
 	return ctx
 }
 
-// OrgID returns the org id minted from a validated JWT, or "".
+// OrgID returns the org id resolved from a validated JWT, or "".
 func OrgID(ctx context.Context) string { return strFromCtx(ctx, ctxKeyOrgID) }
 
-// ProjectID returns the project id minted from a validated JWT, or "" —
+// ProjectID returns the project id resolved from a validated JWT, or "" —
 // the org/project/user identity model's middle scope. Convention: a
 // project maps onto a tasks NAMESPACE inside the org's shard.
 func ProjectID(ctx context.Context) string { return strFromCtx(ctx, ctxKeyProjectID) }
 
-// UserID returns the user id minted from a validated JWT, or "".
+// UserID returns the user id resolved from a validated JWT, or "".
 func UserID(ctx context.Context) string { return strFromCtx(ctx, ctxKeyUserID) }
 
-// UserEmail returns the user email minted from a validated JWT, or "".
+// UserEmail returns the user email resolved from a validated JWT, or "".
 func UserEmail(ctx context.Context) string { return strFromCtx(ctx, ctxKeyUserEmail) }
 
 func strFromCtx(ctx context.Context, k ctxKey) string {

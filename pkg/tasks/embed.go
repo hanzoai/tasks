@@ -235,7 +235,7 @@ func (e *Embedded) Address() string {
 // View is an org-scoped, in-process control-plane handle on the embedded
 // engine — the door for a HOST binary (e.g. cloud's platform cron) to manage
 // namespaces and schedules in a specific org's shard without a ZAP hop or a
-// minted identity. In-process callers share the host's trust boundary (the
+// written identity. In-process callers share the host's trust boundary (the
 // same stance as the ungated loopback listener), so the org they pass is
 // authoritative — never derive it from anything client-supplied. Workflows a
 // schedule starts dispatch to whatever worker is subscribed on the schedule's
@@ -557,7 +557,7 @@ func (e *Embedded) CancelActivityForOrg(org, ns, activityID, runID, reason, iden
 func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 
 // HTTPHandler returns the browser-only JSON shim. Mirrors zapHandlers.
-// Per-request engine is scoped to the X-Org-Id minted by pkg/auth from
+// Per-request engine is scoped to the X-Org-Id written by pkg/auth from
 // the validated IAM JWT (Authorization: Bearer). Client-supplied
 // identity headers are stripped before the handler runs. Empty org →
 // legacy unscoped store (embedded/dev path only).

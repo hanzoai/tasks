@@ -111,7 +111,7 @@ func TestRequireIdentity_StripsClientHeaders_RejectsWithoutToken(t *testing.T) {
 	}
 }
 
-func TestRequireIdentity_ValidJWT_MintsHeaders(t *testing.T) {
+func TestRequireIdentity_ValidJWT_WritesHeaders(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestRequireIdentity_ValidJWT_MintsHeaders(t *testing.T) {
 	h := RequireIdentity(v, true)(next)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/foo", nil)
-	// Spoof headers — must be stripped before mint.
+	// Spoof headers — must be stripped before the write.
 	req.Header.Set(HeaderOrgID, "attacker")
 	req.Header.Set(HeaderProjectID, "attacker-project")
 	req.Header.Set(HeaderAuthorization, "Bearer "+tok)
@@ -153,7 +153,7 @@ func TestRequireIdentity_ValidJWT_MintsHeaders(t *testing.T) {
 		t.Fatalf("ctx mismatch: org=%q project=%q user=%q email=%q", gotOrg, gotProject, gotUser, gotEmail)
 	}
 	if headerOrg != "hanzo" || headerProject != "acme-app" || headerUser != "user-123" || headerEmail != "z@hanzo.ai" {
-		t.Fatalf("headers not minted from JWT: org=%q project=%q user=%q email=%q", headerOrg, headerProject, headerUser, headerEmail)
+		t.Fatalf("headers not written from JWT: org=%q project=%q user=%q email=%q", headerOrg, headerProject, headerUser, headerEmail)
 	}
 }
 
@@ -239,7 +239,7 @@ func TestRequireIdentity_WrongIssuer_Rejects(t *testing.T) {
 // tasksd strips the WHOLE estate identity set, not just the four names it reads.
 //
 // It used to strip exactly X-Org-Id / X-Project-Id / X-User-Id / X-User-Email, so
-// every other minted name — X-User-IsAdmin and X-User-Permissions (the platform and
+// every other written name — X-User-IsAdmin and X-User-Permissions (the platform and
 // money signals), X-User-Owner, X-Billing-Account-Id, X-Scope, X-Workspace-Id, and
 // the retired names — passed through from the client untouched. tasksd terminates
 // identity itself (its ingress routes straight to the Service), so nothing upstream
@@ -288,7 +288,7 @@ func TestRequireIdentity_StripsTheWholeEstateSet(t *testing.T) {
 			t.Errorf("retired %s survived as %q", h, seen[h])
 		}
 	}
-	// What the token DID earn is re-minted, so the strip is not just deletion.
+	// What the token DID earn is re-written, so the strip is not just deletion.
 	if seen[authz.HeaderOrg] != "hanzo" {
 		t.Errorf("%s = %q, want hanzo", authz.HeaderOrg, seen[authz.HeaderOrg])
 	}
@@ -299,7 +299,7 @@ func TestRequireIdentity_StripsTheWholeEstateSet(t *testing.T) {
 
 // An admin-org MACHINE reaches tasksd with no authority. IAM's client_credentials
 // grant signs no membership set, which is the machine signal; before this, tasksd
-// had no machine predicate at all and would have minted its `owner` as the org while
+// had no machine predicate at all and would have written its `owner` as the org while
 // letting a forged X-User-IsAdmin ride through untouched.
 func TestRequireIdentity_AdminOrgMachineCarriesNoAuthority(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
