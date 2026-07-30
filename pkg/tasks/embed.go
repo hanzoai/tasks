@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hanzoai/authz/edge"
 	"github.com/hanzoai/tasks/pkg/auth"
 	"github.com/hanzoai/tasks/pkg/sdk/client"
 	"github.com/hanzoai/tasks/pkg/tasks/migration"
@@ -54,7 +55,7 @@ type EmbedConfig struct {
 	// RequireIdentity=true, every ZAP request must carry an auth_token
 	// that validates against IAM; per-request engine is scoped
 	// to claims.Owner. This mirrors the HTTP middleware trust boundary.
-	JWTValidator    *auth.Validator
+	JWTValidator    *edge.Verifier
 	RequireIdentity bool
 	// Replicator wires consensus-replication for every shard. nil →
 	// LocalReplicator (single-node passthrough). cmd/tasksd builds a
@@ -329,7 +330,7 @@ func (e *Embedded) nodeSnapshot() []*zap.Node {
 // delivery. A nil validator is refused: exposing durable execution ungated across
 // the cluster is never correct. Call once, after Embed; Stop tears down every
 // listener.
-func (e *Embedded) ServeGated(ctx context.Context, addr string, validator *auth.Validator) error {
+func (e *Embedded) ServeGated(ctx context.Context, addr string, validator *edge.Verifier) error {
 	if e == nil {
 		return errors.New("tasks: ServeGated on nil Embedded")
 	}
@@ -1620,7 +1621,7 @@ const (
 	opHealth                  uint16 = 0x0090
 )
 
-func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, requireID bool) map[uint16]zap.Handler {
+func zapHandlers(rootEn *engine, defaultNS string, validator *edge.Verifier, requireID bool) map[uint16]zap.Handler {
 	envBody := func(v any) ([]byte, error) { return json.Marshal(v) }
 	// scope validates the request's auth_token and returns the
 	// org-scoped engine view. orgErr non-empty → caller authoritatively
@@ -1637,14 +1638,22 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 			}
 			return rootEn, 0, ""
 		}
-		claims, err := validator.Validate(ctx, tok)
-		if err != nil || claims == nil || claims.Owner == "" {
+		claims, err := validator.VerifyRaw(strings.TrimPrefix(tok, "Bearer "))
+		// EffectiveOrg, not the raw `owner` claim: it is the ONE function that answers
+		// "which org does this request act in", and the ZAP path must answer it the same
+		// way the HTTP one does. With no selection to honour — this transport carries no
+		// org-switch — it resolves the home org, which is what `owner` meant here.
+		var org string
+		if err == nil && claims != nil {
+			org, _ = claims.EffectiveOrg("")
+		}
+		if org == "" {
 			if requireID {
 				return nil, 401, "invalid auth_token"
 			}
 			return rootEn, 0, ""
 		}
-		return rootEn.As(Org(claims.Owner)), 0, ""
+		return rootEn.As(Org(org)), 0, ""
 	}
 	wrap := func(fn func(en *engine, req map[string]any) (any, uint32, string)) zap.Handler {
 		return func(ctx context.Context, _ string, msg *zap.Message) (*zap.Message, error) {
