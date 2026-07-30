@@ -315,7 +315,7 @@ further pruning once the native engine settles.
 ### Auth: IAM only, through the estate's one reader
 
 tasksd validates `Authorization: Bearer <jwt>` itself — no gateway required — and
-the strip+mint pattern is the trust boundary. What it does NOT do any more is hold
+the strip+write pattern is the trust boundary. What it does NOT do any more is hold
 its own reading of that contract.
 
 **The reader is `hanzoai/authz` + `hanzoai/authz/edge`.** `pkg/auth` is down to the
@@ -330,13 +330,13 @@ does not have:
   so an unset `TASKSD_JWT_ISSUER` accepted tokens from any issuer instead of failing
   closed.
 
-It also stripped only the four names it reads. Every other minted header —
+It also stripped only the four names it reads. Every other written header —
 `X-User-IsAdmin` and `X-User-Permissions` (the platform and money signals),
 `X-User-Owner`, `X-Billing-Account-Id`, `X-Scope`, `X-Workspace-Id`, and the retired
 names — passed through from the client untouched, and since tasksd's ingress routes
 straight to the Service, nothing upstream was deleting them either. It now strips
-`authz.Headers` ∪ `authz.Retired` and mints through `edge.Inject`, so the strip list
-IS the mint list.
+`authz.Headers` ∪ `authz.Retired` and writes through `edge.Apply`, so the strip list
+IS the write list.
 
 And it gains a machine predicate it never had: a `client_credentials` token carries no
 membership set, so it is not a person and holds neither admin scope.

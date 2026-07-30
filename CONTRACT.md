@@ -181,7 +181,7 @@ Namespaces map 1:1 to IAM orgs. This is non-negotiable.
 Workers dial with `Namespace: <orgSlug>`. All schedules, workflows, and
 visibility queries are namespace-scoped at the server. An `org-a`
 worker cannot see `org-b` workflows even if both share a binary. The
-strip + mint identity middleware in `tasksd` enforces this on every RPC.
+strip + write identity middleware in `tasksd` enforces this on every RPC.
 
 Multi-tenant services hold one client + worker per active org. Onboarding
 a new org allocates the namespace lazily on first `ExecuteWorkflow`.
