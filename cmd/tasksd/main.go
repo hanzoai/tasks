@@ -102,8 +102,11 @@ func main() {
 
 	requireID := envBool("TASKSD_REQUIRE_IDENTITY", false)
 	validator := auth.NewValidator(auth.JWTConfig{
-		JWKSURL:  envStr("TASKSD_JWKS_URL", ""),
-		Issuer:   envStr("TASKSD_JWT_ISSUER", ""),
+		JWKSURL: envStr("TASKSD_JWKS_URL", ""),
+		Issuer:  envStr("TASKSD_JWT_ISSUER", ""),
+		// The brands this tasksd accepts tokens from beyond the primary — each signs
+		// under its own issuer. Adding one is configuration, not a code change.
+		Issuers:  strings.Split(envStr("TASKSD_WHITELABEL_ISSUERS", ""), ","),
 		Audience: envStr("TASKSD_JWT_AUDIENCE", ""),
 	})
 

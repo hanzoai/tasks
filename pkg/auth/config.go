@@ -14,6 +14,8 @@
 package auth
 
 import (
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/hanzoai/authz/edge"
@@ -22,8 +24,17 @@ import (
 // JWTConfig configures the validator. An empty JWKSURL disables JWT validation, and
 // RequireIdentity then refuses every request when require is set.
 type JWTConfig struct {
-	JWKSURL  string        // e.g. https://hanzo.id/v1/iam/.well-known/jwks
-	Issuer   string        // e.g. https://hanzo.id
+	JWKSURL string // e.g. https://hanzo.id/v1/iam/.well-known/jwks
+
+	// Issuer is the primary trusted issuer, e.g. https://hanzo.id. It is widened by
+	// Issuers for a deployment that fronts more than one brand; an empty result
+	// refuses every token rather than silently disabling the check.
+	Issuer string
+
+	// Issuers are ADDITIONAL trusted issuers beyond Issuer — the white-label brands
+	// this tasksd accepts tokens from, each of which signs its own.
+	Issuers []string
+
 	Audience string        // optional; "" → audience check skipped
 	TTL      time.Duration // JWKS cache TTL; 0 → the edge's default
 }
@@ -42,5 +53,17 @@ func NewValidator(cfg JWTConfig) *edge.Verifier {
 	if cfg.Audience != "" {
 		audiences = []string{cfg.Audience}
 	}
-	return edge.NewVerifier(cfg.JWKSURL, cfg.Issuer, audiences, cfg.TTL)
+	issuers := make([]string, 0, 1+len(cfg.Issuers))
+	for _, iss := range append([]string{cfg.Issuer}, cfg.Issuers...) {
+		// An empty entry is dropped, not trusted: splitting an unset
+		// TASKSD_WHITELABEL_ISSUERS yields one empty string, and an empty issuer would
+		// match a token that carries none.
+		if iss = strings.TrimSpace(iss); iss == "" {
+			continue
+		}
+		if !slices.Contains(issuers, iss) {
+			issuers = append(issuers, iss)
+		}
+	}
+	return edge.NewVerifier(cfg.JWKSURL, issuers, audiences, cfg.TTL)
 }

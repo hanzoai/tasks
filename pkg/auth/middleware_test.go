@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,5 +334,62 @@ func TestRequireIdentity_AdminOrgMachineCarriesNoAuthority(t *testing.T) {
 	if seen[authz.HeaderUserOrgAdmin] != "" {
 		t.Errorf("an admin-org machine reached the handler with %s=%q",
 			authz.HeaderUserOrgAdmin, seen[authz.HeaderUserOrgAdmin])
+	}
+}
+
+// An unset TASKSD_WHITELABEL_ISSUERS splits into one EMPTY string, and an empty
+// issuer must not become a trusted one — a token carrying no `iss` would match it.
+// The verifier is built from the same code path production uses.
+func TestIssuerAllowlistDropsEmptyEntries(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := jwksServer(t, key, "kid-1")
+	v := NewValidator(JWTConfig{
+		JWKSURL: js.URL,
+		Issuer:  testIssuer,
+		Issuers: strings.Split("", ","), // exactly what an unset env var yields
+		TTL:     time.Minute,
+	})
+
+	// The real issuer still works.
+	good := signedToken(t, key, "kid-1", iamClaims("hanzo", "u", "", "", time.Now().Add(time.Hour)))
+	if _, err := v.VerifyRaw(good); err != nil {
+		t.Fatalf("the primary issuer was refused: %v", err)
+	}
+
+	// A token carrying NO issuer must not be admitted by the empty entry.
+	none := iamClaims("hanzo", "u", "", "", time.Now().Add(time.Hour))
+	none.Issuer = ""
+	if _, err := v.VerifyRaw(signedToken(t, key, "kid-1", none)); err == nil {
+		t.Error("a token with no issuer was trusted")
+	}
+}
+
+// A brand this tasksd fronts is admitted by configuration.
+func TestWhiteLabelIssuerIsAdmitted(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := jwksServer(t, key, "kid-1")
+	v := NewValidator(JWTConfig{
+		JWKSURL: js.URL, Issuer: testIssuer,
+		Issuers: []string{"https://lux.id", "https://zoo.id"},
+		TTL:     time.Minute,
+	})
+
+	for _, iss := range []string{testIssuer, "https://lux.id", "https://zoo.id"} {
+		c := iamClaims("acme", "u", "", "", time.Now().Add(time.Hour))
+		c.Issuer = iss
+		if _, err := v.VerifyRaw(signedToken(t, key, "kid-1", c)); err != nil {
+			t.Errorf("brand issuer %s was refused: %v", iss, err)
+		}
+	}
+	rogue := iamClaims("acme", "u", "", "", time.Now().Add(time.Hour))
+	rogue.Issuer = "https://evil.test"
+	if _, err := v.VerifyRaw(signedToken(t, key, "kid-1", rogue)); err == nil {
+		t.Error("an untrusted issuer was admitted")
 	}
 }
