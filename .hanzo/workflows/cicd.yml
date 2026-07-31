@@ -17,5 +17,12 @@ on:
 
 jobs:
   cicd:
-    uses: hanzoai/ci/.github/workflows/build.yml@v1
+    # `.hanzo/workflows/`, matching where this caller lives. Reusables resolve
+    # through services/actions.ResolveUses, which enforces the WORKFLOW_DIRS
+    # allowlist on the referenced path too, so a `uses:` naming
+    # `.github/workflows` is refused once that list narrows to
+    # `.hanzo/workflows` alone — and refused at InsertRun, before any run row
+    # exists, so it reads as silence rather than as a failure. hanzoai/ci
+    # publishes build.yml at both paths from every tag; @v1 is unchanged.
+    uses: hanzoai/ci/.hanzo/workflows/build.yml@v1
     secrets: inherit
