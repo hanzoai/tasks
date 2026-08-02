@@ -410,56 +410,72 @@ Persistence = per-`(principal, namespace)` SQLite shard
 `meta` tables. Survives restart (`TestStore_PersistsAcrossOpen`).
 
 A `Principal` is the tenant that owns a shard — an org, optionally
-narrowed to a project and a user. It is one value used in the two places
-tenancy is decided, so they cannot disagree: the shard's directory
-(`<data>/<org>/<project>/<user>/<ns>.db`, each unset leg written `_`) and
-the key its DEK is wrapped under. Shards and namespaces are created on
-first use; nothing is declared up front.
+narrowed to a project. Shards and namespaces are created on first use;
+nothing is declared up front.
+
+### Storage and encryption — `hanzoai/cek` + `hanzoai/namespace`
+
+Tasks no longer has a storage layout or a key schedule of its own. It
+uses the estate's:
+
+    namespace   names the tenant, and where its file lives
+    cek         turns the process master + that name into the file's key,
+                and opens it
+    sqlite      opens a file under a raw key, knowing nothing about who owns it
+    kms         holds the master
+
+    <data>/orgs/<org>/<ns>.db
+    <data>/orgs/<org>/projects/<project>/<ns>.db
+    <data>/orgs/_platform/<ns>.db          the root (unscoped) tenant
+
+The key is DERIVED (HKDF of master + namespace + namespace-name), not
+generated, wrapped or stored. So there is no DEK, no `.dek` sidecar, no
+unwrap step, no rewrap step, no per-file key material to lose, and no
+migration path to maintain. A shard is born encrypted or it does not
+exist; losing the master loses the data, which is the property you want
+from encryption at rest and the reason the master lives in KMS.
 
 `EmbedConfig.MasterKey` (32 bytes, `KMS_MASTER_KEY` base64 for `tasksd`)
-opens every shard encrypted at rest. Each file carries its own DEK,
-wrapped under a KEK derived master -> org -> project -> user and stored
-beside it as `<ns>.db.dek`, so rotating the master rewraps sidecars and
-never touches ciphertext. A keyed shard is ciphertext on every build:
-`hanzoai/sqlite` uses the live libsqlcipher codec when one is linked and
-its pure-Go SQLCipher envelope when one is not. On the envelope the file
-is sealed at checkpoint/close rather than per commit, which is what the
-manager's sweep bounds. Unset leaves shards plaintext (dev).
+is installed into cek at `store.New`. A **nil master no longer means
+plaintext** — there is no such posture. It means "I have no key to
+state": embedded in a process that already installed one (cloud resolves
+it through `credz` at boot) that key is used, so one deployment has one
+key; otherwise a random master is minted for this process and nothing it
+writes outlives the run, which is the honest shape of a keyless
+deployment and why a developer needs no configuration.
 
-### Upgrading a store written before principals — `tasksd upgrade`
+A shard is ciphertext on every build: `hanzoai/sqlite` uses the live
+libsqlcipher codec when one is linked and its pure-Go SQLCipher envelope
+when one is not. On the envelope the file is written when it is SEALED
+(checkpoint/close), not per commit — which is what the manager's sweep
+bounds, and why `ListShards`/`ListPrincipals` read the resident set as
+well as the directory: a shard created moments ago has no file yet, and
+that is exactly the tenant the cron sweeper most needs to see.
 
-An older binary addressed a shard by org alone (`<data>/<org>/<ns>.db`,
-`<data>/_/<ns>.db` for the unscoped tenant). This one reads three levels
-down, so on the first boot after the upgrade it finds nothing, creates
-empty shards beside the full ones, enumerates zero tenants, and no
-schedule fires again — silently. Nothing is destroyed; the bytes are one
-directory up.
+**The org is folded to its storage identity once, at the door**
+(`store.Org`, via the one injective slugger `namespace.Sanitize`), and
+never again when that identity is turned into a place. `Principal.Org`
+downstream is therefore the STORED name — which is what lets
+`ListPrincipals` read a slug back off disk and reach the same file.
+Folding twice would re-suffix it into a different, empty database, since
+Sanitize is injective but deliberately not idempotent. A name Sanitize
+refuses is kept raw so `Valid` rejects it, because folding it would yield
+the empty org — and an empty org leg is the ROOT principal, so a name too
+hostile to store would otherwise have become the deployment's own tenant.
 
-    tasksd upgrade --data <dir>
+### Known gap — no user-scoped shard
 
-inserts the two sentinel levels uniformly (`<data>/X/*.db` →
-`<data>/X/_/_/`, including `_` → `_/_/_`). A rename within one
-filesystem: no page rewritten, no re-encryption. Journals move before
-their database, so a run that stops half way never leaves a database
-without the WAL holding its last commits. Idempotent — a moved shard
-leaves nothing behind — so a deploy can run it unconditionally ahead of
-the daemon.
+`Principal` still carries a `User` leg (it is the wire encoding, and
+`ParsePrincipal`/`String` round-trip it), but a principal that narrows to
+a user **cannot open a shard**: `Principal.Namespace` returns
+`store.ErrUserLeg`. `namespace.Key` refuses a user namespace on purpose —
+that layout has no place for one, "and inventing one silently is how a
+second convention starts". The old `<org>/<project>/<user>/` tree was
+tasks' own; sharing the estate's layout costs that depth until
+`hanzoai/namespace` grows a user layout. Scope to the org or its project.
 
-Two refusals, both loud, both non-destructive:
-
-- **A master key is set.** Pre-upgrade shards are plaintext and moving
-  one does not encrypt it; the next boot would wrap a fresh DEK around a
-  file it then failed to decrypt. Move first with `KMS_MASTER_KEY`
-  unset, encrypt second.
-- **A destination is occupied** (`store.ErrOccupied`). The only way to
-  get there is booting this binary before the move ran, which creates an
-  EMPTY shard where the full one belongs — and anything started after
-  that boot is in the empty one. Both files are kept, the other tenants
-  still move, and the operator picks which is authoritative.
-
-`upgrade` and `migrate` are different axes and stay separate:
-`upgrade` moves EVERY shard forward in time (layout), `migrate` moves ONE
-shard across space (nodes).
+`tasksd upgrade` is **gone** with the layout it moved shards into. The
+only subcommand is `migrate`, which moves ONE shard across NODES.
 
 ### What is genuinely missing (the real gap)
 

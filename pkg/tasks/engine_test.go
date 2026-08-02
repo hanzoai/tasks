@@ -34,7 +34,7 @@ func TestEngine_StartWorkflow(t *testing.T) {
 		// A namespace is an addressing fact, not a resource to provision:
 		// starting in one that has never been seen registers it.
 		{name: "unseen namespace", ns: "ghost", wfID: "wf-c", typ: TypeRef{Name: "Demo"}},
-		{name: "unusable namespace", ns: "../escape", wfID: "wf-d", typ: TypeRef{Name: "Demo"}, wantErr: "path separator"},
+		{name: "unusable namespace", ns: "../escape", wfID: "wf-d", typ: TypeRef{Name: "Demo"}, wantErr: "cannot name a shard"},
 		{name: "sentinel namespace", ns: "_", wfID: "wf-e", typ: TypeRef{Name: "Demo"}, wantErr: "sentinel"},
 	}
 	for _, c := range cases {

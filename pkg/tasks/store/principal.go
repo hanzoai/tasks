@@ -3,11 +3,11 @@
 package store
 
 import (
+	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
-	hanzosqlite "github.com/hanzoai/sqlite"
+	"github.com/hanzoai/namespace"
 )
 
 // Sentinel is the path segment standing for an unset leg of a Principal.
@@ -41,7 +41,44 @@ type Principal struct {
 }
 
 // Org returns the principal naming an org.
-func Org(org string) Principal { return Principal{Org: org} }
+//
+// It is THE DOOR: the raw IAM org a caller holds is folded here, once, through
+// namespace.Sanitize — the one injective slugger — so everything downstream
+// carries the STORAGE identity. That matters because a Principal is both the
+// routing key on a replication frame and the name of the directory its shard
+// lives in: folding again at the open would re-suffix a slug that already
+// carries a disambiguation suffix, and land the tenant in a different, empty
+// database than the one ListPrincipals just read off disk.
+//
+// A name Sanitize REFUSES — it carries whitespace, a control or a format rune,
+// the class no injective fold survives — is kept RAW rather than folded, so
+// that Valid rejects it. Folding it would produce the empty string, and an
+// empty org leg is the ROOT principal: a name too hostile to store would have
+// become the deployment's own platform tenant. Fail-closed, loudly.
+func Org(org string) Principal { return Principal{Org: fold(org)} }
+
+// OrgProject is the door for a principal narrowed to one of an org's
+// projects. Both legs are folded, by the same rule, in the same place.
+func OrgProject(org, project string) Principal {
+	return Principal{Org: fold(org), Project: fold(project)}
+}
+
+// fold reduces one externally-chosen name to its storage identity.
+//
+// A name Sanitize REFUSES is returned RAW rather than folded, so that Valid
+// rejects it. Sanitize's refusal is the empty string, and an empty leg means
+// "unset" — an unset org leg is the ROOT principal — so folding a hostile
+// name would silently hand it the deployment's own platform tenant instead
+// of turning it away. An empty input is genuinely unset and stays so.
+func fold(name string) string {
+	if name == "" {
+		return ""
+	}
+	if slug := namespace.Sanitize(name); slug != "" {
+		return slug
+	}
+	return name
+}
 
 // legs returns the three legs in narrowing order.
 func (p Principal) legs() [Depth]string { return [Depth]string{p.Org, p.Project, p.User} }
@@ -66,9 +103,6 @@ func (p Principal) String() string {
 	}
 	return strings.Join(out, "/")
 }
-
-// dir is the shard directory for p relative to the store root.
-func (p Principal) dir() string { return filepath.FromSlash(p.String()) }
 
 // ParsePrincipal is the inverse of String.
 func ParsePrincipal(s string) (Principal, error) {
@@ -110,67 +144,88 @@ func (p Principal) Valid() error {
 // or file, or collide with the unset-leg sentinel. Every name that becomes
 // a path segment — a principal's legs and a namespace alike — passes
 // through here, so there is one rule for all of them.
+//
+// The rule is hanzoai/namespace's own segment rule, asked rather than
+// restated: a name must already BE a legal namespace segment, exactly as
+// written. That settles what a name cannot be by construction instead of by
+// denylist — no separator so no path, no dot so no ".." and no hidden name,
+// no trailing space, no encoded form of any of those — and it holds for the
+// namespace leg too, which cek renders straight into a filename.
+//
+// "Exactly as written" is the strict part, and it is deliberate. The
+// namespace constructor case-folds, so it would ACCEPT "Acme" and quietly
+// store it as "acme"; a leg that only becomes legal after folding has two
+// spellings, and the second one names the same file under a different key.
+// Legs arrive already folded (see Org), so anything that would change here
+// did not come through the door.
 func ValidName(name string) error {
 	switch name {
 	case "":
 		return fmt.Errorf("store: name required")
 	case Sentinel:
 		return fmt.Errorf("store: %q is the unset-leg sentinel and cannot name a tenant", name)
-	case ".", "..":
-		return fmt.Errorf("store: %q is not a name", name)
 	}
-	if strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
-		return fmt.Errorf("store: name %q contains a path separator", name)
+	if strings.ContainsRune(name, 0) {
+		return fmt.Errorf("store: name %q contains a NUL", name)
+	}
+	ns, err := namespace.Org(name)
+	if err != nil {
+		return fmt.Errorf("store: %q cannot name a shard: %w", name, err)
+	}
+	if ns.ID() != name {
+		return fmt.Errorf("store: name %q is not in its stored form (%q); it did not come through the door", name, ns.ID())
 	}
 	return nil
 }
 
-// principalProject is the domain-separation tag for the project leg.
-// hanzoai/sqlite ships global/org/user; project is the third leg IAM
-// already validates and mints (auth.Claims.Project), so it needs its own
-// tag for the HKDF info to stay injective across legs.
-const principalProject = hanzosqlite.PrincipalType("project")
-
-// rootPrincipalID is the id the root (zero) Principal derives under. The
-// root tenant is the service itself, so it derives as the global
-// principal — distinct from any org, project or user that could be named
-// "tasks".
-const rootPrincipalID = "tasks"
-
-// KEK derives the key-encryption key for p from the master key by walking
-// the principal chain: master → org → project → user, skipping any leg p
-// leaves unset. Each narrowing step derives from the key it narrows, so a
-// user's key is cryptographically contained in its org's — reaching a
-// user's data requires the whole chain, not just the master. Each step
-// carries its own domain-separation tag, so narrowing to a project named
-// "z" and to a user named "z" derive different keys.
+// ErrUserLeg reports that a Principal narrows to a USER, which the shared
+// namespace layout has no place for.
 //
-// The KEK never encrypts a page. It wraps that shard's own DEK (see
-// dek.go), which is what makes master-key rotation O(1) per shard.
-func (p Principal) KEK(master []byte) ([]byte, error) {
+// hanzoai/namespace names an org, an org's project, and the deployment
+// itself. namespace.Key returns an error for a user namespace on purpose —
+// "this layout has no place for them, and inventing one silently is how a
+// second convention starts". Tasks used to write <root>/<org>/<project>/<user>/,
+// a layout of its own; it now shares the estate's, and the user leg is the
+// one part of its tenancy that does not survive the move.
+//
+// It is refused at the door rather than only when the file is keyed, so a
+// user-scoped shard fails the same way in dev as in production instead of
+// working plaintext and dying the day a master key is set.
+var ErrUserLeg = errors.New("store: the shared namespace layout has no place for a user-scoped shard; scope to the org or its project")
+
+// Namespace is the entity hanzoai/namespace names this shard's tenant, and
+// therefore both where its file lives and what its key is derived from —
+// one name, two renderings, so the two cannot drift apart:
+//
+//	root (zero)        →  system            →  orgs/_platform/<ns>.db
+//	{Org}              →  org/<org>         →  orgs/<org>/<ns>.db
+//	{Org, Project}     →  org/<org>/<proj>  →  orgs/<org>/projects/<proj>/<ns>.db
+//	anything with User →  ErrUserLeg
+//
+// The legs are already the folded storage identity (see Org), so this
+// VALIDATES them and does not fold again — namespace.Sanitize is injective
+// but not idempotent, and a second fold would rename a tenant whose first
+// fold carried a disambiguation suffix.
+func (p Principal) Namespace() (namespace.Namespace, error) {
 	if err := p.Valid(); err != nil {
-		return nil, err
+		return namespace.Namespace{}, err
+	}
+	if p.User != "" {
+		return namespace.Namespace{}, fmt.Errorf("%w: %s", ErrUserLeg, p)
 	}
 	if p.Root() {
-		return hanzosqlite.DeriveKey(master, hanzosqlite.PrincipalGlobal, rootPrincipalID)
+		return namespace.System(), nil
 	}
-	key, err := hanzosqlite.DeriveKey(master, hanzosqlite.PrincipalOrg, p.Org)
+	ns, err := namespace.Org(p.Org)
 	if err != nil {
-		return nil, err
+		return namespace.Namespace{}, err
 	}
-	for _, leg := range []struct {
-		typ hanzosqlite.PrincipalType
-		id  string
-	}{
-		{principalProject, p.Project},
-		{hanzosqlite.PrincipalUser, p.User},
-	} {
-		if leg.id == "" {
-			continue
-		}
-		if key, err = hanzosqlite.DeriveChildKey(key, leg.typ, leg.id); err != nil {
-			return nil, err
-		}
+	if p.Project == "" {
+		return ns, nil
 	}
-	return key, nil
+	g, err := namespace.NewGroup(p.Project)
+	if err != nil {
+		return namespace.Namespace{}, fmt.Errorf("store: project %q: %w", p.Project, err)
+	}
+	return ns.WithGroup(g), nil
 }

@@ -5,8 +5,10 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/hanzoai/cek"
 	"github.com/hanzoai/tasks/pkg/tasks/store"
 )
 
@@ -72,26 +74,31 @@ func TestPrincipal_Rejected(t *testing.T) {
 	}
 }
 
-// The KEK must separate every tenant, and narrowing must derive a child of
-// the leg to its left rather than a fresh key off the master.
-func TestPrincipal_KEKSeparatesTenants(t *testing.T) {
+// Every tenant must derive its own key, and a different master must move
+// all of them. The derivation is cek's now, but the property is still
+// tasks' to hold: it depends on Principal.Namespace being injective, which
+// is the part this package owns.
+func TestPrincipal_NamespaceSeparatesTenants(t *testing.T) {
 	master := bytes.Repeat([]byte{0x5a}, store.MasterKeyLen)
 	tenants := []store.Principal{
 		{},
 		{Org: "acme"},
 		{Org: "acme", Project: "web"},
-		{Org: "acme", User: "z"},
-		{Org: "acme", Project: "web", User: "z"},
+		{Org: "acme", Project: "z"},
 		{Org: "other"},
 	}
 	seen := map[string]store.Principal{}
 	for _, p := range tenants {
-		k, err := p.KEK(master)
+		ns, err := p.Namespace()
 		if err != nil {
-			t.Fatalf("KEK(%+v): %v", p, err)
+			t.Fatalf("Namespace(%+v): %v", p, err)
+		}
+		k, err := cek.DeriveKey(master, ns, "default")
+		if err != nil {
+			t.Fatalf("DeriveKey(%+v): %v", p, err)
 		}
 		if len(k) != store.MasterKeyLen {
-			t.Fatalf("KEK(%+v) is %d bytes", p, len(k))
+			t.Fatalf("key for %+v is %d bytes", p, len(k))
 		}
 		if prev, dup := seen[string(k)]; dup {
 			t.Fatalf("%+v and %+v derive the same key", prev, p)
@@ -101,10 +108,72 @@ func TestPrincipal_KEKSeparatesTenants(t *testing.T) {
 	// A different master must move every key.
 	other := bytes.Repeat([]byte{0x5b}, store.MasterKeyLen)
 	for _, p := range tenants {
-		k, _ := p.KEK(other)
+		ns, _ := p.Namespace()
+		k, _ := cek.DeriveKey(other, ns, "default")
 		if _, collides := seen[string(k)]; collides {
 			t.Fatalf("%+v derives the same key under a different master", p)
 		}
+	}
+	// Two namespaces of the SAME tenant must not share a key either.
+	acme, _ := store.Org("acme").Namespace()
+	a, _ := cek.DeriveKey(master, acme, "default")
+	b, _ := cek.DeriveKey(master, acme, "staging")
+	if bytes.Equal(a, b) {
+		t.Fatal("two namespaces of one tenant derive the same key")
+	}
+}
+
+// A user-scoped principal has no place in the shared namespace layout, and
+// is refused rather than silently written somewhere. It is refused at the
+// door — not only once a key is in play — so it fails identically in dev
+// and in production.
+func TestPrincipal_UserLegRefused(t *testing.T) {
+	for _, p := range []store.Principal{
+		{Org: "acme", User: "z"},
+		{Org: "acme", Project: "web", User: "z"},
+	} {
+		if _, err := p.Namespace(); !errors.Is(err, store.ErrUserLeg) {
+			t.Fatalf("Namespace(%+v) = %v, want ErrUserLeg", p, err)
+		}
+	}
+}
+
+// The org is folded to its storage identity ONCE, at the door (Org), and
+// never again when that identity is turned into a place (Namespace).
+//
+// This is the invariant ListPrincipals rests on. It reads a slug back off
+// disk and builds a Principal from it directly; if Namespace folded a
+// second time the tenant would render into a DIFFERENT, empty database,
+// because namespace.Sanitize is injective but deliberately not idempotent —
+// it re-suffixes anything already shaped like its own output, so that an
+// entity cannot squat on the rendered form of another's name.
+func TestOrg_FoldsOnceAtTheDoor(t *testing.T) {
+	// "Acme" is not a clean slug, so the door folds it to a disambiguated one.
+	folded := store.Org("Acme")
+	if folded.Org == "Acme" {
+		t.Fatal("Org did not fold a non-slug name")
+	}
+	// Distinct raw orgs must stay distinct after folding.
+	if store.Org("Acme").Org == store.Org("acme").Org {
+		t.Fatal("two distinct orgs folded onto one identity")
+	}
+	// A name no injective fold survives is refused, not mangled.
+	if err := store.Org("ac me").Valid(); err == nil {
+		t.Fatal("an org carrying whitespace should be refused")
+	}
+	// THE INVARIANT: a Principal rebuilt from the stored identity — which is
+	// exactly what ListPrincipals does — names the same place as the one the
+	// door produced.
+	want, err := folded.Namespace()
+	if err != nil {
+		t.Fatalf("Namespace: %v", err)
+	}
+	got, err := store.Principal{Org: folded.Org}.Namespace()
+	if err != nil {
+		t.Fatalf("Namespace (rebuilt): %v", err)
+	}
+	if got != want {
+		t.Fatalf("rebuilt tenant names %s, door named %s — the fold ran twice", got, want)
 	}
 }
 
@@ -121,8 +190,7 @@ func TestManager_TenantsAreIsolated(t *testing.T) {
 		{},
 		{Org: "acme"},
 		{Org: "acme", Project: "web"},
-		{Org: "acme", User: "z"},
-		{Org: "acme", Project: "web", User: "z"},
+		{Org: "acme", Project: "z"},
 		{Org: "other"},
 	}
 	for _, p := range tenants {
@@ -133,6 +201,10 @@ func TestManager_TenantsAreIsolated(t *testing.T) {
 		if err := sh.Put(ctx, "wf/default/a/1", []byte(p.String())); err != nil {
 			t.Fatalf("Put(%+v): %v", p, err)
 		}
+	}
+	// A user-scoped tenant opens no shard at all, so it can share none.
+	if _, err := mgr.Get(ctx, store.Principal{Org: "acme", User: "z"}, "default"); !errors.Is(err, store.ErrUserLeg) {
+		t.Fatalf("Get(user-scoped) = %v, want ErrUserLeg", err)
 	}
 	for _, p := range tenants {
 		sh, _ := mgr.Get(ctx, p, "default")
