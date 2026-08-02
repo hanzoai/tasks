@@ -17,6 +17,8 @@ import (
 	// opens through it (never modernc directly) so a store embedded in the unified
 	// cloud binary shares that single registration instead of double-registering
 	// "sqlite" and panicking at init.
+	"github.com/hanzoai/cek"
+	"github.com/hanzoai/namespace"
 	hanzosqlite "github.com/hanzoai/sqlite"
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
 )
@@ -69,18 +71,27 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `
 
-// openShard opens the shard file at path. A non-nil dek opens it at rest
-// encrypted; hanzoai/sqlite routes that through the live libsqlcipher codec
-// when one is linked and through its pure-Go SQLCipher codec envelope when
-// one is not, so a keyed shard is ciphertext on every build and there is
-// nothing here to branch on.
-func openShard(path string, p Principal, ns string, dek []byte) (*Shard, error) {
+// openShard opens the shard holding namespace ns for tenant, under dir.
+//
+// cek derives the file's key from the process master and the tenant that
+// owns it, picks the path, creates the directory and opens it encrypted —
+// so the file's location and its key are two renderings of one name and
+// cannot be paired wrongly. hanzoai/sqlite routes the keyed open through
+// the live libsqlcipher codec when one is linked and through its pure-Go
+// SQLCipher codec envelope when one is not, so a shard is ciphertext on
+// every build and there is nothing here to branch on.
+func openShard(tenant namespace.Namespace, dir string, p Principal, ns string) (*Shard, error) {
 	// WAL + busy_timeout + synchronous=NORMAL + foreign_keys are set by schemaSQL
 	// below (explicit PRAGMA statements), so they apply on both backends rather
 	// than relying on driver-specific DSN params.
-	conn, err := hanzosqlite.OpenDB(path, dek)
+	conn, err := cek.Open(tenant, ns, dir)
 	if err != nil {
-		return nil, fmt.Errorf("store.openShard: open %s: %w", path, err)
+		return nil, fmt.Errorf("store.openShard: open %s/%s: %w", tenant, ns, err)
+	}
+	path, err := namespace.Path(dir, tenant, ns)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
 	}
 	conn.SetMaxOpenConns(1) // single writer
 	conn.SetMaxIdleConns(1)

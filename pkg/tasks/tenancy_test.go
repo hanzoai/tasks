@@ -30,8 +30,6 @@ func TestTenancy_NamespaceOnDemand(t *testing.T) {
 		{},
 		Org("acme"),
 		{Org: "acme", Project: "web"},
-		{Org: "acme", User: "z"},
-		{Org: "acme", Project: "web", User: "z"},
 	} {
 		v := emb.View(p)
 		wf, err := v.en.StartWorkflow("never-declared", tenancySecret, "", TypeRef{Name: "Demo"}, "default", nil)
@@ -48,6 +46,23 @@ func TestTenancy_NamespaceOnDemand(t *testing.T) {
 	}
 }
 
+// A user-scoped tenant is refused outright. The shared namespace layout
+// names an org and an org's project and nothing narrower, so the depth
+// tasks used to address by hand no longer has a place to be written — and
+// it fails here, at the start, rather than by quietly landing in the org's
+// own shard.
+func TestTenancy_UserScopedIsRefused(t *testing.T) {
+	emb := embedFixture(t, t.TempDir(), nil)
+	for _, p := range []Principal{
+		{Org: "acme", User: "z"},
+		{Org: "acme", Project: "web", User: "z"},
+	} {
+		if _, err := emb.View(p).en.StartWorkflow("default", "wf", "", TypeRef{Name: "Demo"}, "default", nil); err == nil {
+			t.Fatalf("StartWorkflow(%+v) should be refused", p)
+		}
+	}
+}
+
 // Each tenant sees only its own workflows, even in the same namespace.
 func TestTenancy_ViewsAreIsolated(t *testing.T) {
 	emb := embedFixture(t, t.TempDir(), nil)
@@ -55,7 +70,7 @@ func TestTenancy_ViewsAreIsolated(t *testing.T) {
 		{},
 		Org("acme"),
 		{Org: "acme", Project: "web"},
-		{Org: "acme", User: "z"},
+		{Org: "acme", Project: "api"},
 		Org("other"),
 	}
 	for _, p := range tenants {
@@ -82,7 +97,7 @@ func TestTenancy_ViewsAreIsolated(t *testing.T) {
 func TestTenancy_EncryptedAtRest(t *testing.T) {
 	dir := t.TempDir()
 	key := bytes.Repeat([]byte{0x7e}, 32)
-	tenants := []Principal{{}, Org("acme"), {Org: "acme", Project: "web", User: "z"}}
+	tenants := []Principal{{}, Org("acme"), {Org: "acme", Project: "web"}}
 
 	emb := embedFixture(t, dir, key)
 	for _, p := range tenants {

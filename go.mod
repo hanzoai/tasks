@@ -11,7 +11,9 @@ retract (
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hanzoai/authz v1.10.29
-	github.com/hanzoai/sqlite v0.4.0
+	github.com/hanzoai/cek v0.2.1
+	github.com/hanzoai/namespace v1.2.0
+	github.com/hanzoai/sqlite v0.5.0
 	github.com/luxfi/consensus v1.36.3
 	github.com/luxfi/log v1.5.0
 	github.com/luxfi/zap v1.2.7
