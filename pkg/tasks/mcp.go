@@ -29,37 +29,42 @@ func (e *Embedded) mcpHandler() http.Handler {
 		return http.NotFoundHandler()
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "POST required", http.StatusMethodNotAllowed)
-			return
-		}
-		var req mcpRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			mcpError(w, nil, -32700, "parse error: "+err.Error())
-			return
-		}
-		switch req.Method {
-		case "initialize":
-			mcpResult(w, req.ID, map[string]any{
-				"protocolVersion": "2025-06-18",
-				"serverInfo": map[string]any{
-					"name":    "hanzo-tasks",
-					"version": "1.40.0",
-				},
-				"capabilities": map[string]any{
-					"tools": map[string]any{},
-				},
-			})
-		case "tools/list":
-			mcpResult(w, req.ID, map[string]any{"tools": mcpTools()})
-		case "tools/call":
-			e.mcpToolCall(w, r, req)
-		case "ping":
-			mcpResult(w, req.ID, map[string]any{})
-		default:
-			mcpError(w, req.ID, -32601, "method not found: "+req.Method)
-		}
+		e.mcp(asked(r)).write(w)
 	})
+}
+
+// mcp answers one JSON-RPC 2.0 call against the MCP method surface.
+func (e *Embedded) mcp(rq call) answer {
+	if rq.method != http.MethodPost {
+		return plain(http.StatusMethodNotAllowed, "POST required")
+	}
+	var req mcpRequest
+	// A stream decode, so an empty body is a parse error rather than a call
+	// with no method.
+	if err := rq.stream(&req); err != nil {
+		return mcpError(nil, -32700, "parse error: "+err.Error())
+	}
+	switch req.Method {
+	case "initialize":
+		return mcpResult(req.ID, map[string]any{
+			"protocolVersion": "2025-06-18",
+			"serverInfo": map[string]any{
+				"name":    "hanzo-tasks",
+				"version": "1.40.0",
+			},
+			"capabilities": map[string]any{
+				"tools": map[string]any{},
+			},
+		})
+	case "tools/list":
+		return mcpResult(req.ID, map[string]any{"tools": mcpTools()})
+	case "tools/call":
+		return e.mcpToolCall(rq, req)
+	case "ping":
+		return mcpResult(req.ID, map[string]any{})
+	default:
+		return mcpError(req.ID, -32601, "method not found: "+req.Method)
+	}
 }
 
 // mcpTools is the static MCP tool catalogue. Each tool maps onto an
@@ -137,10 +142,10 @@ func mcpTools() []map[string]any {
 	}
 }
 
-func (e *Embedded) mcpToolCall(w http.ResponseWriter, r *http.Request, req mcpRequest) {
+func (e *Embedded) mcpToolCall(rq call, req mcpRequest) answer {
 	// Scope every tool call to the caller's IAM-validated org. Empty org
 	// (embedded/dev) returns the unscoped engine — same surface as today.
-	en := e.engine.As(Org(auth.OrgID(r.Context())))
+	en := e.engine.As(Org(auth.OrgID(rq.ctx)))
 	var p struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -155,88 +160,77 @@ func (e *Embedded) mcpToolCall(w http.ResponseWriter, r *http.Request, req mcpRe
 		return ""
 	}
 
-	emit := func(v any) {
+	emit := func(v any) answer {
 		text, _ := json.Marshal(v)
-		mcpResult(w, req.ID, map[string]any{
+		return mcpResult(req.ID, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": string(text)}},
 		})
 	}
-	fail := func(code int, msg string) {
-		mcpError(w, req.ID, code, msg)
+	fail := func(code int, msg string) answer {
+		return mcpError(req.ID, code, msg)
 	}
 
 	switch p.Name {
 	case "list_namespaces":
 		rows, err := en.ListNamespaces()
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(map[string]any{"namespaces": rows})
+		return emit(map[string]any{"namespaces": rows})
 	case "describe_namespace":
 		n, ok, err := en.DescribeNamespace(str("name"))
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
 		if !ok {
-			fail(-32004, "namespace not found")
-			return
+			return fail(-32004, "namespace not found")
 		}
-		emit(n)
+		return emit(n)
 	case "list_workflows":
 		rows, err := en.ListWorkflows(str("namespace"))
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(map[string]any{"executions": rows})
+		return emit(map[string]any{"executions": rows})
 	case "describe_workflow":
 		wf, ok, err := en.DescribeWorkflow(str("namespace"), str("workflow_id"), str("run_id"))
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
 		if !ok {
-			fail(-32004, "workflow not found")
-			return
+			return fail(-32004, "workflow not found")
 		}
-		emit(wf)
+		return emit(wf)
 	case "start_workflow":
 		typ := TypeRef{Name: str("workflow_type")}
 		wf, err := en.StartWorkflow(str("namespace"), str("workflow_id"), str("run_id"), typ, str("task_queue"), a["input"])
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(wf)
+		return emit(wf)
 	case "signal_workflow":
 		if err := en.SignalWorkflow(str("namespace"), str("workflow_id"), str("run_id"), str("signal_name"), a["input"]); err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(map[string]string{"status": "signaled"})
+		return emit(map[string]string{"status": "signaled"})
 	case "cancel_workflow":
 		wf, err := en.CancelWorkflow(str("namespace"), str("workflow_id"), str("run_id"))
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(wf)
+		return emit(wf)
 	case "terminate_workflow":
 		wf, err := en.TerminateWorkflow(str("namespace"), str("workflow_id"), str("run_id"))
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(wf)
+		return emit(wf)
 	case "list_schedules":
 		rows, err := en.ListSchedules(str("namespace"))
 		if err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(map[string]any{"schedules": rows})
+		return emit(map[string]any{"schedules": rows})
 	case "create_schedule":
 		s := Schedule{
 			ScheduleId: str("schedule_id"),
@@ -248,19 +242,17 @@ func (e *Embedded) mcpToolCall(w http.ResponseWriter, r *http.Request, req mcpRe
 			},
 		}
 		if err := en.CreateSchedule(s); err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(s)
+		return emit(s)
 	case "pause_schedule":
 		paused, _ := a["paused"].(bool)
 		if err := en.PauseSchedule(str("namespace"), str("schedule_id"), paused, ""); err != nil {
-			fail(-32000, err.Error())
-			return
+			return fail(-32000, err.Error())
 		}
-		emit(map[string]any{"paused": paused})
+		return emit(map[string]any{"paused": paused})
 	default:
-		fail(-32601, "unknown tool: "+p.Name)
+		return fail(-32601, "unknown tool: "+p.Name)
 	}
 }
 
@@ -272,18 +264,18 @@ type mcpRequest struct {
 	Params  any    `json:"params,omitempty"`
 }
 
-func mcpResult(w http.ResponseWriter, id any, result any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+// A JSON-RPC answer carries its outcome in the body, so both of these are 200:
+// the transport delivered the call, and `error` is the call's own verdict.
+func mcpResult(id any, result any) answer {
+	return data(nil, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
 		"result":  result,
 	})
 }
 
-func mcpError(w http.ResponseWriter, id any, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+func mcpError(id any, code int, msg string) answer {
+	return data(nil, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
 		"error":   map[string]any{"code": code, "message": msg},
