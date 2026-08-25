@@ -392,16 +392,26 @@ func (e *Embedded) Stop(ctx context.Context) error {
 // migrate accepts the same X-Org-Id-scoped identity as everything else.
 func (e *Embedded) ClusterHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/tasks/cluster", e.handleClusterStatus)
-	mux.HandleFunc("/v1/tasks/cluster/health", e.handleClusterHealth)
-	mux.HandleFunc("/v1/tasks/namespaces/", e.handleNamespaceMigrate)
+	serve := func(fn func(rq call) answer) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) { fn(asked(r)).write(w) }
+	}
+	mux.HandleFunc("/v1/tasks/cluster", serve(e.clusterStatus))
+	mux.HandleFunc("/v1/tasks/cluster/health", serve(e.clusterHealth))
+	mux.HandleFunc("/v1/tasks/namespaces/", func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/v1/tasks/namespaces/"
+		if !strings.HasPrefix(r.URL.Path, prefix) || !strings.HasSuffix(r.URL.Path, "/migrate") {
+			absent().write(w)
+			return
+		}
+		ns := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/migrate")
+		e.migrate(asked(r), ns).write(w)
+	})
 	return mux
 }
 
-func (e *Embedded) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.NotFound(w, r)
-		return
+func (e *Embedded) clusterStatus(rq call) answer {
+	if rq.method != http.MethodGet {
+		return absent()
 	}
 	type stats struct {
 		Accepted uint64 `json:"accepted"`
@@ -426,59 +436,54 @@ func (e *Embedded) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 		a, rj, to := e.repl.Stats()
 		resp["stats"] = stats{Accepted: a, Rejected: rj, Timeouts: to}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return data(nil, resp)
 }
 
-func (e *Embedded) handleClusterHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.NotFound(w, r)
-		return
+func (e *Embedded) clusterHealth(rq call) answer {
+	if rq.method != http.MethodGet {
+		return absent()
 	}
 	// Health is "in-quorum" — for the local driver always true. For
 	// quasar we treat presence of validators as proof; real
 	// out-of-quorum signal would come from the engine, which we don't
 	// drive a heartbeat against in this build.
 	if e.repl == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "down"})
-		return
+		return answer{
+			status: http.StatusServiceUnavailable,
+			ctype:  ctypeJSON,
+			body:   render(map[string]any{"status": "down"}),
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	return data(nil, map[string]any{"status": "ok"})
 }
 
-// handleNamespaceMigrate is the admin-only POST /v1/tasks/namespaces/{ns}/migrate
-// endpoint. Body: {"toNode":"<nodeId>"}. Returns the migration job.
-func (e *Embedded) handleNamespaceMigrate(w http.ResponseWriter, r *http.Request) {
-	const prefix = "/v1/tasks/namespaces/"
-	if !strings.HasPrefix(r.URL.Path, prefix) || !strings.HasSuffix(r.URL.Path, "/migrate") {
-		http.NotFound(w, r)
-		return
+// migrate is the admin-only POST /v1/tasks/namespaces/{ns}/migrate operation.
+// Body: {"toNode":"<nodeId>"}. Returns the migration job. Its refusals are
+// plain text, not the engine's JSON envelope.
+func (e *Embedded) migrate(rq call, ns string) answer {
+	if rq.method != http.MethodPost {
+		return absent()
 	}
-	if r.Method != http.MethodPost {
-		http.NotFound(w, r)
-		return
-	}
-	ns := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/migrate")
 	if ns == "" {
-		http.Error(w, "namespace required", http.StatusBadRequest)
-		return
+		return plain(http.StatusBadRequest, "namespace required")
 	}
 	var req struct {
 		ToNode string `json:"toNode"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	// A stream decode, so an EMPTY body is the error "EOF" rather than the
+	// zero value every other operation on this surface accepts.
+	if err := rq.stream(&req); err != nil {
+		return plain(http.StatusBadRequest, err.Error())
 	}
-	job, err := e.migr.Migrate(r.Context(), migration.Job{
-		Principal: Org(auth.OrgID(r.Context())).String(),
+	job, err := e.migr.Migrate(rq.ctx, migration.Job{
+		Principal: Org(auth.OrgID(rq.ctx)).String(),
 		Namespace: ns,
 		To:        req.ToNode,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return plain(http.StatusInternalServerError, err.Error())
 	}
-	writeJSON(w, http.StatusOK, job)
+	return data(nil, job)
 }
 
 func replicatorKind(r replication.Replicator) string {
@@ -493,12 +498,6 @@ func shardCount(e *Embedded) int {
 		return 0
 	}
 	return e.engine.store.mgr.OpenShardCount()
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
 }
 
 // MCPHandler returns the JSON-RPC 2.0 MCP endpoint.
@@ -561,139 +560,185 @@ func (e *Embedded) EventsHandler() http.Handler { return e.sseHandler() }
 // the validated IAM JWT (Authorization: Bearer). Client-supplied
 // identity headers are stripped before the handler runs. Empty org →
 // legacy unscoped store (embedded/dev path only).
+//
+// The operations themselves are in the handleX family below and hold no
+// net/http type: this mux and Surface's routes both reach them, so the two
+// transports answer the same bytes by construction rather than by agreement.
 func (e *Embedded) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 
-	// /v1/tasks/settings — UI bootstrap. Unauthenticated.
-	mux.HandleFunc("/v1/tasks/settings", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.NotFound(w, r)
-			return
+	serve := func(fn func(rq call, en *engine) answer) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			rq := asked(r)
+			fn(rq, e.engine.As(Org(auth.OrgID(rq.ctx)))).write(w)
 		}
-		writeOK(w, nil, settingsResponse())
-	})
+	}
+
+	// /v1/tasks/settings — UI bootstrap. Unauthenticated.
+	mux.HandleFunc("/v1/tasks/settings", serve(func(rq call, _ *engine) answer {
+		return settings(rq)
+	}))
 
 	// /v1/tasks/namespaces
-	mux.HandleFunc("/v1/tasks/namespaces", func(w http.ResponseWriter, r *http.Request) {
-		en := e.engine.As(Org(auth.OrgID(r.Context())))
-		switch r.Method {
-		case http.MethodGet:
-			rows, err := en.ListNamespaces()
-			writeOK(w, err, map[string]any{"namespaces": rows})
-		case http.MethodPost:
-			var req struct {
-				Namespace
-			}
-			if err := decode(r, &req); err != nil {
-				writeErr(w, 400, err.Error())
-				return
-			}
-			err := en.RegisterNamespace(req.Namespace)
-			writeOK(w, err, req.Namespace)
-		default:
-			http.NotFound(w, r)
-		}
-	})
+	mux.HandleFunc("/v1/tasks/namespaces", serve(namespaces))
 
 	// /v1/tasks/nexus — cross-namespace aggregate (read-only).
-	mux.HandleFunc("/v1/tasks/nexus", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.NotFound(w, r)
-			return
-		}
-		en := e.engine.As(Org(auth.OrgID(r.Context())))
-		rows, err := en.ListAllNexusEndpoints()
-		writeOK(w, err, map[string]any{"endpoints": rows})
-	})
+	mux.HandleFunc("/v1/tasks/nexus", serve(endpoints))
 
-	// /v1/tasks/namespaces/{ns}[/...]
+	// /v1/tasks/namespaces/{ns}[/...] — matched by path segment, which is what
+	// a ServeMux can express. Surface registers the same operations as routes.
 	mux.HandleFunc("/v1/tasks/namespaces/", func(w http.ResponseWriter, r *http.Request) {
-		en := e.engine.As(Org(auth.OrgID(r.Context())))
+		rq := asked(r)
+		en := e.engine.As(Org(auth.OrgID(rq.ctx)))
 		rest := strings.TrimPrefix(r.URL.Path, "/v1/tasks/namespaces/")
-		parts := strings.Split(rest, "/")
-		ns := parts[0]
-		if ns == "" {
-			http.NotFound(w, r)
-			return
-		}
-		if !validIdent(ns) {
-			writeErr(w, 400, "invalid namespace")
-			return
-		}
-		// Reject any path-traversal sentinels in the resource id slot too.
-		for _, p := range parts[1:] {
-			if !validPathSegment(p) {
-				writeErr(w, 400, "invalid path segment")
-				return
-			}
-		}
-		if len(parts) == 1 {
-			switch r.Method {
-			case http.MethodGet:
-				n, ok, err := en.DescribeNamespace(ns)
-				if err != nil {
-					writeErr(w, 500, err.Error())
-					return
-				}
-				if !ok {
-					writeErr(w, 404, "namespace not found")
-					return
-				}
-				writeOK(w, nil, n)
-			case http.MethodDelete:
-				n, err := en.DeprecateNamespace(ns)
-				if err != nil {
-					writeErr(w, 404, err.Error())
-					return
-				}
-				writeOK(w, nil, n)
-			default:
-				http.NotFound(w, r)
-			}
-			return
-		}
-		switch parts[1] {
-		case "workflows":
-			handleWorkflows(w, r, en, ns, parts[2:])
-		case "schedules":
-			handleSchedules(w, r, en, ns, parts[2:])
-		case "batches":
-			handleBatches(w, r, en, ns, parts[2:])
-		case "deployments":
-			handleDeployments(w, r, en, ns, parts[2:])
-		case "nexus":
-			handleNexus(w, r, en, ns, parts[2:])
-		case "identities":
-			handleIdentities(w, r, en, ns, parts[2:])
-		case "task-queues":
-			handleTaskQueues(w, r, en, ns, parts[2:])
-		case "workers":
-			handleWorkers(w, r, en, ns, parts[2:])
-		case "search-attributes":
-			handleSearchAttributes(w, r, en, ns, parts[2:])
-		case "metadata":
-			handleNamespaceMetadata(w, r, en, ns, parts[2:])
-		case "archival":
-			handleArchival(w, r, en, ns, parts[2:])
-		case "activities":
-			handleActivities(w, r, en, ns, parts[2:])
-		default:
-			http.NotFound(w, r)
-		}
+		below(rq, en, strings.Split(rest, "/")).write(w)
 	})
 
 	return mux
 }
 
-// ── per-resource HTTP routers ──────────────────────────────────────
+// asked reads one net/http request as an operation reads it. A body that
+// cannot be read is carried rather than raised, so it surfaces from decode —
+// where a caller has always seen it.
+func asked(r *http.Request) call {
+	defer r.Body.Close()
+	body, err := io.ReadAll(r.Body)
+	return call{ctx: r.Context(), method: r.Method, query: r.URL.Query(), body: body, unread: err}
+}
 
-func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+// ── per-resource routers ───────────────────────────────────────────
+
+// below routes one path under /v1/tasks/namespaces/, already split on "/".
+// parts[0] is the namespace and the rest names a resource within it.
+func below(rq call, en *engine, parts []string) answer {
+	ns := parts[0]
+	if ns == "" {
+		return absent()
+	}
+	if a, ok := grammar(ns, parts[1:]); !ok {
+		return a
+	}
+	if len(parts) == 1 {
+		return namespace(rq, en, ns)
+	}
+	return resource(rq, en, ns, parts[1], parts[2:])
+}
+
+// grammar enforces what path-injected values must satisfy before they reach a
+// constructed store key, and returns the refusal when they do not.
+func grammar(ns string, rest []string) (answer, bool) {
+	if !validIdent(ns) {
+		return fault(400, "invalid namespace"), false
+	}
+	// Reject any path-traversal sentinels in the resource id slot too.
+	for _, p := range rest {
+		if !validPathSegment(p) {
+			return fault(400, "invalid path segment"), false
+		}
+	}
+	return answer{}, true
+}
+
+// resource dispatches one namespace's sub-resource by name. Both transports
+// arrive here — the mux by splitting a path, Surface by matching a route.
+func resource(rq call, en *engine, ns, kind string, sub []string) answer {
+	switch kind {
+	case "workflows":
+		return handleWorkflows(rq, en, ns, sub)
+	case "schedules":
+		return handleSchedules(rq, en, ns, sub)
+	case "batches":
+		return handleBatches(rq, en, ns, sub)
+	case "deployments":
+		return handleDeployments(rq, en, ns, sub)
+	case "nexus":
+		return handleNexus(rq, en, ns, sub)
+	case "identities":
+		return handleIdentities(rq, en, ns, sub)
+	case "task-queues":
+		return handleTaskQueues(rq, en, ns, sub)
+	case "workers":
+		return handleWorkers(rq, en, ns, sub)
+	case "search-attributes":
+		return handleSearchAttributes(rq, en, ns, sub)
+	case "metadata":
+		return handleNamespaceMetadata(rq, en, ns, sub)
+	case "archival":
+		return handleArchival(rq, en, ns, sub)
+	case "activities":
+		return handleActivities(rq, en, ns, sub)
+	default:
+		return absent()
+	}
+}
+
+// settings is the UI bootstrap read at /v1/tasks/settings.
+func settings(rq call) answer {
+	if rq.method != http.MethodGet {
+		return absent()
+	}
+	return data(nil, settingsResponse())
+}
+
+// namespaces lists and registers namespaces at /v1/tasks/namespaces.
+func namespaces(rq call, en *engine) answer {
+	switch rq.method {
+	case http.MethodGet:
+		rows, err := en.ListNamespaces()
+		return data(err, map[string]any{"namespaces": rows})
+	case http.MethodPost:
+		var req struct {
+			Namespace
+		}
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
+		}
+		err := en.RegisterNamespace(req.Namespace)
+		return data(err, req.Namespace)
+	default:
+		return absent()
+	}
+}
+
+// endpoints is the cross-namespace nexus aggregate at /v1/tasks/nexus.
+func endpoints(rq call, en *engine) answer {
+	if rq.method != http.MethodGet {
+		return absent()
+	}
+	rows, err := en.ListAllNexusEndpoints()
+	return data(err, map[string]any{"endpoints": rows})
+}
+
+// namespace reads or deprecates one namespace at /v1/tasks/namespaces/{ns}.
+func namespace(rq call, en *engine, ns string) answer {
+	switch rq.method {
+	case http.MethodGet:
+		n, ok, err := en.DescribeNamespace(ns)
+		if err != nil {
+			return fault(500, err.Error())
+		}
+		if !ok {
+			return fault(404, "namespace not found")
+		}
+		return data(nil, n)
+	case http.MethodDelete:
+		n, err := en.DeprecateNamespace(ns)
+		if err != nil {
+			return fault(404, err.Error())
+		}
+		return data(nil, n)
+	default:
+		return absent()
+	}
+}
+
+func handleWorkflows(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
-		query := r.URL.Query().Get("query")
+	case len(sub) == 0 && rq.method == http.MethodGet:
+		query := rq.query.Get("query")
 		rows, err := en.ListWorkflowExecutions(ns, query)
-		writeOK(w, err, map[string]any{"executions": rows})
-	case len(sub) == 0 && r.Method == http.MethodPost:
+		return data(err, map[string]any{"executions": rows})
+	case len(sub) == 0 && rq.method == http.MethodPost:
 		var req struct {
 			WorkflowId   string  `json:"workflowId"`
 			RunId        string  `json:"runId"`
@@ -704,13 +749,12 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 			Input     any    `json:"input"`
 			RequestId string `json:"requestId"`
 		}
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		wf, err := en.StartWorkflowWithRequestID(ns, req.WorkflowId, req.RunId, req.WorkflowType, req.TaskQueue.Name, req.Input, req.RequestId)
-		writeOK(w, err, wf)
-	case len(sub) == 1 && sub[0] == "signal-with-start" && r.Method == http.MethodPost:
+		return data(err, wf)
+	case len(sub) == 1 && sub[0] == "signal-with-start" && rq.method == http.MethodPost:
 		var req struct {
 			WorkflowId   string  `json:"workflowId"`
 			RunId        string  `json:"runId"`
@@ -723,119 +767,109 @@ func handleWorkflows(w http.ResponseWriter, r *http.Request, en *engine, ns stri
 			SignalPayload any    `json:"signalPayload"`
 			RequestId     string `json:"requestId"`
 		}
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		if req.SignalName == "" {
-			writeErr(w, 400, "signalName required")
-			return
+			return fault(400, "signalName required")
 		}
 		wf, err := en.SignalWithStartWorkflow(ns, req.WorkflowId, req.RunId, req.WorkflowType, req.TaskQueue.Name, req.Input, req.SignalName, req.SignalPayload, req.RequestId)
-		writeOK(w, err, wf)
-	case len(sub) == 1 && r.Method == http.MethodGet:
-		runId := r.URL.Query().Get("execution.runId")
+		return data(err, wf)
+	case len(sub) == 1 && rq.method == http.MethodGet:
+		runId := rq.query.Get("execution.runId")
 		if runId == "" {
-			runId = r.URL.Query().Get("runId")
+			runId = rq.query.Get("runId")
 		}
 		wf, ok, err := en.DescribeWorkflow(ns, sub[0], runId)
 		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
+			return fault(500, err.Error())
 		}
 		if !ok {
-			writeErr(w, 404, "workflow not found")
-			return
+			return fault(404, "workflow not found")
 		}
-		writeOK(w, nil, map[string]any{
+		return data(nil, map[string]any{
 			"workflowExecutionInfo": wf,
 			"executionConfig": map[string]any{
 				"taskQueue": map[string]string{"name": wf.TaskQueue},
 			},
 		})
-	case len(sub) == 2 && sub[1] == "cancel" && r.Method == http.MethodPost:
+	case len(sub) == 2 && sub[1] == "cancel" && rq.method == http.MethodPost:
 		var req struct {
 			Reason   string `json:"reason"`
 			Identity string `json:"identity"`
 		}
-		_ = decode(r, &req)
-		wf, err := en.CancelWorkflowWithReason(ns, sub[0], r.URL.Query().Get("runId"), req.Reason, req.Identity)
-		writeOK(w, err, wf)
-	case len(sub) == 2 && sub[1] == "terminate" && r.Method == http.MethodPost:
+		_ = rq.decode(&req)
+		wf, err := en.CancelWorkflowWithReason(ns, sub[0], rq.query.Get("runId"), req.Reason, req.Identity)
+		return data(err, wf)
+	case len(sub) == 2 && sub[1] == "terminate" && rq.method == http.MethodPost:
 		var req struct {
 			Reason   string `json:"reason"`
 			Identity string `json:"identity"`
 		}
-		_ = decode(r, &req)
-		wf, err := en.TerminateWorkflowWithReason(ns, sub[0], r.URL.Query().Get("runId"), req.Reason, req.Identity)
-		writeOK(w, err, wf)
-	case len(sub) == 2 && sub[1] == "signal" && r.Method == http.MethodPost:
+		_ = rq.decode(&req)
+		wf, err := en.TerminateWorkflowWithReason(ns, sub[0], rq.query.Get("runId"), req.Reason, req.Identity)
+		return data(err, wf)
+	case len(sub) == 2 && sub[1] == "signal" && rq.method == http.MethodPost:
 		var req struct {
 			Name    string `json:"name"`
 			Payload any    `json:"payload"`
 		}
-		_ = decode(r, &req)
-		err := en.SignalWorkflow(ns, sub[0], r.URL.Query().Get("runId"), req.Name, req.Payload)
-		writeOK(w, err, map[string]string{"status": "signaled"})
-	case len(sub) == 2 && sub[1] == "history" && r.Method == http.MethodGet:
-		runId := r.URL.Query().Get("runId")
-		afterID := parseInt64(r.URL.Query().Get("after"))
-		pageSize := int(parseInt64(r.URL.Query().Get("pageSize")))
-		reverse := r.URL.Query().Get("reverse") == "true"
+		_ = rq.decode(&req)
+		err := en.SignalWorkflow(ns, sub[0], rq.query.Get("runId"), req.Name, req.Payload)
+		return data(err, map[string]string{"status": "signaled"})
+	case len(sub) == 2 && sub[1] == "history" && rq.method == http.MethodGet:
+		runId := rq.query.Get("runId")
+		afterID := parseInt64(rq.query.Get("after"))
+		pageSize := int(parseInt64(rq.query.Get("pageSize")))
+		reverse := rq.query.Get("reverse") == "true"
 		events, next, err := en.GetWorkflowHistory(ns, sub[0], runId, afterID, pageSize, reverse)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, map[string]any{"events": events, "nextCursor": next})
-	case len(sub) == 2 && sub[1] == "query" && r.Method == http.MethodPost:
+		return data(nil, map[string]any{"events": events, "nextCursor": next})
+	case len(sub) == 2 && sub[1] == "query" && rq.method == http.MethodPost:
 		var req struct {
 			QueryType string `json:"queryType"`
 			Args      any    `json:"args"`
 		}
-		_ = decode(r, &req)
-		runId := r.URL.Query().Get("runId")
-		out, err := en.QueryWorkflowCtx(r.Context(), ns, sub[0], runId, req.QueryType, req.Args)
+		_ = rq.decode(&req)
+		runId := rq.query.Get("runId")
+		out, err := en.QueryWorkflowCtx(rq.ctx, ns, sub[0], runId, req.QueryType, req.Args)
 		if err == ErrNoWorkersSubscribed {
-			writeErr(w, 503, err.Error())
-			return
+			return fault(503, err.Error())
 		}
 		if err != nil && strings.Contains(err.Error(), "timeout") {
-			writeErr(w, 504, err.Error())
-			return
+			return fault(504, err.Error())
 		}
-		writeOK(w, err, map[string]any{"queryResult": out})
-	case len(sub) == 2 && sub[1] == "metadata" && r.Method == http.MethodPost:
+		return data(err, map[string]any{"queryResult": out})
+	case len(sub) == 2 && sub[1] == "metadata" && rq.method == http.MethodPost:
 		var req WorkflowUserMetadata
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
-		runId := r.URL.Query().Get("runId")
+		runId := rq.query.Get("runId")
 		wf, err := en.UpdateWorkflowMetadata(ns, sub[0], runId, req)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, wf)
-	case len(sub) == 2 && sub[1] == "executions" && r.Method == http.MethodGet:
+		return data(nil, wf)
+	case len(sub) == 2 && sub[1] == "executions" && rq.method == http.MethodGet:
 		rows, err := en.ListWorkflowChain(ns, sub[0])
-		writeOK(w, err, map[string]any{"executions": rows})
-	case len(sub) == 2 && sub[1] == "reset" && r.Method == http.MethodPost:
+		return data(err, map[string]any{"executions": rows})
+	case len(sub) == 2 && sub[1] == "reset" && rq.method == http.MethodPost:
 		var req struct {
 			RunId    string `json:"runId"`
 			EventId  int64  `json:"eventId"`
 			Reason   string `json:"reason"`
 			Identity string `json:"identity"`
 		}
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		wf, err := en.ResetWorkflow(ns, sub[0], req.RunId, req.EventId, req.Reason, req.Identity)
-		writeOK(w, err, wf)
+		return data(err, wf)
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
@@ -895,23 +929,21 @@ func parseInt64(s string) int64 {
 // is no separate "task queue" object in storage yet; queues live as
 // strings on workflows. Aggregating them here is cheap and matches what
 // the upstream UI shows on first paint.
-func handleTaskQueues(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleTaskQueues(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
+	case len(sub) == 0 && rq.method == http.MethodGet:
 		rows, err := en.ListWorkflows(ns)
 		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
+			return fault(500, err.Error())
 		}
-		writeOK(w, nil, map[string]any{"taskQueues": aggregateTaskQueues(rows)})
-	case len(sub) == 1 && r.Method == http.MethodGet:
+		return data(nil, map[string]any{"taskQueues": aggregateTaskQueues(rows)})
+	case len(sub) == 1 && rq.method == http.MethodGet:
 		rows, err := en.ListWorkflows(ns)
 		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
+			return fault(500, err.Error())
 		}
-		writeOK(w, nil, taskQueueDetail(rows, sub[0]))
-	case len(sub) == 2 && sub[1] == "workers" && r.Method == http.MethodGet:
+		return data(nil, taskQueueDetail(rows, sub[0]))
+	case len(sub) == 2 && sub[1] == "workers" && rq.method == http.MethodGet:
 		// Filter the registry by task queue name (sub[0]).
 		all := en.workers.List(ns)
 		out := make([]Worker, 0, len(all))
@@ -920,12 +952,12 @@ func handleTaskQueues(w http.ResponseWriter, r *http.Request, en *engine, ns str
 				out = append(out, w)
 			}
 		}
-		writeOK(w, nil, map[string]any{"workers": out})
-	case len(sub) == 2 && sub[1] == "partitions" && r.Method == http.MethodGet:
+		return data(nil, map[string]any{"workers": out})
+	case len(sub) == 2 && sub[1] == "partitions" && rq.method == http.MethodGet:
 		// Placeholder for the real partition manager. The engine does
 		// not shard task queues yet, so every queue reports as a single
 		// partition with zero backlog.
-		writeOK(w, nil, map[string]any{
+		return data(nil, map[string]any{
 			"partitions": []map[string]any{{
 				"key":         0,
 				"backlogAge":  "0s",
@@ -933,38 +965,36 @@ func handleTaskQueues(w http.ResponseWriter, r *http.Request, en *engine, ns str
 			}},
 		})
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
 // handleWorkers — namespace-wide worker listing. Stub registry: workers
 // self-register via Embedded.RegisterWorker on first poll/heartbeat.
-func handleWorkers(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleWorkers(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
-		writeOK(w, nil, map[string]any{"workers": en.workers.List(ns)})
-	case len(sub) == 1 && r.Method == http.MethodGet:
+	case len(sub) == 0 && rq.method == http.MethodGet:
+		return data(nil, map[string]any{"workers": en.workers.List(ns)})
+	case len(sub) == 1 && rq.method == http.MethodGet:
 		wk, ok := en.workers.Get(ns, sub[0])
 		if !ok {
-			writeErr(w, 404, "worker not found")
-			return
+			return fault(404, "worker not found")
 		}
-		writeOK(w, nil, wk)
+		return data(nil, wk)
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
 // handleArchival — archival is disabled. UI renders the documented
 // "disabled" body. When archival lands, switch to engine.QueryArchival
 // with cursor pagination.
-func handleArchival(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
-	if len(sub) != 0 || r.Method != http.MethodGet {
-		http.NotFound(w, r)
-		return
+func handleArchival(rq call, en *engine, ns string, sub []string) answer {
+	if len(sub) != 0 || rq.method != http.MethodGet {
+		return absent()
 	}
-	body, err := en.QueryArchival(ns, r.URL.Query().Get("query"), r.URL.Query().Get("nextPageToken"))
-	writeOK(w, err, body)
+	body, err := en.QueryArchival(ns, rq.query.Get("query"), rq.query.Get("nextPageToken"))
+	return data(err, body)
 }
 
 // settingsResponse builds the UI bootstrap response.
@@ -1087,277 +1117,242 @@ func taskQueueDetail(rows []WorkflowExecution, queue string) map[string]any {
 	}
 }
 
-func handleSchedules(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleSchedules(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
+	case len(sub) == 0 && rq.method == http.MethodGet:
 		rows, err := en.ListSchedules(ns)
-		writeOK(w, err, map[string]any{"schedules": rows})
-	case len(sub) == 0 && r.Method == http.MethodPost:
+		return data(err, map[string]any{"schedules": rows})
+	case len(sub) == 0 && rq.method == http.MethodPost:
 		var req Schedule
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		req.Namespace = ns
 		err := en.CreateSchedule(req)
-		writeOK(w, err, req)
-	case len(sub) == 1 && r.Method == http.MethodGet:
+		return data(err, req)
+	case len(sub) == 1 && rq.method == http.MethodGet:
 		s, ok, err := en.DescribeSchedule(ns, sub[0])
 		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
+			return fault(500, err.Error())
 		}
 		if !ok {
-			writeErr(w, 404, "schedule not found")
-			return
+			return fault(404, "schedule not found")
 		}
-		writeOK(w, nil, s)
-	case len(sub) == 1 && r.Method == http.MethodPost:
+		return data(nil, s)
+	case len(sub) == 1 && rq.method == http.MethodPost:
 		var req Schedule
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		out, err := en.UpdateSchedule(ns, sub[0], req)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, out)
-	case len(sub) == 1 && r.Method == http.MethodDelete:
+		return data(nil, out)
+	case len(sub) == 1 && rq.method == http.MethodDelete:
 		err := en.DeleteSchedule(ns, sub[0])
-		writeOK(w, err, map[string]string{"status": "deleted"})
-	case len(sub) == 2 && sub[1] == "trigger" && r.Method == http.MethodPost:
+		return data(err, map[string]string{"status": "deleted"})
+	case len(sub) == 2 && sub[1] == "trigger" && rq.method == http.MethodPost:
 		var req struct {
 			RequestId     string `json:"requestId"`
 			OverlapPolicy string `json:"overlapPolicy"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		wf, err := en.TriggerSchedule(ns, sub[0], req.RequestId)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, map[string]any{"status": "triggered", "execution": wf})
-	case len(sub) == 2 && sub[1] == "matching-times" && r.Method == http.MethodGet:
-		from := parseTimeParam(r.URL.Query().Get("from"), r.URL.Query().Get("start"), time.Now().UTC())
-		to := parseTimeParam(r.URL.Query().Get("to"), r.URL.Query().Get("end"), from.Add(24*time.Hour))
+		return data(nil, map[string]any{"status": "triggered", "execution": wf})
+	case len(sub) == 2 && sub[1] == "matching-times" && rq.method == http.MethodGet:
+		from := parseTimeParam(rq.query.Get("from"), rq.query.Get("start"), time.Now().UTC())
+		to := parseTimeParam(rq.query.Get("to"), rq.query.Get("end"), from.Add(24*time.Hour))
 		times, err := en.ScheduleMatchingTimes(ns, sub[0], from, to)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
 		out := make([]string, len(times))
 		for i, t := range times {
 			out[i] = t.UTC().Format(time.RFC3339)
 		}
-		writeOK(w, nil, map[string]any{"matchingTimes": out})
-	case len(sub) == 2 && sub[1] == "pause" && r.Method == http.MethodPost:
+		return data(nil, map[string]any{"matchingTimes": out})
+	case len(sub) == 2 && sub[1] == "pause" && rq.method == http.MethodPost:
 		var req struct {
 			Note string `json:"note"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		err := en.PauseSchedule(ns, sub[0], true, req.Note)
-		writeOK(w, err, map[string]string{"status": "paused"})
-	case len(sub) == 2 && sub[1] == "unpause" && r.Method == http.MethodPost:
+		return data(err, map[string]string{"status": "paused"})
+	case len(sub) == 2 && sub[1] == "unpause" && rq.method == http.MethodPost:
 		err := en.PauseSchedule(ns, sub[0], false, "")
-		writeOK(w, err, map[string]string{"status": "running"})
+		return data(err, map[string]string{"status": "running"})
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
-func handleBatches(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleBatches(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
+	case len(sub) == 0 && rq.method == http.MethodGet:
 		rows, err := en.ListBatches(ns)
-		writeOK(w, err, map[string]any{"batches": rows})
-	case len(sub) == 0 && r.Method == http.MethodPost:
+		return data(err, map[string]any{"batches": rows})
+	case len(sub) == 0 && rq.method == http.MethodPost:
 		var req BatchOperation
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		req.Namespace = ns
 		b, err := en.StartBatch(req)
-		writeOK(w, err, b)
-	case len(sub) == 1 && r.Method == http.MethodGet:
+		return data(err, b)
+	case len(sub) == 1 && rq.method == http.MethodGet:
 		b, ok, err := en.DescribeBatch(ns, sub[0])
 		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
+			return fault(500, err.Error())
 		}
 		if !ok {
-			writeErr(w, 404, "batch not found")
-			return
+			return fault(404, "batch not found")
 		}
-		writeOK(w, nil, b)
-	case len(sub) == 2 && sub[1] == "terminate" && r.Method == http.MethodPost:
+		return data(nil, b)
+	case len(sub) == 2 && sub[1] == "terminate" && rq.method == http.MethodPost:
 		var req struct {
 			Reason   string `json:"reason"`
 			Identity string `json:"identity"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		b, err := en.TerminateBatch(ns, sub[0], req.Reason, req.Identity)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, b)
+		return data(nil, b)
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
 // handleSearchAttributes — POST adds, GET lists, DELETE removes by name.
-func handleSearchAttributes(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
-	if len(sub) == 1 && r.Method == http.MethodDelete {
+func handleSearchAttributes(rq call, en *engine, ns string, sub []string) answer {
+	if len(sub) == 1 && rq.method == http.MethodDelete {
 		if err := en.RemoveSearchAttribute(ns, sub[0]); err != nil {
 			if strings.Contains(err.Error(), "not registered") {
-				writeErr(w, 404, err.Error())
-				return
+				return fault(404, err.Error())
 			}
-			writeErr(w, 400, err.Error())
-			return
+			return fault(400, err.Error())
 		}
-		writeOK(w, nil, map[string]string{"status": "removed"})
-		return
+		return data(nil, map[string]string{"status": "removed"})
 	}
 	if len(sub) != 0 {
-		http.NotFound(w, r)
-		return
+		return absent()
 	}
-	switch r.Method {
+	switch rq.method {
 	case http.MethodGet:
 		rows, err := en.ListSearchAttributes(ns)
-		writeOK(w, err, map[string]any{"searchAttributes": rows})
+		return data(err, map[string]any{"searchAttributes": rows})
 	case http.MethodPost:
 		var req SearchAttribute
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		if err := en.AddSearchAttribute(ns, req); err != nil {
 			if strings.Contains(err.Error(), "already exists") {
-				writeErr(w, 409, err.Error())
-				return
+				return fault(409, err.Error())
 			}
 			if strings.Contains(err.Error(), "not registered") {
-				writeErr(w, 404, err.Error())
-				return
+				return fault(404, err.Error())
 			}
-			writeErr(w, 400, err.Error())
-			return
+			return fault(400, err.Error())
 		}
-		writeOK(w, nil, req)
+		return data(nil, req)
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
 // handleNamespaceMetadata — POST patches namespace metadata.
-func handleNamespaceMetadata(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
-	if len(sub) != 0 || r.Method != http.MethodPost {
-		http.NotFound(w, r)
-		return
+func handleNamespaceMetadata(rq call, en *engine, ns string, sub []string) answer {
+	if len(sub) != 0 || rq.method != http.MethodPost {
+		return absent()
 	}
 	var req NamespaceMetadataPatch
-	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
-		return
+	if err := rq.decode(&req); err != nil {
+		return fault(400, err.Error())
 	}
 	n, err := en.UpdateNamespaceMetadata(ns, req)
 	if err != nil {
 		if strings.Contains(err.Error(), "not registered") {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeErr(w, 400, err.Error())
-		return
+		return fault(400, err.Error())
 	}
-	writeOK(w, nil, n)
+	return data(nil, n)
 }
 
-func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleDeployments(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
+	case len(sub) == 0 && rq.method == http.MethodGet:
 		rows, err := en.ListDeployments(ns)
-		writeOK(w, err, map[string]any{"deployments": rows})
-	case len(sub) == 0 && r.Method == http.MethodPost:
+		return data(err, map[string]any{"deployments": rows})
+	case len(sub) == 0 && rq.method == http.MethodPost:
 		var req struct {
 			Name           string `json:"name"`
 			Description    string `json:"description"`
 			OwnerEmail     string `json:"ownerEmail"`
 			DefaultCompute string `json:"defaultCompute"`
 		}
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		d, err := en.CreateDeployment(ns, req.Name, req.Description, req.OwnerEmail, req.DefaultCompute)
 		if err != nil {
 			if strings.Contains(err.Error(), "already exists") {
-				writeErr(w, 409, err.Error())
-				return
+				return fault(409, err.Error())
 			}
-			writeErr(w, 400, err.Error())
-			return
+			return fault(400, err.Error())
 		}
-		writeOK(w, nil, d)
-	case len(sub) == 1 && r.Method == http.MethodGet:
+		return data(nil, d)
+	case len(sub) == 1 && rq.method == http.MethodGet:
 		d, ok, err := en.DescribeDeployment(ns, sub[0])
 		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
+			return fault(500, err.Error())
 		}
 		if !ok {
-			writeErr(w, 404, "deployment not found")
-			return
+			return fault(404, "deployment not found")
 		}
-		writeOK(w, nil, d)
-	case len(sub) == 1 && r.Method == http.MethodPost:
+		return data(nil, d)
+	case len(sub) == 1 && rq.method == http.MethodPost:
 		var req DeploymentPatch
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		d, err := en.UpdateDeployment(ns, sub[0], req)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, d)
-	case len(sub) == 1 && r.Method == http.MethodDelete:
-		force := r.URL.Query().Get("force") == "true"
+		return data(nil, d)
+	case len(sub) == 1 && rq.method == http.MethodDelete:
+		force := rq.query.Get("force") == "true"
 		err := en.DeleteDeployment(ns, sub[0], force)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
-				writeErr(w, 404, err.Error())
-				return
+				return fault(404, err.Error())
 			}
-			writeErr(w, 409, err.Error())
-			return
+			return fault(409, err.Error())
 		}
-		writeOK(w, nil, map[string]string{"status": "deleted"})
-	case len(sub) == 2 && sub[1] == "set-current" && r.Method == http.MethodPost:
+		return data(nil, map[string]string{"status": "deleted"})
+	case len(sub) == 2 && sub[1] == "set-current" && rq.method == http.MethodPost:
 		var req struct {
 			BuildId string `json:"buildId"`
 		}
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		d, err := en.SetCurrentDeploymentVersion(ns, sub[0], req.BuildId)
 		if err != nil {
 			if strings.Contains(err.Error(), "not in deployment") {
-				writeErr(w, 400, err.Error())
-				return
+				return fault(400, err.Error())
 			}
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, d)
-	case len(sub) == 2 && sub[1] == "versions" && r.Method == http.MethodPost:
+		return data(nil, d)
+	case len(sub) == 2 && sub[1] == "versions" && rq.method == http.MethodPost:
 		var req struct {
 			BuildId     string            `json:"buildId"`
 			Description string            `json:"description"`
@@ -1365,70 +1360,61 @@ func handleDeployments(w http.ResponseWriter, r *http.Request, en *engine, ns st
 			Image       string            `json:"image"`
 			Env         map[string]string `json:"env"`
 		}
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		v, err := en.CreateVersion(ns, sub[0], req.BuildId, req.Description, req.Compute, req.Image, req.Env)
 		if err != nil {
 			if strings.Contains(err.Error(), "already exists") {
-				writeErr(w, 409, err.Error())
-				return
+				return fault(409, err.Error())
 			}
 			if strings.Contains(err.Error(), "not found") {
-				writeErr(w, 404, err.Error())
-				return
+				return fault(404, err.Error())
 			}
-			writeErr(w, 400, err.Error())
-			return
+			return fault(400, err.Error())
 		}
-		writeOK(w, nil, v)
-	case len(sub) == 3 && sub[1] == "versions" && r.Method == http.MethodPost:
+		return data(nil, v)
+	case len(sub) == 3 && sub[1] == "versions" && rq.method == http.MethodPost:
 		var req DeploymentVersionPatch
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		v, err := en.UpdateVersion(ns, sub[0], sub[2], req)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, v)
-	case len(sub) == 3 && sub[1] == "versions" && r.Method == http.MethodDelete:
+		return data(nil, v)
+	case len(sub) == 3 && sub[1] == "versions" && rq.method == http.MethodDelete:
 		d, err := en.DeleteDeploymentVersion(ns, sub[0], sub[2])
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, d)
-	case len(sub) == 4 && sub[1] == "versions" && sub[3] == "validate" && r.Method == http.MethodPost:
+		return data(nil, d)
+	case len(sub) == 4 && sub[1] == "versions" && sub[3] == "validate" && rq.method == http.MethodPost:
 		res, err := en.ValidateVersion(ns, sub[0], sub[2])
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, res)
+		return data(nil, res)
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
 // handleActivities — standalone activities engine.
-func handleActivities(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleActivities(rq call, en *engine, ns string, sub []string) answer {
 	for _, s := range sub {
 		if s == "" {
-			http.NotFound(w, r)
-			return
+			return absent()
 		}
 	}
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
-		cursor := r.URL.Query().Get("cursor")
-		pageSize := int(parseInt64(r.URL.Query().Get("pageSize")))
+	case len(sub) == 0 && rq.method == http.MethodGet:
+		cursor := rq.query.Get("cursor")
+		pageSize := int(parseInt64(rq.query.Get("pageSize")))
 		rows, next, err := en.ListActivities(ns, cursor, pageSize)
-		writeOK(w, err, map[string]any{"activities": rows, "nextCursor": next})
-	case len(sub) == 0 && r.Method == http.MethodPost:
+		return data(err, map[string]any{"activities": rows, "nextCursor": next})
+	case len(sub) == 0 && rq.method == http.MethodPost:
 		var req struct {
 			ActivityId             string       `json:"activityId"`
 			RunId                  string       `json:"runId"`
@@ -1443,150 +1429,138 @@ func handleActivities(w http.ResponseWriter, r *http.Request, en *engine, ns str
 			Identity               string       `json:"identity"`
 			RequestId              string       `json:"requestId"`
 		}
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		a, err := en.StartActivity(ns, req.ActivityId, req.RunId, req.ActivityType, req.TaskQueue, req.Input, req.RetryPolicy, req.ScheduleToCloseTimeout, req.ScheduleToStartTimeout, req.StartToCloseTimeout, req.HeartbeatTimeout, req.Identity, req.RequestId)
 		if err != nil {
-			writeErr(w, 400, err.Error())
-			return
+			return fault(400, err.Error())
 		}
-		writeOK(w, nil, a)
-	case len(sub) == 1 && sub[0] == "claim" && r.Method == http.MethodPost:
+		return data(nil, a)
+	case len(sub) == 1 && sub[0] == "claim" && rq.method == http.MethodPost:
 		var req struct {
 			TaskQueue    string `json:"taskQueue"`
 			Identity     string `json:"identity"`
 			LeaseSeconds int    `json:"leaseSeconds"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		a, ok, err := en.ClaimNextActivity(ns, req.TaskQueue, req.Identity, time.Duration(req.LeaseSeconds)*time.Second)
 		if err != nil {
-			writeErr(w, 400, err.Error())
-			return
+			return fault(400, err.Error())
 		}
 		if !ok {
-			w.WriteHeader(http.StatusNoContent)
-			return
+			return empty(http.StatusNoContent)
 		}
-		writeOK(w, nil, a)
-	case len(sub) == 2 && r.Method == http.MethodGet:
+		return data(nil, a)
+	case len(sub) == 2 && rq.method == http.MethodGet:
 		a, ok, err := en.DescribeActivity(ns, sub[0], sub[1])
 		if err != nil {
-			writeErr(w, 500, err.Error())
-			return
+			return fault(500, err.Error())
 		}
 		if !ok {
-			writeErr(w, 404, "activity not found")
-			return
+			return fault(404, "activity not found")
 		}
-		writeOK(w, nil, a)
-	case len(sub) == 3 && sub[2] == "cancel" && r.Method == http.MethodPost:
+		return data(nil, a)
+	case len(sub) == 3 && sub[2] == "cancel" && rq.method == http.MethodPost:
 		var req struct {
 			Reason   string `json:"reason"`
 			Identity string `json:"identity"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		err := en.CancelActivity(ns, sub[0], sub[1], req.Reason, req.Identity)
-		writeActivityResult(w, en, ns, sub[0], sub[1], err)
-	case len(sub) == 3 && sub[2] == "complete" && r.Method == http.MethodPost:
+		return activityResult(en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "complete" && rq.method == http.MethodPost:
 		var req struct {
 			Result   any    `json:"result"`
 			Identity string `json:"identity"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		err := en.CompleteActivity(ns, sub[0], sub[1], req.Result, req.Identity)
-		writeActivityResult(w, en, ns, sub[0], sub[1], err)
-	case len(sub) == 3 && sub[2] == "fail" && r.Method == http.MethodPost:
+		return activityResult(en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "fail" && rq.method == http.MethodPost:
 		var req struct {
 			Cause    string `json:"cause"`
 			Identity string `json:"identity"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		err := en.FailActivity(ns, sub[0], sub[1], req.Cause, req.Identity)
-		writeActivityResult(w, en, ns, sub[0], sub[1], err)
-	case len(sub) == 3 && sub[2] == "heartbeat" && r.Method == http.MethodPost:
+		return activityResult(en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "heartbeat" && rq.method == http.MethodPost:
 		var req struct {
 			Details any `json:"details"`
 		}
-		_ = decode(r, &req)
+		_ = rq.decode(&req)
 		err := en.HeartbeatActivity(ns, sub[0], sub[1], req.Details)
-		writeActivityResult(w, en, ns, sub[0], sub[1], err)
-	case len(sub) == 3 && sub[2] == "history" && r.Method == http.MethodGet:
-		afterID := parseInt64(r.URL.Query().Get("after"))
-		pageSize := int(parseInt64(r.URL.Query().Get("pageSize")))
-		reverse := r.URL.Query().Get("reverse") == "true"
+		return activityResult(en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "history" && rq.method == http.MethodGet:
+		afterID := parseInt64(rq.query.Get("after"))
+		pageSize := int(parseInt64(rq.query.Get("pageSize")))
+		reverse := rq.query.Get("reverse") == "true"
 		events, next, err := en.GetActivityHistory(ns, sub[0], sub[1], afterID, pageSize, reverse)
 		if err != nil {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
-		writeOK(w, nil, map[string]any{"events": events, "nextCursor": next})
+		return data(nil, map[string]any{"events": events, "nextCursor": next})
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
-// writeActivityResult maps engine errors to HTTP codes for the
-// activity lifecycle handlers and writes the refreshed activity body.
-func writeActivityResult(w http.ResponseWriter, en *engine, ns, activityID, runID string, err error) {
+// activityResult maps engine errors onto statuses for the activity lifecycle
+// operations and answers with the refreshed activity.
+func activityResult(en *engine, ns, activityID, runID string, err error) answer {
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErr(w, 404, err.Error())
-			return
+			return fault(404, err.Error())
 		}
 		if strings.Contains(err.Error(), "terminal") {
-			writeErr(w, 409, err.Error())
-			return
+			return fault(409, err.Error())
 		}
-		writeErr(w, 400, err.Error())
-		return
+		return fault(400, err.Error())
 	}
 	a, _, _ := en.DescribeActivity(ns, activityID, runID)
-	writeOK(w, nil, a)
+	return data(nil, a)
 }
 
-func handleNexus(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleNexus(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
+	case len(sub) == 0 && rq.method == http.MethodGet:
 		rows, err := en.ListNexusEndpoints(ns)
-		writeOK(w, err, map[string]any{"endpoints": rows})
-	case len(sub) == 0 && r.Method == http.MethodPost:
+		return data(err, map[string]any{"endpoints": rows})
+	case len(sub) == 0 && rq.method == http.MethodPost:
 		var req NexusEndpoint
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		req.Namespace = ns
 		err := en.CreateNexusEndpoint(req)
-		writeOK(w, err, req)
-	case len(sub) == 1 && r.Method == http.MethodDelete:
+		return data(err, req)
+	case len(sub) == 1 && rq.method == http.MethodDelete:
 		err := en.DeleteNexusEndpoint(ns, sub[0])
-		writeOK(w, err, map[string]string{"status": "deleted"})
+		return data(err, map[string]string{"status": "deleted"})
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
-func handleIdentities(w http.ResponseWriter, r *http.Request, en *engine, ns string, sub []string) {
+func handleIdentities(rq call, en *engine, ns string, sub []string) answer {
 	switch {
-	case len(sub) == 0 && r.Method == http.MethodGet:
+	case len(sub) == 0 && rq.method == http.MethodGet:
 		rows, err := en.ListIdentities(ns)
-		writeOK(w, err, map[string]any{"identities": rows})
-	case len(sub) == 0 && r.Method == http.MethodPost:
+		return data(err, map[string]any{"identities": rows})
+	case len(sub) == 0 && rq.method == http.MethodPost:
 		var req Identity
-		if err := decode(r, &req); err != nil {
-			writeErr(w, 400, err.Error())
-			return
+		if err := rq.decode(&req); err != nil {
+			return fault(400, err.Error())
 		}
 		req.Namespace = ns
 		err := en.GrantIdentity(req)
-		writeOK(w, err, req)
-	case len(sub) == 1 && r.Method == http.MethodDelete:
+		return data(err, req)
+	case len(sub) == 1 && rq.method == http.MethodDelete:
 		err := en.RevokeIdentity(ns, sub[0])
-		writeOK(w, err, map[string]string{"status": "revoked"})
+		return data(err, map[string]string{"status": "revoked"})
 	default:
-		http.NotFound(w, r)
+		return absent()
 	}
 }
 
@@ -2305,34 +2279,4 @@ func envelope(body []byte, status uint32, errMsg string) (*zap.Message, error) {
 	obj.SetBytes(envelopeError, []byte(errMsg))
 	obj.FinishAsRoot()
 	return zap.Parse(b.Finish())
-}
-
-// ── HTTP helpers ────────────────────────────────────────────────────
-
-func decode(r *http.Request, v any) error {
-	defer r.Body.Close()
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return err
-	}
-	if len(body) == 0 {
-		return nil
-	}
-	return json.Unmarshal(body, v)
-}
-
-func writeOK(w http.ResponseWriter, err error, body any) {
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeErr(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": msg, "code": code})
 }
