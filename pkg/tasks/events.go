@@ -11,8 +11,10 @@
 package tasks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -89,50 +91,67 @@ func (b *broker) publish(e Event) {
 	}
 }
 
+// eventHeaders are the four an event stream carries, in the order the browser
+// reads them. Both transports set exactly these before the first frame.
+var eventHeaders = [][2]string{
+	{"Content-Type", "text/event-stream"},
+	{"Cache-Control", "no-cache"},
+	{"Connection", "keep-alive"},
+	{"X-Accel-Buffering", "no"},
+}
+
 // sseHandler streams Events as text/event-stream. Disconnects unsubscribe.
 func (e *Embedded) sseHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			plain(http.StatusInternalServerError, "streaming unsupported").write(w)
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
+		for _, h := range eventHeaders {
+			w.Header().Set(h[0], h[1])
+		}
+		e.feed(r.Context(), auth.OrgID(r.Context()), w, func() error { flusher.Flush(); return nil })
+	})
+}
 
-		// Hello frame so clients know the stream is live.
-		fmt.Fprintf(w, ": hanzo-tasks event stream\n\n")
-		flusher.Flush()
+// feed writes the engine's event stream to w until ctx ends, the subscription
+// closes, or the client stops reading. org "" sees the full unscoped firehose
+// (embedded/dev); otherwise only events tagged with that tenant. flush pushes
+// each frame and reports a connection that can no longer take one.
+func (e *Embedded) feed(ctx context.Context, org string, w io.Writer, flush func() error) {
+	// Hello frame so clients know the stream is live.
+	if _, err := io.WriteString(w, ": hanzo-tasks event stream\n\n"); err != nil {
+		return
+	}
+	if flush() != nil {
+		return
+	}
 
-		id, ch := e.engine.broker.subscribe()
-		defer e.engine.broker.unsubscribe(id)
+	id, ch := e.engine.broker.subscribe()
+	defer e.engine.broker.unsubscribe(id)
 
-		// Per-tenant filter: when the caller authenticated, only deliver
-		// events tagged with their org. Empty caller-org (embedded/dev)
-		// sees the full unscoped firehose — same surface as today.
-		callerOrg := auth.OrgID(r.Context())
-
-		ctx := r.Context()
-		for {
-			select {
-			case <-ctx.Done():
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
 				return
-			case ev, ok := <-ch:
-				if !ok {
-					return
-				}
-				if callerOrg != "" && ev.OrgID != callerOrg {
-					continue
-				}
-				body, err := json.Marshal(ev)
-				if err != nil {
-					continue
-				}
-				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, body)
-				flusher.Flush()
+			}
+			if org != "" && ev.OrgID != org {
+				continue
+			}
+			body, err := json.Marshal(ev)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, body); err != nil {
+				return
+			}
+			if flush() != nil {
+				return
 			}
 		}
-	})
+	}
 }
