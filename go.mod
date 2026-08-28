@@ -18,6 +18,7 @@ require (
 	github.com/luxfi/log v1.5.0
 	github.com/luxfi/zap v1.2.7
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/zap-proto/zip v1.36.9
 	golang.org/x/time v0.15.0
 )
 
@@ -45,7 +46,7 @@ require (
 	github.com/luxfi/math v1.5.1 // indirect
 	github.com/luxfi/math/big v0.1.0 // indirect
 	github.com/luxfi/mdns v0.1.1 // indirect
-	github.com/luxfi/metric v1.8.1 // indirect
+	github.com/luxfi/metric v1.10.0 // indirect
 	github.com/luxfi/mock v0.1.1 // indirect
 	github.com/luxfi/p2p v1.22.1 // indirect
 	github.com/luxfi/sampler v1.1.0 // indirect
@@ -72,14 +73,25 @@ require (
 )
 
 require (
-	github.com/dop251/goja v0.0.0-20260627200808-0b76000cabdb // indirect
+	github.com/andybalholm/brotli v1.2.1 // indirect
+	github.com/gofiber/schema v1.7.1 // indirect
+	github.com/gofiber/utils/v2 v2.0.4 // indirect
 	github.com/hanzoai/csqlite v0.1.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/luxfi/bft v0.1.5 // indirect
 	github.com/luxfi/pq v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/philhofer/fwd v1.2.0 // indirect
+	github.com/tinylib/msgp v1.6.4 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
+	github.com/valyala/fasthttp v1.70.0 // indirect
+	github.com/zap-proto/fiber/v3 v3.2.1 // indirect
+	github.com/zap-proto/go v1.3.0 // indirect
+	github.com/zap-proto/http v0.3.5 // indirect
+	github.com/zap-proto/mcp v1.0.5 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	modernc.org/sqlite v1.51.0 // indirect
 )
