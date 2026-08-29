@@ -1,7 +1,7 @@
 {
   "name": "@hanzoai/tasks",
   "version": "1.49.1",
-  "description": "TypeScript SDK for Hanzo Tasks — durable workflow execution over the native ZAP transport. Drop-in replacement for @temporalio/* + nestjs-temporal-core against a Hanzo Tasks (tasksd) server.",
+  "description": "TypeScript SDK for Hanzo Tasks \u2014 durable workflow execution over the native ZAP transport. Drop-in replacement for @temporalio/* + nestjs-temporal-core against a Hanzo Tasks (tasksd) server.",
   "license": "MIT",
   "author": "Hanzo AI",
   "repository": {
@@ -42,9 +42,9 @@
     "zap"
   ],
   "devDependencies": {
-    "@types/node": "^20.14.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "@types/node": "26.4.0",
+    "tsup": "^8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "^4.1.11"
   }
 }
