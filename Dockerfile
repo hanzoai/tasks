@@ -44,9 +44,17 @@ ENV GOEXPERIMENT=${GO_EXPERIMENT}
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tasksd ./cmd/tasksd
 
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates && mkdir -p /data
+# One directory in an empty image: the static binary and the files it reads;
+# nothing else is present to run, so nothing else can be run.
+FROM alpine:3.22 AS root
+RUN apk add --no-cache ca-certificates tzdata && mkdir -p /data && chown -R 65532:65532 /data
+
+FROM scratch
+COPY --from=root /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=root /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=root --chown=65532:65532 /data /data
 COPY --from=go-build /tasksd /usr/local/bin/tasksd
+USER 65532:65532
 EXPOSE 9999 7243
-ENTRYPOINT ["tasksd"]
+ENTRYPOINT ["/usr/local/bin/tasksd"]
 CMD ["--zap", ":9999", "--http", ":7243", "--data", "/data"]
