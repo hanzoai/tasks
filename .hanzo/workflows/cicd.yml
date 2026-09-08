@@ -24,5 +24,5 @@ jobs:
     # `.hanzo/workflows` alone — and refused at InsertRun, before any run row
     # exists, so it reads as silence rather than as a failure. hanzoai/ci
     # publishes build.yml at both paths from every tag; @v1 is unchanged.
-    uses: hanzoai/ci/.hanzo/workflows/build.yml@v1
+    uses: hanzoai/ci/.github/workflows/build.yml@v1
     secrets: inherit
