@@ -1,6 +1,6 @@
 module github.com/hanzoai/tasks
 
-go 1.26.5
+go 1.26.8
 
 retract (
 	v1.30.0
