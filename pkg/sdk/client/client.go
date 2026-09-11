@@ -368,18 +368,15 @@ func newZAPTransport(addr string, dialTimeout time.Duration, nodeID string, toke
 	var rb [4]byte
 	_, _ = cryptorand.Read(rb[:])
 	nodeID = nodeID + "-" + hex.EncodeToString(rb[:])
-	// The client only dials; it binds an ephemeral TCP port of its own so
-	// the peer can push deliveries back to it.
+	// The client only dials and is never started, so it binds no listener.
+	// Responses and server-pushed deliveries arrive on the connection it
+	// opened.
 	node := zap.NewNode(zap.NodeConfig{
 		NodeID:      nodeID,
 		ServiceType: "_tasks._tcp",
-		Port:        0,
 		Logger:      slog.Default(),
 		NoDiscovery: true,
 	})
-	if err := node.Start(); err != nil {
-		return nil, fmt.Errorf("zap start: %w", err)
-	}
 	if err := node.ConnectDirect(addr); err != nil {
 		node.Stop()
 		return nil, fmt.Errorf("zap connect %s: %w", addr, err)
