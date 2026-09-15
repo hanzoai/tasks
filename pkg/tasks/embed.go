@@ -1890,36 +1890,7 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *auth.Validator, re
 			return map[string]any{"schedules": out}, 200, ""
 		}),
 		opCreateSchedule: wrap(func(en *engine, req map[string]any) (any, uint32, string) {
-			ns := strOr(req, "namespace", defaultNS)
-			id := strOr(req, "schedule_id", str(req, "scheduleId"))
-			s := Schedule{ScheduleId: id, Namespace: ns}
-			// Re-marshal the "schedule" field and let the SDK shape's
-			// custom UnmarshalJSON handle it via a side struct.
-			if sched, ok := req["schedule"].(map[string]any); ok {
-				if spec, ok := sched["spec"].(map[string]any); ok {
-					if cron, ok := spec["cron"].([]any); ok {
-						for _, c := range cron {
-							if cs, ok := c.(string); ok {
-								s.Spec.CronString = append(s.Spec.CronString, cs)
-							}
-						}
-					}
-					if iv, ok := spec["interval"]; ok {
-						// The engine fires interval schedules (engine.go
-						// scheduleNext); decode straight into the spec's
-						// interval entries via their json tags.
-						raw, _ := json.Marshal(iv)
-						_ = json.Unmarshal(raw, &s.Spec.Interval)
-					}
-				}
-				if action, ok := sched["action"].(map[string]any); ok {
-					s.Action.WorkflowType.Name, _ = action["workflow_type"].(string)
-					s.Action.TaskQueue, _ = action["task_queue"].(string)
-				}
-				if p, ok := sched["paused"].(bool); ok {
-					s.State.Paused = p
-				}
-			}
+			s := scheduleFromSDK(req, defaultNS)
 			if s.ScheduleId == "" {
 				return nil, 400, "schedule_id required"
 			}
@@ -2270,4 +2241,47 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": msg, "code": code})
+}
+
+// scheduleFromSDK reads the SDK's createScheduleRequest into a Schedule. The
+// action's input is what every fire hands the workflow, so it is carried with
+// the type and the queue.
+func scheduleFromSDK(req map[string]any, defaultNS string) Schedule {
+	id, _ := req["schedule_id"].(string)
+	if id == "" {
+		id, _ = req["scheduleId"].(string)
+	}
+	ns, _ := req["namespace"].(string)
+	if ns == "" {
+		ns = defaultNS
+	}
+	s := Schedule{ScheduleId: id, Namespace: ns}
+	sched, ok := req["schedule"].(map[string]any)
+	if !ok {
+		return s
+	}
+	if spec, ok := sched["spec"].(map[string]any); ok {
+		if cron, ok := spec["cron"].([]any); ok {
+			for _, c := range cron {
+				if cs, ok := c.(string); ok {
+					s.Spec.CronString = append(s.Spec.CronString, cs)
+				}
+			}
+		}
+		if iv, ok := spec["interval"]; ok {
+			// The engine fires interval schedules (engine.go scheduleNext);
+			// decode straight into the spec's interval entries via their json tags.
+			raw, _ := json.Marshal(iv)
+			_ = json.Unmarshal(raw, &s.Spec.Interval)
+		}
+	}
+	if action, ok := sched["action"].(map[string]any); ok {
+		s.Action.WorkflowType.Name, _ = action["workflow_type"].(string)
+		s.Action.TaskQueue, _ = action["task_queue"].(string)
+		s.Action.Input = action["input"]
+	}
+	if p, ok := sched["paused"].(bool); ok {
+		s.State.Paused = p
+	}
+	return s
 }
