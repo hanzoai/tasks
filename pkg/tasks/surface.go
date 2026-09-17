@@ -48,19 +48,19 @@ func (e *Embedded) Surface() *zip.App {
 	// The addresses that stand on their own. The MCP endpoint and the event
 	// stream are NAMED here, because a route carries its address where a bare
 	// handler left the choice to whoever mounted it.
-	app.Get(root+"/settings", handle(e, func(rq call, _ *engine) answer { return settings(rq) }))
-	app.Get(root+"/namespaces", handle(e, namespaces))
-	app.Post(root+"/namespaces", handle(e, namespaces))
-	app.Get(root+"/nexus", handle(e, endpoints))
-	app.Get(root+"/cluster", alone(e.clusterStatus))
-	app.Get(root+"/cluster/health", alone(e.clusterHealth))
-	app.Post(root+"/mcp", alone(e.mcp))
-	app.Get(root+"/events", e.tail)
+	app.Raw(http.MethodGet, root+"/settings", handle(e, func(rq call, _ *engine) answer { return settings(rq) }))
+	app.Raw(http.MethodGet, root+"/namespaces", handle(e, namespaces))
+	app.Raw(http.MethodPost, root+"/namespaces", handle(e, namespaces))
+	app.Raw(http.MethodGet, root+"/nexus", handle(e, endpoints))
+	app.Raw(http.MethodGet, root+"/cluster", alone(e.clusterStatus))
+	app.Raw(http.MethodGet, root+"/cluster/health", alone(e.clusterHealth))
+	app.Raw(http.MethodPost, root+"/mcp", alone(e.mcp))
+	app.Raw(http.MethodGet, root+"/events", e.tail)
 
 	// One namespace, and the migration of one namespace.
-	app.Get(root+"/namespaces/:ns", named(e, namespace))
-	app.Delete(root+"/namespaces/:ns", named(e, namespace))
-	app.Post(root+"/namespaces/:ns/migrate", func(c *zip.Ctx) error {
+	app.Raw(http.MethodGet, root+"/namespaces/:ns", named(e, namespace))
+	app.Raw(http.MethodDelete, root+"/namespaces/:ns", named(e, namespace))
+	app.Raw(http.MethodPost, root+"/namespaces/:ns/migrate", func(c *zip.Ctx) error {
 		ns := c.Param("ns")
 		if a, ok := grammar(ns, nil); !ok {
 			return a.send(c)
@@ -95,7 +95,7 @@ func (e *Embedded) Surface() *zip.App {
 	// redirects to the tidied form before it matches anything, so a request
 	// like /namespaces//workflows reaches a route there and 404s here. That is
 	// a difference a caller can see, so it is reproduced rather than accepted.
-	app.All(root+"/*", func(c *zip.Ctx) error {
+	app.Raw(zip.MethodAll, root+"/*", func(c *zip.Ctx) error {
 		if to, dirty := tidy(c.Path()); dirty {
 			if q := string(c.Fiber().RequestCtx().URI().QueryString()); q != "" {
 				to += "?" + q
@@ -219,11 +219,11 @@ var contents = []row{
 func on(app *zip.App, method, path string, h zip.Handler) {
 	switch method {
 	case get:
-		app.Get(path, h)
+		app.Raw(http.MethodGet, path, h)
 	case post:
-		app.Post(path, h)
+		app.Raw(http.MethodPost, path, h)
 	case del:
-		app.Delete(path, h)
+		app.Raw(http.MethodDelete, path, h)
 	default:
 		panic("tasks: no route method " + method)
 	}

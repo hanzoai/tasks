@@ -46,15 +46,15 @@ func FS() fs.FS {
 // Handler returns an http.Handler that serves the embedded SPA.
 //
 // Behaviour:
-//  - Exact-match static assets (JS/CSS/images) ship with
-//    immutable cache hints because Vite hashes filenames.
-//  - Anything else rewrites to /index.html so the React router
-//    handles the route client-side. This is the standard SPA
-//    fallback and is the only way react-router's BrowserRouter
-//    survives a page reload on a deep link.
-//  - If the build hasn't run and index.html is missing, every
-//    request returns 503 so operators notice in staging before
-//    shipping a blank image to production.
+//   - Exact-match static assets (JS/CSS/images) ship with
+//     immutable cache hints because Vite hashes filenames.
+//   - Anything else rewrites to /index.html so the React router
+//     handles the route client-side. This is the standard SPA
+//     fallback and is the only way react-router's BrowserRouter
+//     survives a page reload on a deep link.
+//   - If the build hasn't run and index.html is missing, every
+//     request returns 503 so operators notice in staging before
+//     shipping a blank image to production.
 func Handler() http.Handler {
 	root := FS()
 	fileServer := http.FileServer(http.FS(root))
