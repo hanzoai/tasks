@@ -18,7 +18,7 @@ require (
 	github.com/luxfi/log v1.5.0
 	github.com/luxfi/zap v1.2.7
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/zap-proto/zip v1.37.1
+	github.com/zap-proto/zip v1.37.3
 	golang.org/x/time v0.15.0
 )
 
