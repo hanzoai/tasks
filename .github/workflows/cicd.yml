@@ -25,4 +25,8 @@ jobs:
     # exists, so it reads as silence rather than as a failure. hanzoai/ci
     # publishes build.yml at both paths from every tag; @v1 is unchanged.
     uses: hanzoai/ci/.github/workflows/build.yml@v1
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     secrets: inherit
