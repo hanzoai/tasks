@@ -256,8 +256,10 @@ func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, ta
 		SearchAttrs: searchAttrs,
 		Memo:        memo,
 	}
-	key := fmt.Sprintf("wf/%s/%s/%s", ns, workflowId, runId)
-	if err := e.store.put(key, wf); err != nil {
+	if err := e.openRun(ns, wf.Execution); err != nil {
+		return nil, err
+	}
+	if err := e.store.put(runKey(ns, workflowId, runId), wf); err != nil {
 		return nil, err
 	}
 	if requestID != "" {
@@ -399,7 +401,7 @@ func (e *engine) terminalTransition(ns, workflowId, runId, status, evKind, event
 	}
 	wf.Status = status
 	wf.CloseTime = nowRFC3339()
-	if err := e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, wf.Execution.WorkflowId, wf.Execution.RunId), wf); err != nil {
+	if err := e.closeRun(ns, wf); err != nil {
 		return nil, err
 	}
 	if _, err := e.appendHistory(ns, wf.Execution.WorkflowId, wf.Execution.RunId, eventType, attrs); err != nil {
@@ -805,6 +807,9 @@ func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reas
 		},
 	}
 	// Persist the new execution shell first so appendHistory finds it.
+	if err := e.openRun(ns, newWf.Execution); err != nil {
+		return nil, err
+	}
 	if err := e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, newWf.Execution.WorkflowId, newWf.Execution.RunId), newWf); err != nil {
 		return nil, err
 	}
@@ -834,7 +839,7 @@ func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reas
 	// Mark the source as terminated-by-reset; mirror Temporal semantics.
 	src.Status = "WORKFLOW_EXECUTION_STATUS_TERMINATED"
 	src.CloseTime = nowRFC3339()
-	_ = e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, src.Execution.WorkflowId, src.Execution.RunId), src)
+	_ = e.closeRun(ns, src)
 	// Deliver the forked run's first workflow task carrying its (truncated
 	// + RESET) history so the worker replays from the fork point.
 	if err := e.scheduleWorkflowTask(ns, newWf.Execution.WorkflowId, newWf.Execution.RunId); err != nil {

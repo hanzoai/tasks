@@ -163,6 +163,21 @@ func (s *store) list(prefix string, fn func(key string, body []byte) error) erro
 	return sh.List(ctx, prefix, fn)
 }
 
+// scan walks one page of a single namespace's entries under prefix: at most
+// limit of them, after the key `after` (see storepkg.Shard.Scan).
+func (s *store) scan(prefix, after string, limit int, fn func(key string, body []byte) error) error {
+	ctx := context.Background()
+	_, ns, _ := storepkg.SplitPrefix(prefix)
+	if ns == "" || storepkg.IsCrossNamespacePrefix(prefix) {
+		return fmt.Errorf("store.scan: prefix %q does not name one namespace", prefix)
+	}
+	sh, err := s.mgr.Get(ctx, s.principal, ns)
+	if err != nil {
+		return err
+	}
+	return sh.Scan(ctx, prefix, after, limit, fn)
+}
+
 // listEveryTenant iterates entries with the given prefix across EVERY
 // tenant's shards — the root cron sweeper's view of the world. fn receives
 // the owning principal alongside each entry so the caller can act through

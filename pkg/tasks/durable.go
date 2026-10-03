@@ -394,6 +394,100 @@ func effectiveRetryPolicy(rp *client.RetryPolicyJSON) *temporal.RetryPolicy {
 
 // ── crash-recovery (single replica) ─────────────────────────────────────
 
+// The open-run index. wfopen/<ns>/<workflowId>/<runId> holds a workflow run
+// that has not reached a terminal state, and Recover reads it instead of the
+// run rows, so a restart reads the runs it has to drive again and none of the
+// ones that finished. wfidx/<ns> marks a shard whose index is complete; a
+// shard written before the index existed is walked once to build it
+// (indexOpenRuns).
+//
+// A shard can be sealed, or a process stopped, between any two writes, so
+// the entry is put BEFORE a run's first row and deleted AFTER its terminal
+// row. Stopping in between leaves an entry with no row, or one whose row is
+// terminal, and recovery drops either when it reads it; it never leaves an
+// open row the index misses.
+
+// indexPage is how many rows indexOpenRuns reads from the shard at a time.
+const indexPage = 1024
+
+func runKey(ns, wf, run string) string  { return "wf/" + ns + "/" + wf + "/" + run }
+func openKey(ns, wf, run string) string { return "wfopen/" + ns + "/" + wf + "/" + run }
+func openPrefix(ns string) string       { return "wfopen/" + ns + "/" }
+func openIndexKey(ns string) string     { return "wfidx/" + ns }
+
+// openRun indexes a workflow run as open. It is written ahead of the run's
+// first row.
+func (e *engine) openRun(ns string, ref ExecutionRef) error {
+	return e.store.put(openKey(ns, ref.WorkflowId, ref.RunId), ref)
+}
+
+// closeRun writes wf's terminal row, then drops the run from the open index.
+func (e *engine) closeRun(ns string, wf *WorkflowExecution) error {
+	if err := e.store.put(runKey(ns, wf.Execution.WorkflowId, wf.Execution.RunId), wf); err != nil {
+		return err
+	}
+	return e.store.del(openKey(ns, wf.Execution.WorkflowId, wf.Execution.RunId))
+}
+
+// runRow is the part of a run's row that says whether and when it closed.
+// Workflow and standalone-activity rows share these field names, and decoding
+// only these skips building the input, result and memo a full decode would.
+type runRow struct {
+	Execution ExecutionRef `json:"execution"`
+	Status    string       `json:"status"`
+	StartTime string       `json:"startTime"`
+	CloseTime string       `json:"closeTime"`
+}
+
+// page reads up to limit rows under prefix after the key `after`, and
+// returns them with the last key read and how many rows it read. A row that
+// does not decode counts as read and is otherwise skipped.
+func (e *engine) page(prefix, after string, limit int) ([]runRow, string, int, error) {
+	var rows []runRow
+	n := 0
+	err := e.store.scan(prefix, after, limit, func(key string, body []byte) error {
+		n++
+		after = key
+		var r runRow
+		if json.Unmarshal(body, &r) == nil {
+			rows = append(rows, r)
+		}
+		return nil
+	})
+	return rows, after, n, err
+}
+
+// indexOpenRuns builds ns's open-run index from its workflow rows, unless
+// wfidx/<ns> says it is built. That is one walk over the shard's workflow
+// rows, ever, a page at a time so the shard is free between pages. Every
+// write it makes is idempotent, so a walk cut short is walked again.
+func (e *engine) indexOpenRuns(ns string) error {
+	var built string
+	if ok, err := e.store.get(openIndexKey(ns), &built); err != nil || ok {
+		return err
+	}
+	after := ""
+	for {
+		rows, last, n, err := e.page("wf/"+ns+"/", after, indexPage)
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if isTerminal(r.Status) {
+				continue
+			}
+			if err := e.openRun(ns, r.Execution); err != nil {
+				return err
+			}
+		}
+		if n < indexPage {
+			break
+		}
+		after = last
+	}
+	return e.store.put(openIndexKey(ns), nowRFC3339())
+}
+
 // Recover rebuilds in-flight dispatch state from the durable store after a
 // restart. For every non-terminal workflow it re-dispatches any activity
 // that is scheduled/started but not terminal (idempotent per (run, seq))
@@ -401,6 +495,10 @@ func effectiveRetryPolicy(rp *client.RetryPolicyJSON) *temporal.RetryPolicy {
 // advances. Because dispatch is seq-keyed and the decider dedups on replay,
 // recovery causes neither lost nor double execution: an already-terminal
 // activity is skipped (never re-run), a not-yet-terminal one is re-driven.
+//
+// It finds those workflows through the open-run index above, so it
+// reads the runs still open and none of the ones that finished: its cost is
+// set by how much is in flight, not by how much history the shard holds.
 func (e *engine) Recover() error {
 	namespaces, err := e.ListNamespaces()
 	if err != nil {
@@ -408,15 +506,15 @@ func (e *engine) Recover() error {
 	}
 	for i := range namespaces {
 		ns := namespaces[i].NamespaceInfo.Name
-		wfs, err := e.ListWorkflows(ns)
+		if err := e.indexOpenRuns(ns); err != nil {
+			return err
+		}
+		open, err := listInto[ExecutionRef](e.store, openPrefix(ns))
 		if err != nil {
 			return err
 		}
-		for j := range wfs {
-			if isTerminal(wfs[j].Status) {
-				continue
-			}
-			if err := e.recoverRun(ns, wfs[j].Execution.WorkflowId, wfs[j].Execution.RunId); err != nil {
+		for _, ref := range open {
+			if err := e.recoverRun(ns, ref.WorkflowId, ref.RunId); err != nil {
 				return err
 			}
 		}
@@ -427,6 +525,15 @@ func (e *engine) Recover() error {
 func (e *engine) recoverRun(ns, wf, run string) error {
 	unlock := e.lockRun(ns, wf, run)
 	defer unlock()
+	row, ok, err := e.DescribeWorkflow(ns, wf, run)
+	if err != nil {
+		return err
+	}
+	if !ok || isTerminal(row.Status) {
+		// An entry its row contradicts: the process stopped between the
+		// writes that open or close a run. There is nothing to drive.
+		return e.store.del(openKey(ns, wf, run))
+	}
 	acts, err := e.listWorkflowActivities(ns, wf, run)
 	if err != nil {
 		return err

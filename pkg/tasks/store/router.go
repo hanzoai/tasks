@@ -22,6 +22,8 @@ import (
 //	id/<ns>/<email>
 //	sa/<ns>/<attrName>
 //	idem/<ns>/<workflowId>/<requestId>
+//	wfopen/<ns>/<workflowId>/<runId>
+//	wfidx/<ns>
 func NsFromKey(key string) (kind, ns, rest string, ok bool) {
 	slash := strings.IndexByte(key, '/')
 	if slash <= 0 {
