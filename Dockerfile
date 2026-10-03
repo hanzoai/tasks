@@ -9,7 +9,10 @@
 # resulting dist/ into this build context. ui/embed.go imports the
 # bundle via //go:embed all:dist at compile time.
 
-FROM golang:1.26.8-alpine AS go-build
+FROM golang:1.27.1-alpine AS go-build
+# The golang images default to GOTOOLCHAIN=local, which fails a build whose
+# go.mod asks for a newer Go than the image carries; auto fetches that Go.
+ENV GOTOOLCHAIN=auto
 # git: the private-module fetch below resolves `direct` via git.
 RUN apk add --no-cache git
 WORKDIR /src
