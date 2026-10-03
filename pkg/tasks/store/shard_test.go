@@ -3,8 +3,12 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -208,5 +212,125 @@ func TestShard_NsFromKey(t *testing.T) {
 		if ok != c.ok || got != c.ns {
 			t.Fatalf("NsFromKey(%q) = ns=%q ok=%v, want ns=%q ok=%v", c.key, got, ok, c.ns, c.ok)
 		}
+	}
+}
+
+// TestShard_ScanPages: Scan reads a prefix a page at a time from the key
+// after the last one read, and never past the prefix.
+func TestShard_ScanPages(t *testing.T) {
+	mgr := newMgr(t)
+	ctx := context.Background()
+	s, _ := mgr.Get(ctx, store.Org("org"), "ns")
+	for _, k := range []string{"wf/ns/a/1", "wf/ns/a/2", "wf/ns/b/1", "wf/ns/c/1", "wfh/ns/a/1/1"} {
+		if err := s.Put(ctx, k, []byte("v")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	after := ""
+	for {
+		n := 0
+		if err := s.Scan(ctx, "wf/ns/", after, 2, func(k string, _ []byte) error {
+			n++
+			after = k
+			got = append(got, k)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if n < 2 {
+			break
+		}
+	}
+	if want := "wf/ns/a/1 wf/ns/a/2 wf/ns/b/1 wf/ns/c/1"; strings.Join(got, " ") != want {
+		t.Fatalf("paged scan = %v, want %s", got, want)
+	}
+}
+
+// TestShard_ReclaimShrinksFile: deleted rows leave the file its size. A
+// shard in SQLite's default mode is rebuilt only when the caller says it is
+// done deleting, and the rebuild leaves it in incremental mode, where later
+// deletes are given back with no rebuild.
+func TestShard_ReclaimShrinksFile(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := store.New(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	s, err := mgr.Get(ctx, store.Org("org"), "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(ctx, "wf/ns/keep", []byte("kept")); err != nil {
+		t.Fatal(err)
+	}
+	val := bytes.Repeat([]byte("v"), 2048)
+	each := func(fn func(key string) error) {
+		t.Helper()
+		for i := 0; i < 1000; i++ {
+			if err := fn(fmt.Sprintf("wf/ns/k/%04d", i)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	fill := func() { each(func(k string) error { return s.Put(ctx, k, val) }) }
+	drain := func() { each(func(k string) error { return s.Del(ctx, k) }) }
+	size := func() int64 {
+		t.Helper()
+		if err := s.Checkpoint(); err != nil {
+			t.Fatal(err)
+		}
+		fi, err := os.Stat(s.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fi.Size()
+	}
+	reclaim := func(rebuild bool) {
+		t.Helper()
+		if err := s.Reclaim(ctx, rebuild); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fill()
+	full := size()
+	drain()
+	reclaim(false)
+	if got := size(); got*10 < full*9 {
+		t.Fatalf("default-mode shard shrank to %d of %d without a rebuild", got, full)
+	}
+	reclaim(true)
+	if got := size(); got*4 > full {
+		t.Fatalf("rebuilt shard is %d bytes, was %d", got, full)
+	}
+
+	fill()
+	grown := size()
+	drain()
+	reclaim(false)
+	if got := size(); got*4 > grown {
+		t.Fatalf("incremental shard is %d bytes after its rows were deleted, was %d", got, grown)
+	}
+
+	// The rebuilt file still opens under its key, holding what it held.
+	if err := mgr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	mgr2, err := store.New(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr2.Close()
+	s2, err := mgr2.Get(ctx, store.Org("org"), "ns")
+	if err != nil {
+		t.Fatalf("reopen rebuilt shard: %v", err)
+	}
+	if v, ok, err := s2.Get(ctx, "wf/ns/keep"); err != nil || !ok || string(v) != "kept" {
+		t.Fatalf("reopened shard: ok=%v v=%q err=%v", ok, v, err)
+	}
+	if _, ok, err := s2.Get(ctx, "wf/ns/k/0001"); err != nil || ok {
+		t.Fatalf("deleted row read back: ok=%v err=%v", ok, err)
 	}
 }

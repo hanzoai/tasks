@@ -200,13 +200,29 @@ func (s *Shard) Del(ctx context.Context, key string) error {
 
 // List walks every kv row whose key starts with prefix in lexicographic order.
 func (s *Shard) List(ctx context.Context, prefix string, fn func(key string, value []byte) error) error {
+	return s.Scan(ctx, prefix, "", 0, fn)
+}
+
+// Scan walks, in lexicographic order, at most limit kv rows (all of them when
+// limit <= 0) whose key starts with prefix and sorts after `after`. Passing
+// the last key one page returned as the next page's `after` walks a prefix in
+// pieces; the shard's single connection is free between pages, so a long walk
+// never holds the shard against the engine.
+func (s *Shard) Scan(ctx context.Context, prefix, after string, limit int, fn func(key string, value []byte) error) error {
 	if s.closed.Load() {
 		return ErrClosed
 	}
 	s.touch()
-	rows, err := s.db.QueryContext(ctx, "SELECT key, value FROM kv WHERE key>=? AND key<? ORDER BY key", prefix, prefixUpperBound(prefix))
+	if limit <= 0 {
+		limit = -1 // SQLite: no limit
+	}
+	q, from := "SELECT key, value FROM kv WHERE key>=? AND key<? ORDER BY key LIMIT ?", prefix
+	if after >= prefix {
+		q, from = "SELECT key, value FROM kv WHERE key>? AND key<? ORDER BY key LIMIT ?", after
+	}
+	rows, err := s.db.QueryContext(ctx, q, from, prefixUpperBound(prefix), limit)
 	if err != nil {
-		return fmt.Errorf("store.List(%s): %w", prefix, err)
+		return fmt.Errorf("store.Scan(%s): %w", prefix, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -220,6 +236,66 @@ func (s *Shard) List(ctx context.Context, prefix string, fn func(key string, val
 		}
 	}
 	return rows.Err()
+}
+
+// reclaimPages bounds how many free pages one Reclaim releases from a shard
+// in incremental auto-vacuum mode, so a call never holds the shard for long.
+const reclaimPages = 4096
+
+// Reclaim gives the shard's free pages back to the filesystem. SQLite keeps
+// the pages of deleted rows on a freelist and reuses them for new rows, but
+// never shrinks the file on its own.
+//
+// A shard in incremental auto-vacuum mode releases up to reclaimPages per
+// call. A shard in the default mode cannot release pages in place; it can
+// only be rebuilt with VACUUM, which costs a copy of everything still in it.
+// So it is rebuilt only when the caller passes rebuild — it has finished
+// deleting for now, which is when the shard is smallest — and at least a
+// quarter of it is free. The rebuild also switches the shard to incremental
+// mode, so it happens once per shard. VACUUM keeps the page size and the
+// reserved bytes per page that the encryption codec writes into.
+//
+// The smaller file reaches disk at the shard's next seal (Checkpoint or
+// Close). Reclaim is local to this file and never replicated: each replica's
+// pages are its own.
+func (s *Shard) Reclaim(ctx context.Context, rebuild bool) error {
+	if s.closed.Load() {
+		return ErrClosed
+	}
+	s.touch()
+	var mode, free, total int64
+	for _, p := range []struct {
+		pragma string
+		v      *int64
+	}{{"auto_vacuum", &mode}, {"freelist_count", &free}, {"page_count", &total}} {
+		if err := s.db.QueryRowContext(ctx, "PRAGMA "+p.pragma).Scan(p.v); err != nil {
+			return fmt.Errorf("store.Reclaim(%s): %s: %w", s.ns, p.pragma, err)
+		}
+	}
+	const incremental = 2 // PRAGMA auto_vacuum: 0 none, 1 full, 2 incremental
+	switch {
+	case free == 0:
+		return nil
+	case mode == incremental:
+		// incremental_vacuum releases one page per step and yields a row for
+		// each, so it is drained as a query; an Exec would step it once.
+		rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA incremental_vacuum(%d)", reclaimPages))
+		if err != nil {
+			return fmt.Errorf("store.Reclaim(%s): %w", s.ns, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+		}
+		return rows.Err()
+	case mode == 0 && rebuild && free*4 >= total:
+		if _, err := s.db.ExecContext(ctx, "PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
+			return fmt.Errorf("store.Reclaim(%s): %w", s.ns, err)
+		}
+		if _, err := s.db.ExecContext(ctx, "VACUUM"); err != nil {
+			return fmt.Errorf("store.Reclaim(%s): vacuum: %w", s.ns, err)
+		}
+	}
+	return nil
 }
 
 // replicate runs Propose, and on Accept calls apply locally.
