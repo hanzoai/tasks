@@ -178,6 +178,17 @@ func (s *store) scan(prefix, after string, limit int, fn func(key string, body [
 	return sh.Scan(ctx, prefix, after, limit, fn)
 }
 
+// reclaim gives ns's free pages back to the filesystem (see
+// storepkg.Shard.Reclaim).
+func (s *store) reclaim(ns string, rebuild bool) error {
+	ctx := context.Background()
+	sh, err := s.mgr.Get(ctx, s.principal, ns)
+	if err != nil {
+		return err
+	}
+	return sh.Reclaim(ctx, rebuild)
+}
+
 // listEveryTenant iterates entries with the given prefix across EVERY
 // tenant's shards — the root cron sweeper's view of the world. fn receives
 // the owning principal alongside each entry so the caller can act through

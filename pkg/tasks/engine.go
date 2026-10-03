@@ -135,7 +135,7 @@ func (e *engine) RegisterNamespace(ns Namespace) error {
 		ns.NamespaceInfo.CreateTime = nowRFC3339()
 	}
 	if ns.Config.WorkflowExecutionRetentionTtl == "" {
-		ns.Config.WorkflowExecutionRetentionTtl = "720h"
+		ns.Config.WorkflowExecutionRetentionTtl = defaultRetention
 	}
 	if ns.Config.APSLimit == 0 {
 		ns.Config.APSLimit = 400

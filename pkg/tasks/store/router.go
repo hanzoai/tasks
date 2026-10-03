@@ -24,6 +24,7 @@ import (
 //	idem/<ns>/<workflowId>/<requestId>
 //	wfopen/<ns>/<workflowId>/<runId>
 //	wfidx/<ns>
+//	purge/<ns>
 func NsFromKey(key string) (kind, ns, rest string, ok bool) {
 	slash := strings.IndexByte(key, '/')
 	if slash <= 0 {

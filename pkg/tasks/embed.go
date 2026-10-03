@@ -204,6 +204,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 
 	stop := make(chan struct{})
 	go en.runScheduler(stop)
+	go en.runPurge(stop)
 	e.stop = stop
 
 	return e, nil

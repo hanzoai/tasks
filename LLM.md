@@ -15,8 +15,37 @@ Durable workflow execution engine for AI agent orchestration.
 - `v1.51.2` added `Embedded.CancelActivityForOrg`; `v1.51.3` added `Embedded.ActivitiesPageForOrg` — the org-scoped cancel + paginated read cloud's fleet queue surface (hanzoai/cloud `clients/visor`) depends on.
 - `v1.52.3` added `View.FailureStreaks(ns)` + the `FailureStreak` type — the durable "what is broken right now" read a host polls instead of hand-decoding SQLite.
 
-## Known gaps
-- **Terminal standalone-activity GC is unimplemented.** Completed/failed/canceled standalone activities under the `act/<ns>/` key family (and their `ahist/<ns>/…` history) are never pruned — the namespace `WorkflowExecutionRetentionTtl` (default `720h`) has **no sweeper enforcing it** for standalone activities. The store therefore grows unbounded with volume (one row per job, e.g. every `studio.render` in the `gpu-jobs` namespace), and every `ListActivities` / `ActivitiesForOrg` / `ActivitiesPageForOrg` scans the full set. Consumers can bound the READ (cloud's fleet queue recency-sorts + caps terminal history, and now walks all pages via `ActivitiesPageForOrg`), but the underlying storage + scan cost still grow. **Fix (queued v1.51.4):** a background sweeper alongside `runScheduler` that deletes terminal standalone activities older than the namespace retention TTL, plus their history — idempotent, org-shard-scoped. Surfaced in the hanzoai/cloud per-GPU-queue review.
+## Recovery and retention (v1.53.6)
+
+- **Recover reads only open runs.** `wfopen/<ns>/<workflowId>/<runId>` is put
+  before a run's first row and deleted after its terminal row
+  (`openRun`/`closeRun`, `durable.go`). Recover lists it, so boot cost follows
+  what is in flight, not how much history a shard holds. A shard written before
+  the index is walked once (`indexOpenRuns`, paged, minimal decode) and marked
+  `wfidx/<ns>`. Recover still covers the root tenant only, as before.
+- **Retention is enforced.** `runPurge` (every 5 s, `retention.go`) walks each
+  namespace's `wf/` then `act/` rows, 512 per pass per shard, from a cursor at
+  `purge/<ns>`, across every tenant. A terminal run whose close time plus
+  `WorkflowExecutionRetentionTtl` (default `720h`) has passed is removed with
+  every key it owns: `wf`, `wfh`, `wfact`, `wfopen`, the `idem` and `sctrig`
+  entries naming it; for standalone activities `act`, `ahist`, `aidem`. All
+  through the replicated delete path, row last. The row is re-read under the
+  run lock first; an open run is never touched. A retention that does not parse
+  purges nothing and logs `tasks: retention purge failed` (throttled).
+- **The file shrinks.** Each pass ends in `Shard.Reclaim`. A default-mode
+  shard is rebuilt once, at the end of a walk, with `VACUUM` when at least a
+  quarter of it is free; that switches it to incremental auto-vacuum, and from
+  then on each pass releases up to 4096 pages. The smaller file reaches disk at
+  the next seal.
+- **Measured** (200k terminal runs + 10 open, 1.71 GiB encrypted shard, pure-Go
+  envelope, 8 vCPU): `Embed` 10.4–12.0 s / VmHWM 1.14–1.25 GB before;
+  7.7–8.7 s / 85 MB on the first boot (backfill walk); 6.0–6.2 s / 21 MB after.
+  What is left is the envelope decrypting the whole file at open (~3.5 s/GiB,
+  single-threaded). The purge drained the 200k runs in 392 passes (p99 197 ms),
+  the shard went to 132 KiB, and `Embed` took 5 ms / 16 MB.
+- **Not here:** the envelope's minute seal (`hanzoai/sqlite` `Checkpoint`)
+  re-encrypts the whole file while holding the shard's one connection, about
+  9 s per minute at 1.7 GiB, whether or not anything changed.
 
 ## Cron sweeper observability (v1.52.2)
 
