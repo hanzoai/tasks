@@ -241,3 +241,45 @@ func TestViewScheduleCRUD(t *testing.T) {
 		t.Fatalf("after delete, %d schedules remain", len(list))
 	}
 }
+
+// A SCHEDULE'S OWN FIRE NAMES ITS TICK; A TRIGGER NAMES NONE. A consumer that must
+// make one thing per tick (a cron Job) names it by the tick the run carries, so a
+// tick fired late, or by a second engine, is the same tick, and an operator's
+// trigger is a run of its own.
+func TestAScheduledFireCarriesItsTick(t *testing.T) {
+	en := newEngine(newStore())
+	dueSchedule(t, en, "default", "nightly", "TickProbe", "tick-q")
+	subscribe(t, en, "default", "tick-q")
+	if err := en.sweepSchedules(); err != nil {
+		t.Fatalf("sweepSchedules: %v", err)
+	}
+	if _, err := en.TriggerSchedule("default", "nightly", "operator"); err != nil {
+		t.Fatalf("TriggerSchedule: %v", err)
+	}
+	execs, err := en.ListWorkflows("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := (&Embedded{engine: en}).View(Principal{})
+	fired, triggered := 0, 0
+	for _, e := range execs {
+		if e.Type.Name != "TickProbe" {
+			continue
+		}
+		wf, ok, err := v.DescribeWorkflow("default", e.Execution.WorkflowId, e.Execution.RunId)
+		if err != nil || !ok {
+			t.Fatalf("DescribeWorkflow: %v %v", ok, err)
+		}
+		if at, ok := ScheduledStart(wf); ok {
+			fired++
+			if at.Second() != 0 || at.After(time.Now()) || time.Since(at) > 6*time.Minute {
+				t.Fatalf("a fire carries %v, which is not a minute tick it could have made up", at)
+			}
+		} else {
+			triggered++
+		}
+	}
+	if fired != 1 || triggered != 1 {
+		t.Fatalf("one fire and one trigger: %d carry a tick, %d carry none", fired, triggered)
+	}
+}

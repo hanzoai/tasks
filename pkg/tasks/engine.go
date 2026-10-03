@@ -1757,6 +1757,7 @@ func (e *engine) sweepSchedules() error {
 	type due struct {
 		principal Principal
 		s         Schedule
+		tick      time.Time // the nominal fire this sweep is making up
 	}
 	var dues []due
 	if err := e.store.listEveryTenant("sc/", func(p Principal, _ string, body []byte) error {
@@ -1771,7 +1772,7 @@ func (e *engine) sweepSchedules() error {
 		if !ok || next.After(now) {
 			return nil
 		}
-		dues = append(dues, due{principal: p, s: s})
+		dues = append(dues, due{principal: p, s: s, tick: next})
 		return nil
 	}); err != nil {
 		return err
@@ -1790,7 +1791,7 @@ func (e *engine) sweepSchedules() error {
 		// this attribute the failure report one layer down can only say "some
 		// JobWorkflow is broken", never "the nightly backup has not run".
 		wf, startErr := oe.startWorkflowFull(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "",
-			map[string]any{searchAttrScheduleID: s.ScheduleId}, nil, "")
+			map[string]any{searchAttrScheduleID: s.ScheduleId, searchAttrScheduledStart: d.tick.UTC().Format(time.RFC3339)}, nil, "")
 		fault := startErr
 		if fault == nil {
 			fault = e.unreached(s.Namespace, wf.TaskQueue)

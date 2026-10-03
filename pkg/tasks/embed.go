@@ -283,6 +283,13 @@ func (v View) ListWorkflows(ns string) ([]WorkflowExecution, error) {
 	return v.en.ListWorkflows(ns)
 }
 
+// DescribeWorkflow loads one workflow execution in ns (this org's shard), the
+// latest run when runID is empty; ok=false when absent. An activity reads its own
+// run through it, e.g. the tick a schedule's fire carries (ScheduledStart).
+func (v View) DescribeWorkflow(ns, workflowID, runID string) (*WorkflowExecution, bool, error) {
+	return v.en.DescribeWorkflow(ns, workflowID, runID)
+}
+
 // StartActivity enqueues a standalone activity in ns (this org's shard) — the
 // in-binary seam a host subsystem uses to put work on an org queue for a fleet
 // worker to claim (fn.run, studio.render), mirroring the HTTP activities API.

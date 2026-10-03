@@ -343,6 +343,25 @@ func (e *engine) FailureStreaks(ns string) ([]FailureStreak, error) {
 // queryable filter over executions at the same time.
 const searchAttrScheduleID = "ScheduleId"
 
+// searchAttrScheduledStart is the tick a schedule's own fire was for, stamped by
+// the sweep (RFC 3339, UTC) — the nominal time, not the moment the sweep got to
+// it, so a tick fired late (an engine catching up after downtime) and the same
+// tick fired by another engine carry one value. A manual trigger is not a tick
+// and carries none. The name is Temporal's own, which is why tenants cannot
+// register it.
+const searchAttrScheduledStart = "TemporalScheduledStartTime"
+
+// ScheduledStart reads the tick a run was a schedule's fire for, and false for a
+// run no schedule fired on its own (a manual trigger, a run started directly).
+func ScheduledStart(wf *WorkflowExecution) (time.Time, bool) {
+	if wf == nil {
+		return time.Time{}, false
+	}
+	s, _ := wf.SearchAttrs[searchAttrScheduledStart].(string)
+	t, err := time.Parse(time.RFC3339, s)
+	return t, err == nil
+}
+
 // scheduleIDOf reads the stamped schedule id off an execution. Empty for runs
 // that were not started by a schedule.
 func scheduleIDOf(wf *WorkflowExecution) string {
