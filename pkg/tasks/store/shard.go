@@ -105,6 +105,8 @@ var ErrClosed = errors.New("store: manager closed")
 // caller would not make it less global, only harder to see.
 type Manager struct {
 	rootDir    string
+	srv        *server // non-nil: shards are rows on a shared SQL server (NewShared)
+	master     []byte  // the key a shared shard's rows are sealed under
 	replicator replication.Replicator
 	mu         sync.Mutex
 	shards     map[shardKey]*Shard
@@ -221,8 +223,15 @@ func (m *Manager) Get(ctx context.Context, p Principal, ns string) (*Shard, erro
 	}
 	m.mu.Unlock()
 
-	s, err := openShard(tenant, m.rootDir, p, ns)
-	if err != nil {
+	var s *Shard
+	if m.srv != nil {
+		r, err := newSQLKV(m.srv, m.master, tenant, p, ns)
+		if err != nil {
+			return nil, err
+		}
+		s = &Shard{principal: p, ns: ns, rows: r}
+		s.touch()
+	} else if s, err = openShard(tenant, m.rootDir, p, ns); err != nil {
 		return nil, err
 	}
 	m.mu.Lock()
@@ -249,6 +258,9 @@ func (m *Manager) Get(ctx context.Context, p Principal, ns string) (*Shard, erro
 // Principal it builds renders straight back to the directory it came from
 // (see Org for why folding twice would not).
 func (m *Manager) ListPrincipals(ctx context.Context) ([]Principal, error) {
+	if m.srv != nil {
+		return m.sharedPrincipals(ctx)
+	}
 	var out []Principal
 	orgs, err := subdirs(filepath.Join(m.rootDir, orgsRoot))
 	if err != nil {
@@ -296,7 +308,16 @@ func (m *Manager) holdsShard(p Principal) bool { return len(m.shardNames(p)) > 0
 // linked and of when the last seal happened.
 func (m *Manager) shardNames(p Principal) []string {
 	seen := map[string]bool{}
-	if dir, err := m.tenantDir(p); err == nil {
+	if m.srv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), m.srv.timeout)
+		names, err := m.sharedNames(ctx)
+		cancel()
+		if err == nil {
+			for _, ns := range names[p.String()] {
+				seen[ns] = true
+			}
+		}
+	} else if dir, err := m.tenantDir(p); err == nil {
 		entries, err := os.ReadDir(dir)
 		if err == nil {
 			for _, e := range entries {
@@ -379,6 +400,9 @@ func (m *Manager) Close() error {
 		return nil
 	}
 	close(m.stopGC)
+	if m.srv != nil {
+		defer m.srv.close()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var firstErr error

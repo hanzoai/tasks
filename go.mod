@@ -18,6 +18,8 @@ require (
 	github.com/luxfi/log v1.5.0
 	github.com/luxfi/zap v1.2.7
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/valyala/fasthttp v1.70.0
+	github.com/zap-proto/http v0.3.5
 	github.com/zap-proto/zip v1.37.3
 	golang.org/x/time v0.15.0
 )
@@ -70,10 +72,8 @@ require (
 	github.com/supranational/blst v0.3.16 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.70.0 // indirect
 	github.com/zap-proto/fiber/v3 v3.2.1 // indirect
 	github.com/zap-proto/go v1.8.3 // indirect
-	github.com/zap-proto/http v0.3.5 // indirect
 	github.com/zap-proto/mcp v1.0.5 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect

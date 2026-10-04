@@ -61,8 +61,18 @@ func newStoreFromEnv(dataDir string, master []byte) (*store, error) {
 		return &store{mgr: mgr}, nil
 	case "memory":
 		return newStore(), nil
+	case "sql":
+		// Every shard's rows on the hanzoai/sql server TASKSD_SQL_ADDR names (its
+		// ZAP listener), so the process keeps nothing on disk.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		mgr, err := storepkg.NewShared(ctx, os.Getenv("TASKSD_SQL_ADDR"), master)
+		if err != nil {
+			return nil, err
+		}
+		return &store{mgr: mgr}, nil
 	default:
-		return nil, fmt.Errorf("TASKSD_STORE=%q: unsupported (sqlite | memory)", mode)
+		return nil, fmt.Errorf("TASKSD_STORE=%q: unsupported (sqlite | memory | sql)", mode)
 	}
 }
 

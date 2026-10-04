@@ -4,22 +4,13 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	// hanzosqlite is the ONE sqlite driver across the Hanzo stack: it registers
-	// the "sqlite" database/sql driver exactly once — pure-Go modernc under !cgo,
-	// mattn+SQLCipher under cgo — and builds the backend-correct DSN. Every store
-	// opens through it (never modernc directly) so a store embedded in the unified
-	// cloud binary shares that single registration instead of double-registering
-	// "sqlite" and panicking at init.
 	"github.com/hanzoai/cek"
 	"github.com/hanzoai/namespace"
-	hanzosqlite "github.com/hanzoai/sqlite"
 	"github.com/hanzoai/tasks/pkg/tasks/replication"
 )
 
@@ -30,8 +21,8 @@ import (
 type Shard struct {
 	principal  Principal
 	ns         string
-	path       string
-	db         *db
+	path       string // "" for a shard whose rows are on a shared server
+	rows       rows
 	replicator replication.Replicator
 	last       atomic.Int64
 	closeOnce  sync.Once
@@ -99,7 +90,7 @@ func openShard(tenant namespace.Namespace, dir string, p Principal, ns string) (
 		_ = conn.Close()
 		return nil, fmt.Errorf("store.openShard: schema: %w", err)
 	}
-	s := &Shard{principal: p, ns: ns, path: path, db: conn}
+	s := &Shard{principal: p, ns: ns, path: path, rows: fileKV{db: conn}}
 	s.last.Store(time.Now().UnixNano())
 	return s, nil
 }
@@ -116,7 +107,8 @@ func (s *Shard) Principal() Principal { return s.principal }
 // Namespace returns the shard's namespace.
 func (s *Shard) Namespace() string { return s.ns }
 
-// Path returns the underlying file path.
+// Path returns the underlying file path; "" when the shard's rows are on a shared
+// server.
 func (s *Shard) Path() string { return s.path }
 
 // Close flushes WAL and releases the connection. Idempotent.
@@ -124,11 +116,10 @@ func (s *Shard) Close() error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	if s.db == nil {
+	if s.rows == nil {
 		return nil
 	}
-	_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);")
-	return s.db.Close()
+	return s.rows.close()
 }
 
 // Checkpoint makes the on-disk file fully self-contained: it truncates the
@@ -142,10 +133,7 @@ func (s *Shard) Checkpoint() error {
 	if s.closed.Load() {
 		return ErrClosed
 	}
-	if _, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE);"); err != nil {
-		return err
-	}
-	return hanzosqlite.Checkpoint(s.db)
+	return s.rows.checkpoint()
 }
 
 // Put writes value at key. If a Replicator is installed it runs
@@ -172,15 +160,11 @@ func (s *Shard) Get(ctx context.Context, key string) ([]byte, bool, error) {
 		return nil, false, ErrClosed
 	}
 	s.touch()
-	row := s.db.QueryRowContext(ctx, "SELECT value FROM kv WHERE key=?", key)
-	var v []byte
-	if err := row.Scan(&v); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
+	v, ok, err := s.rows.get(ctx, key)
+	if err != nil {
 		return nil, false, fmt.Errorf("store.Get(%s): %w", key, err)
 	}
-	return v, true, nil
+	return v, ok, nil
 }
 
 // Del removes key. No-op if missing.
@@ -213,34 +197,11 @@ func (s *Shard) Scan(ctx context.Context, prefix, after string, limit int, fn fu
 		return ErrClosed
 	}
 	s.touch()
-	if limit <= 0 {
-		limit = -1 // SQLite: no limit
-	}
-	q, from := "SELECT key, value FROM kv WHERE key>=? AND key<? ORDER BY key LIMIT ?", prefix
-	if after >= prefix {
-		q, from = "SELECT key, value FROM kv WHERE key>? AND key<? ORDER BY key LIMIT ?", after
-	}
-	rows, err := s.db.QueryContext(ctx, q, from, prefixUpperBound(prefix), limit)
-	if err != nil {
+	if err := s.rows.scan(ctx, prefix, after, limit, fn); err != nil {
 		return fmt.Errorf("store.Scan(%s): %w", prefix, err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var k string
-		var v []byte
-		if err := rows.Scan(&k, &v); err != nil {
-			return err
-		}
-		if err := fn(k, v); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+	return nil
 }
-
-// reclaimPages bounds how many free pages one Reclaim releases from a shard
-// in incremental auto-vacuum mode, so a call never holds the shard for long.
-const reclaimPages = 4096
 
 // Reclaim gives the shard's free pages back to the filesystem. SQLite keeps
 // the pages of deleted rows on a freelist and reuses them for new rows, but
@@ -263,37 +224,8 @@ func (s *Shard) Reclaim(ctx context.Context, rebuild bool) error {
 		return ErrClosed
 	}
 	s.touch()
-	var mode, free, total int64
-	for _, p := range []struct {
-		pragma string
-		v      *int64
-	}{{"auto_vacuum", &mode}, {"freelist_count", &free}, {"page_count", &total}} {
-		if err := s.db.QueryRowContext(ctx, "PRAGMA "+p.pragma).Scan(p.v); err != nil {
-			return fmt.Errorf("store.Reclaim(%s): %s: %w", s.ns, p.pragma, err)
-		}
-	}
-	const incremental = 2 // PRAGMA auto_vacuum: 0 none, 1 full, 2 incremental
-	switch {
-	case free == 0:
-		return nil
-	case mode == incremental:
-		// incremental_vacuum releases one page per step and yields a row for
-		// each, so it is drained as a query; an Exec would step it once.
-		rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA incremental_vacuum(%d)", reclaimPages))
-		if err != nil {
-			return fmt.Errorf("store.Reclaim(%s): %w", s.ns, err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-		}
-		return rows.Err()
-	case mode == 0 && rebuild && free*4 >= total:
-		if _, err := s.db.ExecContext(ctx, "PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
-			return fmt.Errorf("store.Reclaim(%s): %w", s.ns, err)
-		}
-		if _, err := s.db.ExecContext(ctx, "VACUUM"); err != nil {
-			return fmt.Errorf("store.Reclaim(%s): vacuum: %w", s.ns, err)
-		}
+	if err := s.rows.reclaim(ctx, rebuild); err != nil {
+		return fmt.Errorf("store.Reclaim(%s): %w", s.ns, err)
 	}
 	return nil
 }
@@ -341,16 +273,9 @@ func (s *Shard) applyFrame(f replication.Frame) error {
 	}
 }
 
-func (s *Shard) localPut(key string, value []byte) error {
-	_, err := s.db.Exec("INSERT INTO kv(key, value, upd) VALUES(?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, upd=excluded.upd",
-		key, value, time.Now().UnixNano())
-	return err
-}
+func (s *Shard) localPut(key string, value []byte) error { return s.rows.put(key, value, now()) }
 
-func (s *Shard) localDel(key string) error {
-	_, err := s.db.Exec("DELETE FROM kv WHERE key=?", key)
-	return err
-}
+func (s *Shard) localDel(key string) error { return s.rows.del(key) }
 
 // prefixUpperBound returns the smallest string greater than every
 // string with the given prefix, suitable for SQLite range scans.
