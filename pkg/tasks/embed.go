@@ -87,6 +87,13 @@ type EmbedConfig struct {
 	// of the workflows it may be asked to run) and the live event feed.
 	Database *sql.DB
 
+	// KeepFinished stops the retention purge: finished runs are kept whatever their
+	// namespace's WorkflowExecutionRetentionTtl says. The period a namespace keeps
+	// history for is a person's decision, and a host that has not been given one keeps
+	// everything; the field stays on the namespace row, unenforced. The zero value
+	// enforces it.
+	KeepFinished bool
+
 	// Relay, when set, is called with every event this replica's engine emits, so the
 	// host can carry it to the other replicas' live feeds; they hand what they hear to
 	// Hear. It runs on the goroutine that emitted, and must not block.
@@ -271,7 +278,9 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 
 	stop := make(chan struct{})
 	go en.runScheduler(stop)
-	go en.runPurge(stop)
+	if !cfg.KeepFinished {
+		go en.runPurge(stop)
+	}
 	if member != nil {
 		go member.beat(e.tend)
 	}

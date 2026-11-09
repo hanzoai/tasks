@@ -285,3 +285,52 @@ func TestPurge_ShrinksTheShard(t *testing.T) {
 		t.Fatalf("shard is %d bytes after purging every run, was %d", after, full)
 	}
 }
+
+// A host that keeps finished runs (EmbedConfig.KeepFinished) never loses one to the
+// purge, whatever its namespace's retention says; the same engine without it does.
+func TestPurge_KeepFinishedKeepsARunPastItsRetention(t *testing.T) {
+	ctx := context.Background()
+	closedLongAgo := func(t *testing.T, keep bool) (*Embedded, string) {
+		t.Helper()
+		emb, err := Embed(ctx, EmbedConfig{Address: t.TempDir() + "/e.sock", DataDir: t.TempDir(), KeepFinished: keep})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = emb.Stop(ctx) })
+		en := emb.engine
+		wf, err := en.StartWorkflow("default", "old", "", TypeRef{Name: "W"}, "tq", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := wf.Execution.RunId
+		unlock := en.lockRun("default", "old", run)
+		done, err := en.terminalTransition("default", "old", run, "WORKFLOW_EXECUTION_STATUS_COMPLETED", "workflow.completed", "WORKFLOW_EXECUTION_COMPLETED", map[string]any{"result": "x"})
+		unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		done.CloseTime = time.Now().Add(-800 * time.Hour).UTC().Format(time.RFC3339) // older than the 720h it is given
+		if err := en.store.put(runKey("default", "old", run), done); err != nil {
+			t.Fatal(err)
+		}
+		return emb, run
+	}
+	kept, keptRun := closedLongAgo(t, true)
+	purged, purgedRun := closedLongAgo(t, false)
+
+	// The purge ticks every purgeEvery; the engine that enforces retention loses the
+	// run on its first pass, and the one that keeps does not run one.
+	deadline := time.Now().Add(purgeEvery * 3)
+	for time.Now().Before(deadline) {
+		if _, ok, _ := purged.engine.DescribeWorkflow("default", "old", purgedRun); !ok {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if _, ok, _ := purged.engine.DescribeWorkflow("default", "old", purgedRun); ok {
+		t.Fatal("the control did not purge a run past its retention: this test proves nothing")
+	}
+	if _, ok, err := kept.engine.DescribeWorkflow("default", "old", keptRun); err != nil || !ok {
+		t.Fatalf("a host that keeps finished runs lost one past its retention: %v %v", ok, err)
+	}
+}
