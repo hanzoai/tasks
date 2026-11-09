@@ -87,6 +87,11 @@ type EmbedConfig struct {
 	// of the workflows it may be asked to run) and the live event feed.
 	Database *sql.DB
 
+	// Relay, when set, is called with every event this replica's engine emits, so the
+	// host can carry it to the other replicas' live feeds; they hand what they hear to
+	// Hear. It runs on the goroutine that emitted, and must not block.
+	Relay func(Event)
+
 	// timing is the cadence of the sweeps and of the leases among replicas. The zero
 	// value is the production one; only the tests of several replicas set it.
 	timing *timing
@@ -185,6 +190,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		tm = *cfg.timing
 	}
 	en.sweep = tm.sweep
+	en.broker.tap = cfg.Relay
 	var migr *migration.Coordinator
 	var member *replica
 	if st.mgr != nil {
@@ -337,6 +343,15 @@ func wireSend(opcode uint16, body []byte) (*zap.Message, error) {
 	flags := uint16(opcode) << 8
 	frame := b.FinishWithFlags(flags)
 	return zap.Parse(frame)
+}
+
+// Hear delivers an event that another replica of this engine emitted to the live feeds
+// of this one. It is not relayed again.
+func (e *Embedded) Hear(ev Event) {
+	if e == nil || e.engine == nil {
+		return
+	}
+	e.engine.broker.deliver(ev)
 }
 
 // Address returns where the loopback ZAP listener is bound.

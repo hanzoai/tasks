@@ -37,12 +37,15 @@ type Event struct {
 // broker is a tiny fan-out: subscribers receive every event published.
 // Bounded buffers per subscriber drop the oldest event under back-pressure
 // rather than blocking the publisher. Designed for single-process tasks;
-// distributed fan-out lands when persistence does.
+// Among replicas of one engine each replica has its own broker, and relays what it
+// publishes through tap (EmbedConfig.Relay) to the others, which deliver it to their
+// subscribers without relaying it again.
 type broker struct {
 	mu      sync.RWMutex
 	nextID  atomic.Uint64
 	subs    map[uint64]chan Event
 	bufSize int
+	tap     func(Event)
 }
 
 func newBroker() *broker {
@@ -71,6 +74,14 @@ func (b *broker) publish(e Event) {
 	if e.At == "" {
 		e.At = nowRFC3339()
 	}
+	b.deliver(e)
+	if b.tap != nil {
+		b.tap(e)
+	}
+}
+
+// deliver hands e to this replica's subscribers.
+func (b *broker) deliver(e Event) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for _, ch := range b.subs {

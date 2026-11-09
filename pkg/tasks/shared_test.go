@@ -683,3 +683,47 @@ func checkStartActivityIsIdempotentAcrossReplicas(t *testing.T, open dbtest.Open
 		t.Fatalf("an enqueue reset a claimed job: %s held by %q", now.Status, now.Identity)
 	}
 }
+
+// An event one replica emits reaches the live feed of another, once, when the host
+// carries it, and is not carried back.
+func TestShared_EventsReachTheOtherReplicasFeed(t *testing.T) {
+	dbtest.Engines(t, func(t *testing.T, open dbtest.Open) {
+		a, b := podPair(t, open)
+		sub := func(p *pod) (<-chan Event, func()) {
+			id, ch := p.en.broker.subscribe()
+			return ch, func() { p.en.broker.unsubscribe(id) }
+		}
+		// The host: what a replica relays, the other hears.
+		var relayed []Event
+		var mu sync.Mutex
+		a.en.broker.tap = func(ev Event) { mu.Lock(); relayed = append(relayed, ev); mu.Unlock(); b.en.broker.deliver(ev) }
+		heard, stop := sub(b)
+		defer stop()
+		own, stopOwn := sub(a)
+		defer stopOwn()
+
+		if _, err := a.en.StartWorkflow("default", "wf-1", "", TypeRef{Name: "W"}, "tq", nil); err != nil {
+			t.Fatal(err)
+		}
+		for name, ch := range map[string]<-chan Event{"b hears a": heard, "a hears itself": own} {
+			select {
+			case ev := <-ch:
+				if ev.Kind != "workflow.started" || ev.WorkflowID != "wf-1" {
+					t.Fatalf("%s: %+v", name, ev)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s: no event", name)
+			}
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(relayed) != 1 {
+			t.Fatalf("the replica relayed %d events for one start, want 1", len(relayed))
+		}
+		select {
+		case ev := <-own:
+			t.Fatalf("a replica heard its own event back: %+v", ev)
+		default:
+		}
+	})
+}

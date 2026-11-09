@@ -591,9 +591,9 @@ a decision (started, or a result landed with no following
 `fireAt`. Because dispatch is `seq`-keyed and the decider dedups on
 replay, recovery causes no lost and no double execution.
 
-**Multi-replica: done (v1.53.9), see "Several replicas, one engine" below.**
+**Multi-replica: done (v1.53.10), see "Several replicas, one engine" below.**
 
-### Several replicas, one engine (`EmbedConfig.Database`, v1.53.9)
+### Several replicas, one engine (`EmbedConfig.Database`, v1.53.10)
 
 An engine that owns shard files is one process. Given a `*sql.DB` (`EmbedConfig.Database`:
 a schema on PostgreSQL that every replica reaches, or a SQLite file for a test) it keeps its
@@ -646,9 +646,12 @@ work with it.
   (cancel marks, activity-lease reaping, purge) runs on the replica that leads `lead/sweep` / `lead/purge`.
 - **What stays with the replica a call reached**: the workers subscribed to it (a task is handed
   to a worker its owner holds, so every replica needs the workers of the workflows it may run;
-  a worker that dials one replica's cluster port is served only that replica's tasks), the SSE feed,
-  the worker registry, and the retry backoff timer (the activity record names
+  a worker that dials one replica's cluster port is served only that replica's tasks), the worker
+  registry, and the retry backoff timer (the activity record names
   this replica as owner; if it dies the backoff is lost and the attempt is handed out at once).
+- **The live feed crosses replicas by the host's carriage**: `EmbedConfig.Relay` is told of every event this
+  replica emits and the host carries it to the others, which `Hear` it into their SSE feeds without relaying
+  it again. Nothing is stored; an event sent while the carriage was down is missed.
 - **From files**: `MoveFiles(ctx, db, dir, master)` copies every row of every shard under `dir` into
   the database in batches, holds each tenant's row count and checksum to the files', and records it
   (`tasks_meta.moved`). The files are left. It writes a `moving` marker first, refuses a database that
