@@ -39,6 +39,9 @@ type cluster interface {
 	// lead reports whether this engine holds the named leadership right now. Asking
 	// renews it; a leader that stops asking loses it within leadTTL.
 	lead(name string) bool
+	// shared reports whether other engines run on the same rows, and so whether work
+	// is the business of whichever of them can deliver it to a worker.
+	shared() bool
 }
 
 // solo is the cluster of one process.
@@ -53,6 +56,7 @@ func (s *solo) self() string                   { return s.id }
 func (s *solo) lock(key string) func()         { return s.mu.lock(key) }
 func (s *solo) live() (map[string]bool, error) { return map[string]bool{s.id: true}, nil }
 func (s *solo) lead(string) bool               { return true }
+func (s *solo) shared() bool                   { return false }
 
 func newMemberID(node string) string {
 	var b [4]byte
@@ -115,11 +119,14 @@ func joinCluster(ctx context.Context, sh *storepkg.Shared, node string, log *slo
 }
 
 func (r *replica) self() string { return r.id }
+func (r *replica) shared() bool { return true }
 
-// beat renews the membership every beatEvery and, whenever a member's term has
-// lapsed, calls adopt with the lapsed memberships: the work those engines owned is
-// now owed by whoever sees it first. It returns when the replica leaves.
-func (r *replica) beat(adopt func(lapsed []string)) {
+// beat renews the membership every beat and, on each one, calls tend with the
+// memberships whose term has lapsed: the work those engines owned is now owed by
+// whoever can deliver it. tend is called when there are none too, because an engine
+// may still owe a look at work it could not deliver the last time. It returns when
+// the replica leaves.
+func (r *replica) beat(tend func(lapsed []string)) {
 	r.beating.Store(true)
 	defer close(r.done)
 	tick := time.NewTicker(r.t.beat)
@@ -135,12 +142,13 @@ func (r *replica) beat(adopt func(lapsed []string)) {
 			r.log.Warn("tasks: membership not renewed; peers adopt this engine's work when its term ends", "member", r.id, "error", err)
 		}
 		lapsed, err := r.sh.Lapsed(r.ctx, memberPrefix)
-		switch {
-		case err != nil && r.ctx.Err() == nil:
-			r.log.Warn("tasks: lapsed members cannot be read", "member", r.id, "error", err)
-		case len(lapsed) > 0:
-			adopt(lapsed)
+		if err != nil {
+			if r.ctx.Err() == nil {
+				r.log.Warn("tasks: lapsed members cannot be read", "member", r.id, "error", err)
+			}
+			lapsed = nil
 		}
+		tend(lapsed)
 		if n++; n%24 == 0 { // every two minutes: the locks of holders that died
 			_ = r.sh.Forget(r.ctx, lockPrefix, time.Hour)
 		}

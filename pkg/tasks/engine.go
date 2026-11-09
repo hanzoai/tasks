@@ -54,6 +54,7 @@ type engine struct {
 	// locks that serialize advancing a single (org, ns, wf, run), who is alive, and
 	// who leads a sweep. Solo for a process that owns its files.
 	cl        cluster
+	later     *deferred     // runs it could not deliver when it took them up, shared by tenant views
 	sweep     time.Duration // how often the scheduler ticks
 	principal Principal     // zero = root tenant (embedded/dev). Its org is stamped on every emitted Event.
 	// log reports what the background sweepers cannot return to a caller.
@@ -70,7 +71,7 @@ type engine struct {
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), workers: newWorkerRegistry(), cl: newSolo(), sweep: defaultTiming.sweep, log: slog.Default(), fails: newFailTracker(failReportThrottle)}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), workers: newWorkerRegistry(), cl: newSolo(), later: newDeferred(), sweep: defaultTiming.sweep, log: slog.Default(), fails: newFailTracker(failReportThrottle)}
 }
 
 // As returns an engine view scoped to the tenant p. Reads and writes route
@@ -83,7 +84,7 @@ func (e *engine) As(p Principal) *engine {
 	if p == e.principal {
 		return e
 	}
-	return &engine{store: e.store.as(p), broker: e.broker, disp: e.disp, workers: e.workers, cl: e.cl, sweep: e.sweep, principal: p, log: e.log, fails: e.fails}
+	return &engine{store: e.store.as(p), broker: e.broker, disp: e.disp, workers: e.workers, cl: e.cl, later: e.later, sweep: e.sweep, principal: p, log: e.log, fails: e.fails}
 }
 
 // emit publishes an event tagged with the engine's org so per-org SSE
@@ -1741,11 +1742,10 @@ func (e *engine) reportFire(p Principal, s Schedule, fault error) {
 // Cron specs are parsed via robfig/cron with seconds-optional 5/6-field
 // syntax; first invalid spec is skipped without aborting the sweep.
 //
-// One engine sweeps at a time: among replicas, the one that leads "sweep". The
-// leadership is what keeps the others from reading every tenant's schedules every
-// tick to find that the leader has fired them; it is not what keeps a schedule from
-// firing twice, which is the fire itself (see sweepSchedules), because a leader that
-// stalls past its term overlaps its successor.
+// Every replica fires schedules, and the fire is idempotent (see sweepSchedules); the
+// rest of the sweep, which any one replica can do for all, runs on the one that leads
+// "sweep". The leadership is what keeps the others from reading every tenant's
+// cancels every tick to find that the leader has acked them.
 func (e *engine) runScheduler(stop <-chan struct{}) {
 	t := time.NewTicker(e.sweep)
 	defer t.Stop()
@@ -1754,9 +1754,7 @@ func (e *engine) runScheduler(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			if e.cl.lead("sweep") {
-				e.sweepOnce()
-			}
+			e.sweepOnce()
 		}
 	}
 }
@@ -1776,6 +1774,9 @@ func (e *engine) sweepOnce() {
 		}
 	} else {
 		e.fails.ok(sweepAllKey)
+	}
+	if !e.cl.lead("sweep") {
+		return
 	}
 	if err := e.sweepCanceling(); err != nil {
 		if n, report := e.fails.fail(sweepCancelKey); report {
@@ -1847,6 +1848,15 @@ func (e *engine) sweepSchedules() error {
 	for _, d := range dues {
 		s := d.s
 		oe := e.As(d.principal)
+		// Among replicas, the one that can hand the run to a worker fires it. A
+		// replica whose worker for this namespace and queue is not up (an app starts
+		// one the first time a request needs it) leaves the tick to one that has it,
+		// until the tick is overdue by more than a few sweeps: then no replica has
+		// one, and it fires anyway so the run exists and the fire is reported as
+		// unreached, as it is when an engine is alone.
+		if e.cl.shared() && !e.serves(s.Namespace, s.Action.TaskQueue, kindWorkflow) && now.Sub(d.tick) < 3*e.sweep {
+			continue
+		}
 		// Stamp the originating schedule on the run. The 11-day incident's
 		// fault was one layer below this call — StartWorkflow succeeded 4489
 		// times while the ACTIVITY it started failed every time — and without

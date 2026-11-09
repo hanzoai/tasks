@@ -38,6 +38,14 @@ func openShared(t *testing.T, open dbtest.Open) *store {
 
 func newPod(t *testing.T, open dbtest.Open, name string) *pod {
 	t.Helper()
+	p := newPodWithoutWorker(t, open, name)
+	p.subscribe(t, name)
+	return p
+}
+
+// newPodWithoutWorker is a replica whose app has not started its worker yet.
+func newPodWithoutWorker(t *testing.T, open dbtest.Open, name string) *pod {
+	t.Helper()
 	st := openShared(t, open)
 	en := newEngine(st)
 	m, err := joinCluster(context.Background(), st.shared, name, slog.Default(), defaultTiming)
@@ -48,12 +56,18 @@ func newPod(t *testing.T, open dbtest.Open, name string) *pod {
 	en.cl = m
 	cap := &captureSend{}
 	en.disp.send = cap.fn
+	return &pod{en: en, cap: cap, m: m}
+}
+
+// subscribe is the worker coming up on p: it takes workflow tasks and activities on
+// the queue "tq".
+func (p *pod) subscribe(t *testing.T, name string) {
+	t.Helper()
 	for peer, kind := range map[string]taskKind{name + "-wf": kindWorkflow, name + "-act": kindActivity} {
-		if _, err := en.disp.Subscribe(peer, "default", "tq", kind); err != nil {
+		if _, err := p.en.disp.Subscribe(peer, "default", "tq", kind); err != nil {
 			t.Fatalf("subscribe %s: %v", peer, err)
 		}
 	}
-	return &pod{en: en, cap: cap, m: m}
 }
 
 func podPair(t *testing.T, open dbtest.Open) (*pod, *pod) {
@@ -467,5 +481,147 @@ func checkCancelIsSweptByAnyReplica(t *testing.T, open dbtest.Open) {
 	}
 	if ok, _ := a.en.store.get(cancelKey("default", "wf-1", wf.Execution.RunId), new(cancelMark)); ok {
 		t.Fatal("the cancel mark outlived the run")
+	}
+}
+
+// A replica takes up only the work it can hand to a worker: one whose app has not
+// started its worker leaves a dead engine's work to a replica that has, and looks
+// again on every beat until one has.
+func TestShared_WorkIsTakenByAReplicaThatCanDeliverIt(t *testing.T) {
+	dbtest.Engines(t, func(t *testing.T, open dbtest.Open) {
+		checkWorkIsTakenByAReplicaThatCanDeliverIt(t, open)
+	})
+}
+
+func checkWorkIsTakenByAReplicaThatCanDeliverIt(t *testing.T, open dbtest.Open) {
+	a, b := podPair(t, open)
+	c := newPodWithoutWorker(t, open, "c")
+	run := startWithActivity(t, a, "wf-1")
+	a.die(t)
+
+	// c looks first, and has no worker: it takes nothing and remembers the run.
+	if err := c.en.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if wf, act := deliveries(c); wf != 0 || act != 0 {
+		t.Fatalf("a replica with no worker took work: %d decisions, %d activities", wf, act)
+	}
+	if rec, _, _ := c.en.getWorkflowActivity("default", "wf-1", run, 0); rec.Owner != a.m.id {
+		t.Fatalf("the dead replica's activity was re-owned by a replica that could not run it: %q", rec.Owner)
+	}
+	if c.en.later.len() != 1 {
+		t.Fatalf("c remembers %d runs it could not deliver, want 1", c.en.later.len())
+	}
+
+	// b has a worker: it takes the activity.
+	if err := b.en.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if _, act := deliveries(b); act != 1 {
+		t.Fatalf("b took the activity %d times, want 1", act)
+	}
+	// c looks again and finds it taken.
+	if err := c.en.retryLater(); err != nil {
+		t.Fatal(err)
+	}
+	if c.en.later.len() != 0 || countDeliveriesAll(c) != 0 {
+		t.Fatalf("c still holds a run b took: %d remembered, %d delivered", c.en.later.len(), countDeliveriesAll(c))
+	}
+}
+
+func countDeliveriesAll(p *pod) int { wf, act := deliveries(p); return wf + act }
+
+// When no replica has the worker the work waits where it is; the one whose worker
+// comes up first takes it on its next look.
+func TestShared_WorkWaitsForAWorkerAndIsTakenWhenOneComesUp(t *testing.T) {
+	dbtest.Engines(t, func(t *testing.T, open dbtest.Open) {
+		checkWorkWaitsForAWorker(t, open)
+	})
+}
+
+func checkWorkWaitsForAWorker(t *testing.T, open dbtest.Open) {
+	a, _ := podPair(t, open)
+	c := newPodWithoutWorker(t, open, "c")
+	run := startWithActivity(t, a, "wf-1")
+	a.die(t)
+	if err := c.en.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if c.en.later.len() != 1 {
+		t.Fatalf("the run waits for a worker: %d remembered", c.en.later.len())
+	}
+	c.subscribe(t, "c") // the app starts its worker
+	if err := c.en.retryLater(); err != nil {
+		t.Fatal(err)
+	}
+	if c.en.later.len() != 0 {
+		t.Fatal("the run was taken once a worker was up")
+	}
+	if _, act := deliveries(c); act != 1 {
+		t.Fatalf("the activity was handed to c's worker %d times, want 1", act)
+	}
+	if rec, _, _ := c.en.getWorkflowActivity("default", "wf-1", run, 0); rec.Owner != c.m.id {
+		t.Fatalf("owner %q", rec.Owner)
+	}
+}
+
+// A due schedule is fired by a replica that can hand its run to a worker; a replica
+// whose worker is not up leaves it, until the tick is so overdue that no replica has
+// one.
+func TestShared_AScheduleIsFiredByAReplicaThatServesIt(t *testing.T) {
+	dbtest.Engines(t, func(t *testing.T, open dbtest.Open) {
+		checkScheduleIsFiredByAReplicaThatServesIt(t, open)
+	})
+}
+
+func checkScheduleIsFiredByAReplicaThatServesIt(t *testing.T, open dbtest.Open) {
+	_, b := podPair(t, open)
+	c := newPodWithoutWorker(t, open, "c")
+	due := func(id string, ago time.Duration) {
+		t.Helper()
+		if err := b.en.CreateSchedule(Schedule{
+			ScheduleId: id, Namespace: "default",
+			Spec:   ScheduleSpec{CronString: []string{"@every 1h"}},
+			Action: ScheduleAction{WorkflowType: TypeRef{Name: "Backup"}, TaskQueue: "tq"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.en.editSchedule("default", id, func(s *Schedule) {
+			s.Info.UpdateTime = time.Now().Add(-time.Hour - ago).UTC().Format(time.RFC3339)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func(id string) int {
+		runs, _ := b.en.ListWorkflows("default")
+		n := 0
+		for _, r := range runs {
+			if s, _ := r.SearchAttrs[searchAttrScheduleID].(string); s == id {
+				n++
+			}
+		}
+		return n
+	}
+
+	due("fresh", time.Second) // the tick was a second ago
+	if err := c.en.sweepSchedules(); err != nil {
+		t.Fatal(err)
+	}
+	if count("fresh") != 0 {
+		t.Fatal("a replica with no worker fired a tick a replica with one can fire")
+	}
+	if err := b.en.sweepSchedules(); err != nil {
+		t.Fatal(err)
+	}
+	if count("fresh") != 1 {
+		t.Fatalf("the replica with the worker fired %d runs, want 1", count("fresh"))
+	}
+
+	due("overdue", time.Hour) // nobody has fired it for an hour
+	if err := c.en.sweepSchedules(); err != nil {
+		t.Fatal(err)
+	}
+	if count("overdue") != 1 {
+		t.Fatalf("an overdue tick must be fired by whoever sees it, so that it exists and is reported: %d", count("overdue"))
 	}
 }

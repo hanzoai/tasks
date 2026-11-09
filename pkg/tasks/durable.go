@@ -605,8 +605,14 @@ func (e *engine) Recover() error {
 				return err
 			}
 			for _, ref := range open {
-				if err := oe.recoverRun(ns, ref.WorkflowId, ref.RunId, alive); err != nil {
+				later, err := oe.recoverRun(ns, ref.WorkflowId, ref.RunId, alive)
+				if err != nil {
 					return err
+				}
+				if r := (deferredRun{p, ns, ref.WorkflowId, ref.RunId}); later {
+					e.later.put(r)
+				} else {
+					e.later.drop(r)
 				}
 			}
 		}
@@ -637,37 +643,121 @@ func (e *engine) aliveFn() (func(owner string) bool, error) {
 	}, nil
 }
 
-func (e *engine) recoverRun(ns, wf, run string, alive func(owner string) bool) error {
+func (e *engine) recoverRun(ns, wf, run string, alive func(owner string) bool) (later bool, err error) {
 	unlock := e.lockRun(ns, wf, run)
 	defer unlock()
 	row, ok, err := e.DescribeWorkflow(ns, wf, run)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ok || isTerminal(row.Status) {
 		// An entry its row contradicts: the process stopped between the
 		// writes that open or close a run. There is nothing to drive.
-		return e.store.del(openKey(ns, wf, run))
+		return false, e.store.del(openKey(ns, wf, run))
 	}
 	acts, err := e.listWorkflowActivities(ns, wf, run)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for k := range acts {
 		if acts[k].isTerminal() || alive(acts[k].Owner) {
 			continue
 		}
+		if !e.serves(ns, acts[k].TaskQueue, kindActivity) {
+			later = true // another replica has the worker for it, or this one will
+			continue
+		}
 		rec := acts[k]
 		if err := e.dispatchActivityAttempt(ns, wf, run, &rec, false); err != nil {
-			return err
+			return false, err
 		}
 	}
 	task, claimed, err := e.getTask(ns, wf, run)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if claimed && (task.Idle || alive(task.Owner)) {
-		return nil
+		return later, nil
 	}
-	return e.scheduleWorkflowTask(ns, wf, run)
+	if !e.serves(ns, row.TaskQueue, kindWorkflow) {
+		return true, nil
+	}
+	return later, e.scheduleWorkflowTask(ns, wf, run)
+}
+
+// serves reports whether this engine can hand work for (ns, queue) to a worker. An
+// engine that owns its files is the only one there is, and takes work whether or not
+// its worker is up yet: it waits in the dispatcher for it, as work always has. One of
+// several replicas takes only what it can deliver, because a replica whose app has
+// not started that worker (apps start a worker the first time a request needs it)
+// would otherwise hold work that another replica could have run.
+func (e *engine) serves(ns, queue string, kind taskKind) bool {
+	if !e.cl.shared() {
+		return true
+	}
+	if queue == "" {
+		queue = "default"
+	}
+	return e.disp != nil && e.disp.HasSubscribers(ns, queue, kind)
+}
+
+// deferred is the runs this engine took up and could not deliver: they are looked at
+// again on every beat, and are cheap to look at, where walking every open run again
+// would not be.
+type deferred struct {
+	mu   sync.Mutex
+	runs map[deferredRun]struct{}
+}
+
+type deferredRun struct {
+	p          Principal
+	ns, wf, id string
+}
+
+func newDeferred() *deferred { return &deferred{runs: map[deferredRun]struct{}{}} }
+
+func (d *deferred) put(r deferredRun) {
+	d.mu.Lock()
+	d.runs[r] = struct{}{}
+	d.mu.Unlock()
+}
+
+func (d *deferred) drop(r deferredRun) {
+	d.mu.Lock()
+	delete(d.runs, r)
+	d.mu.Unlock()
+}
+
+func (d *deferred) list() []deferredRun {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]deferredRun, 0, len(d.runs))
+	for r := range d.runs {
+		out = append(out, r)
+	}
+	return out
+}
+
+func (d *deferred) len() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.runs)
+}
+
+// Retry looks again at the runs this engine could not deliver.
+func (e *engine) retryLater() error {
+	alive, err := e.aliveFn()
+	if err != nil {
+		return err
+	}
+	for _, r := range e.later.list() {
+		later, err := e.As(r.p).recoverRun(r.ns, r.wf, r.id, alive)
+		if err != nil {
+			return err
+		}
+		if !later {
+			e.later.drop(r)
+		}
+	}
+	return nil
 }

@@ -103,6 +103,7 @@ type Embedded struct {
 	router  routing.Router
 	migr    *migration.Coordinator // nil when the state is a shared database: there is one store, and no shard to move
 	member  *replica               // nil when this engine owns its files
+	seen    walked
 }
 
 // Embed starts the Tasks server. Stop before exit.
@@ -219,7 +220,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	// dispatcher's send closure can route delivery to whichever listener (the
 	// loopback one here, or a gated one added later by ServeGated) holds the
 	// subscribed worker's peer.
-	e := &Embedded{cfg: cfg, engine: en, repl: repl, router: router, migr: migr, member: member, nodes: []*zap.Node{node}}
+	e := &Embedded{cfg: cfg, engine: en, repl: repl, router: router, migr: migr, member: member, seen: walked{walked: map[string]bool{}}, nodes: []*zap.Node{node}}
 
 	// Wire dispatcher → node.Send for server-push delivery, routed to the listener
 	// that owns the worker's subscription.
@@ -266,25 +267,61 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	go en.runScheduler(stop)
 	go en.runPurge(stop)
 	if member != nil {
-		go member.beat(e.adopt)
+		go member.beat(e.tend)
 	}
 	e.stop = stop
 
 	return e, nil
 }
 
-// adopt takes up the work of the engines whose memberships lapsed: one replica
-// does, the one that leads it, and the lapsed memberships are cleared only once the
-// pass has finished, so a replica that dies in the middle leaves them for the next.
-func (e *Embedded) adopt(lapsed []string) {
-	if !e.engine.cl.lead("adopt") {
+// tend is what a replica does on every beat. Every replica takes up the work of an
+// engine whose membership lapsed, whichever sees it first, and takes only what it can
+// deliver to a worker (see serves); what it could not it looks at again on every beat
+// until some replica has taken it. A lapsed membership is walked once by each replica
+// and cleared by the first whose walk left nothing behind, so a replica that dies in
+// the middle leaves it for the next, and one that cannot deliver the work does not
+// clear what another could.
+func (e *Embedded) tend(lapsed []string) {
+	var fresh []string
+	e.seen.mu.Lock()
+	for _, name := range lapsed {
+		if !e.seen.walked[name] {
+			fresh = append(fresh, name)
+		}
+	}
+	e.seen.mu.Unlock()
+	if len(fresh) > 0 {
+		if err := e.engine.Recover(); err != nil {
+			e.cfg.Logger.Error("tasks: could not take up the work of engines that stopped; it is tried again", "lapsed", fresh, "error", err)
+			return
+		}
+		e.seen.mu.Lock()
+		for _, name := range fresh {
+			e.seen.walked[name] = true
+		}
+		e.seen.mu.Unlock()
+	} else if e.engine.later.len() > 0 {
+		if err := e.engine.retryLater(); err != nil {
+			e.cfg.Logger.Error("tasks: could not look again at work this replica could not deliver", "error", err)
+			return
+		}
+	}
+	if n := e.engine.later.len(); n > 0 {
+		if cnt, report := e.engine.fails.fail("later|" + e.member.id); report {
+			e.cfg.Logger.Warn("tasks: runs wait for a worker this replica does not have, and no replica has taken them", "runs", n, "consecutive", cnt)
+		}
 		return
 	}
-	if err := e.engine.Recover(); err != nil {
-		e.cfg.Logger.Error("tasks: could not take up the work of engines that stopped; it is tried again", "lapsed", lapsed, "error", err)
-		return
+	e.engine.fails.ok("later|" + e.member.id)
+	if len(lapsed) > 0 {
+		e.member.retire(lapsed)
 	}
-	e.member.retire(lapsed)
+}
+
+// walked is the lapsed memberships this replica has walked the open runs for.
+type walked struct {
+	mu     sync.Mutex
+	walked map[string]bool
 }
 
 // wireSend builds a ZAP message for server-initiated push: the body is

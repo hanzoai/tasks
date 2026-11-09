@@ -591,9 +591,9 @@ a decision (started, or a result landed with no following
 `fireAt`. Because dispatch is `seq`-keyed and the decider dedups on
 replay, recovery causes no lost and no double execution.
 
-**Multi-replica: done (v1.53.7), see "Several replicas, one engine" below.**
+**Multi-replica: done (v1.53.8), see "Several replicas, one engine" below.**
 
-### Several replicas, one engine (`EmbedConfig.Database`, v1.53.7)
+### Several replicas, one engine (`EmbedConfig.Database`, v1.53.8)
 
 An engine that owns shard files is one process. Given a `*sql.DB` (`EmbedConfig.Database`:
 a schema on PostgreSQL that every replica reaches, or a SQLite file for a test) it keeps its
@@ -610,8 +610,8 @@ work with it.
   its page before it calls back, so a callback may query on a one-connection SQLite handle.
   The handle is the host's; `Stop` does not close it.
 - **Time and who holds what is `tasks_lease(name, holder, expires)` in the DATABASE's clock**:
-  membership (`member/<id>`, renewed every 5 s, term 15 s), leadership (`lead/sweep`,
-  `lead/purge`, `lead/adopt`), and the locks (`lock/<key>`, term 20 s). A lock is a lease
+  membership (`member/<id>`, renewed every 5 s, term 15 s), leadership (`lead/sweep`, `lead/purge`),
+  and the locks (`lock/<hash of key>`, term 20 s). A lock is a lease
   taken for a handful of statements, so it holds no connection while held (a pool of four
   cannot afford a held connection per critical section) and a holder that dies frees it by
   expiry; a replica that waits retries with a jittered backoff, and waits behind a process-local
@@ -626,18 +626,24 @@ work with it.
   the epoch that stands: a worker whose replica was declared dead and replaced answers with an
   older epoch and is refused (a refused FAILURE is not counted as an attempt). Idle says nothing
   is owed. The claim is written BEFORE the task is handed over.
-- **Recover takes up what no live replica owns.** At start, and whenever a member's term lapses
-  (`beat` finds it; a replica that leaves expires its own lease, so a rolling update is adopted
-  within one beat, a kill within term + beat), one replica (`lead/adopt`) walks every tenant's open
-  runs and re-dispatches the activities whose owner is not alive and re-enqueues a decision whose
-  claim is held by a dead owner, missing, or from before owners existed (rows moved from files).
-  Liveness is re-read at most once a second during a pass, so a replica that joins mid-pass is not
-  taken for dead. A lapsed membership is cleared only after the pass finishes.
-- **A schedule fires once.** The sweep runs on the replica that leads `lead/sweep`, and the fire is
-  idempotent regardless: the run is `<type>-<hash of tenant, schedule, tick>` started under request
-  id `tick:<tick>`, so a leader that stalled past its term and its successor fire the same tick into
-  one run, and ActionCount counts only a fire that made a run. Cancel marks are rows
-  (`wfcancel/...`), swept by the leader.
+- **Recover takes up what no live replica owns, and only what it can deliver.** At start, and on each
+  beat that finds a lapsed membership (a replica that leaves expires its own lease, so a rolling update
+  is adopted within one beat, a kill within term + beat), EVERY replica walks every tenant's open runs
+  and re-dispatches the activities whose owner is not alive and re-enqueues a decision whose claim is
+  held by a dead owner, missing, or from before owners existed (rows moved from files). A replica takes
+  an item only if one of its workers subscribes to the item's namespace and queue (`serves`): apps start
+  a worker the first time a request needs it (knowledge, git, auto's per-org workers), so the replica that
+  adopts must be one that can run the work. What it could not deliver it remembers (`later`) and looks at
+  again on every beat, which is cheap, until some replica has taken it. A lapsed membership is walked once
+  per replica and cleared by the first replica whose walk left nothing behind. Liveness is re-read at most
+  once a second during a pass, so a replica that joins mid-pass is not taken for dead. An engine that owns
+  its files serves everything: its work waits in the dispatcher for a worker, as it always has.
+- **A schedule fires once.** EVERY replica sweeps and fires the ticks it can deliver (a due tick whose
+  queue has no worker here is left to a replica that has one, until it is overdue by 3 sweeps, when whoever
+  sees it fires it so the run exists and is reported as unreached). The fire is idempotent: the run is
+  `<type>-<hash of tenant, schedule, tick>` started under request id `tick:<tick>`, so two replicas that fire
+  the same tick make one run, and ActionCount counts only a fire that made a run. The rest of the sweep
+  (cancel marks, activity-lease reaping, purge) runs on the replica that leads `lead/sweep` / `lead/purge`.
 - **What stays with the replica a call reached**: the workers subscribed to it (a task is handed
   to a worker its owner holds, so every replica needs the workers of the workflows it may run;
   a worker that dials one replica's cluster port is served only that replica's tasks), the SSE feed,
@@ -646,7 +652,7 @@ work with it.
 - **From files**: `MoveFiles(ctx, db, dir, master)` copies every row of every shard under `dir` into
   the database in batches, holds each tenant's row count and checksum to the files', and records it
   (`tasks_meta.moved`). The files are left. The moved rows carry no owners, so the first Recover on
-  them takes up all in-flight work, exactly as after a restart. `FilesIn(dir)` and `Moved(ctx, db)` ask
+  them takes up all the in-flight work it can deliver, and the replicas look again until all of it is taken, exactly as after a restart. `FilesIn(dir)` and `Moved(ctx, db)` ask
   without side effects. It is for the window in which one process still owns the files.
 - Tests (`TASKS_TEST_SQL_DSN` for the PostgreSQL leg; cloud's `scripts/postgres.sh` exports
   `CLOUD_TEST_SQL_DSN`): `shared_test.go` (two engines on two pools: schedule fires once, lock
