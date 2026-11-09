@@ -448,6 +448,24 @@ func (s *Shared) SetMeta(ctx context.Context, key, value string) error {
 	return nil
 }
 
+// Count is how many rows the store holds, of every tenant.
+func (s *Shared) Count(ctx context.Context) (int64, error) {
+	var n int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks_kv`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store.Count: %w", err)
+	}
+	return n, nil
+}
+
+// Clear removes every row. It is for a move that is starting again over the rows its
+// own earlier attempt left; nothing else clears an engine's state.
+func (s *Shared) Clear(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM tasks_kv`); err != nil {
+		return fmt.Errorf("store.Clear: %w", err)
+	}
+	return nil
+}
+
 // Row is one key and its value.
 type Row struct {
 	Key   string

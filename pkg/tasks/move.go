@@ -40,6 +40,7 @@ type MoveReport struct {
 
 const (
 	movedKey  = "moved"
+	movingKey = "moving"
 	moveLease = "move"
 	// movePage is how many rows are read from a shard, and written, at a time.
 	movePage = 500
@@ -50,6 +51,26 @@ const (
 
 // ErrMoving is the answer when another process holds the move.
 var ErrMoving = errors.New("tasks: another process is moving these rows")
+
+// ErrForeign is the refusal to move files into a database that already holds an
+// engine's rows that the move did not write: a replica with no files was born on it
+// before the files were moved, and its rows and the files' cannot both be the engine.
+var ErrForeign = errors.New("tasks: the database holds rows of an engine that did not come from these files")
+
+// Moving reports whether a move of files into db has begun and not finished: an
+// engine opened on the database now would be opened beside rows still being copied,
+// or beside the remains of a move that stopped.
+func Moving(ctx context.Context, db *sql.DB) (bool, error) {
+	sh, err := storepkg.OpenShared(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	if _, done, err := sh.Meta(ctx, movedKey); err != nil || done {
+		return false, err
+	}
+	_, ok, err := sh.Meta(ctx, movingKey)
+	return ok, err
+}
 
 // FilesIn reports whether dir holds shard files to move.
 func FilesIn(dir string) bool { return storepkg.HasShards(dir) }
@@ -91,6 +112,24 @@ func MoveFiles(ctx context.Context, db *sql.DB, dir string, master []byte) (*Mov
 		return nil, ErrMoving
 	}
 	defer func() { _ = sh.Release(context.Background(), moveLease, holder) }()
+
+	// Whose rows are in the database now? None, or the remains of an earlier attempt of
+	// this move, which are written again from the files; anything else was written by an
+	// engine that was born on the database, and is not overwritten or merged.
+	if _, again, err := sh.Meta(ctx, movingKey); err != nil {
+		return nil, fmt.Errorf("tasks.MoveFiles: %w", err)
+	} else if n, err := sh.Count(ctx); err != nil {
+		return nil, fmt.Errorf("tasks.MoveFiles: %w", err)
+	} else if n > 0 && !again {
+		return nil, fmt.Errorf("%w (%d rows)", ErrForeign, n)
+	} else if again {
+		if err := sh.Clear(ctx); err != nil {
+			return nil, fmt.Errorf("tasks.MoveFiles: %w", err)
+		}
+	}
+	if err := sh.SetMeta(ctx, movingKey, nowRFC3339()); err != nil {
+		return nil, fmt.Errorf("tasks.MoveFiles: %w", err)
+	}
 
 	mgr, err := storepkg.New(dir, master)
 	if err != nil {

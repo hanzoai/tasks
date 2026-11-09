@@ -591,9 +591,9 @@ a decision (started, or a result landed with no following
 `fireAt`. Because dispatch is `seq`-keyed and the decider dedups on
 replay, recovery causes no lost and no double execution.
 
-**Multi-replica: done (v1.53.8), see "Several replicas, one engine" below.**
+**Multi-replica: done (v1.53.9), see "Several replicas, one engine" below.**
 
-### Several replicas, one engine (`EmbedConfig.Database`, v1.53.8)
+### Several replicas, one engine (`EmbedConfig.Database`, v1.53.9)
 
 An engine that owns shard files is one process. Given a `*sql.DB` (`EmbedConfig.Database`:
 a schema on PostgreSQL that every replica reaches, or a SQLite file for a test) it keeps its
@@ -651,7 +651,10 @@ work with it.
   this replica as owner; if it dies the backoff is lost and the attempt is handed out at once).
 - **From files**: `MoveFiles(ctx, db, dir, master)` copies every row of every shard under `dir` into
   the database in batches, holds each tenant's row count and checksum to the files', and records it
-  (`tasks_meta.moved`). The files are left. The moved rows carry no owners, so the first Recover on
+  (`tasks_meta.moved`). The files are left. It writes a `moving` marker first, refuses a database that
+  already holds rows that are not its own (`ErrForeign`: a replica with no files was born on it), and a
+  move that stopped halfway is begun again over its own remains (cleared, then copied), so a row the
+  files no longer hold does not come back; `Moving(ctx, db)` says whether one is under way. The moved rows carry no owners, so the first Recover on
   them takes up all the in-flight work it can deliver, and the replicas look again until all of it is taken, exactly as after a restart. `FilesIn(dir)` and `Moved(ctx, db)` ask
   without side effects. It is for the window in which one process still owns the files.
 - Tests (`TASKS_TEST_SQL_DSN` for the PostgreSQL leg; cloud's `scripts/postgres.sh` exports

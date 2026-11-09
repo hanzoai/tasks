@@ -4,6 +4,7 @@ package tasks_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -123,5 +124,56 @@ func moveFiles(t *testing.T, open dbtest.Open) {
 	scheds, err := shared.View(tasks.Principal{}).ListSchedules("default")
 	if err != nil || len(scheds) != 1 || scheds[0].ScheduleId != "kept" {
 		t.Fatalf("schedules after the move: %v %v", scheds, err)
+	}
+}
+
+// A database that already holds the rows of an engine that did not come from the files
+// is not moved into; and a move that stopped halfway is begun again over its own remains.
+func TestMoveFiles_RefusesForeignRowsAndRestartsItsOwn(t *testing.T) {
+	dbtest.Engines(t, func(t *testing.T, open dbtest.Open) {
+		checkMoveRefusesForeignRows(t, open)
+	})
+}
+
+func checkMoveRefusesForeignRows(t *testing.T, open dbtest.Open) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	port := freePort(t)
+	files, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", port), DataDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := files.View(tasks.Principal{}).CreateSchedule(tasks.Schedule{
+		ScheduleId: "s", Namespace: "default",
+		Spec:   tasks.ScheduleSpec{CronString: []string{"@every 1h"}},
+		Action: tasks.ScheduleAction{WorkflowType: tasks.TypeRef{Name: "W"}, TaskQueue: "q"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// An engine born on the database, with a schedule of its own.
+	db := open()
+	born, err := tasks.Embed(ctx, tasks.EmbedConfig{Address: fmt.Sprintf(":%d", freePort(t)), Database: db, NodeID: "born"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := born.View(tasks.Principal{}).CreateSchedule(tasks.Schedule{
+		ScheduleId: "born", Namespace: "default",
+		Spec:   tasks.ScheduleSpec{CronString: []string{"@every 1h"}},
+		Action: tasks.ScheduleAction{WorkflowType: tasks.TypeRef{Name: "W"}, TaskQueue: "q"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := born.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.MoveFiles(ctx, db, dir, nil); !errors.Is(err, tasks.ErrForeign) {
+		t.Fatalf("files were moved over the rows of an engine born on the database: %v", err)
+	}
+	if moving, _ := tasks.Moving(ctx, db); moving {
+		t.Fatal("a move that was refused is said to be under way")
 	}
 }
