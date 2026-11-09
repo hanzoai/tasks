@@ -625,3 +625,61 @@ func checkScheduleIsFiredByAReplicaThatServesIt(t *testing.T, open dbtest.Open) 
 		t.Fatalf("an overdue tick must be fired by whoever sees it, so that it exists and is reported: %d", count("overdue"))
 	}
 }
+
+// A job enqueued twice at once from two replicas is one job, and one a worker has
+// claimed is not reset by a third enqueue: the check for the activity and the start
+// that fills it are one step across replicas.
+func TestShared_StartActivityIsIdempotentAcrossReplicas(t *testing.T) {
+	dbtest.Engines(t, func(t *testing.T, open dbtest.Open) {
+		checkStartActivityIsIdempotentAcrossReplicas(t, open)
+	})
+}
+
+func checkStartActivityIsIdempotentAcrossReplicas(t *testing.T, open dbtest.Open) {
+	a, b := podPair(t, open)
+	start := func(p *pod, id string) {
+		if _, err := p.en.StartActivity("default", id, id, TypeRef{Name: "render"}, "gpu", []any{"in"}, nil, "", "", "", "1h", "tester", id); err != nil {
+			t.Errorf("start %s: %v", id, err)
+		}
+	}
+	// Eight enqueues of each of twenty jobs, released together from both replicas.
+	var wg sync.WaitGroup
+	release := make(chan struct{})
+	for j := 0; j < 20; j++ {
+		id := fmt.Sprintf("job-%02d", j)
+		for k := 0; k < 8; k++ {
+			p := []*pod{a, b}[k%2]
+			wg.Add(1)
+			go func() { defer wg.Done(); <-release; start(p, id) }()
+		}
+	}
+	close(release)
+	wg.Wait()
+	rows, _, err := a.en.ListActivities("default", "", 0)
+	if err != nil || len(rows) != 20 {
+		t.Fatalf("20 jobs were enqueued and %d exist (%v)", len(rows), err)
+	}
+	for j := 0; j < 20; j++ {
+		id := fmt.Sprintf("job-%02d", j)
+		if evs, _, _ := a.en.GetActivityHistory("default", id, id, 0, 100, false); len(evs) != 1 {
+			t.Fatalf("%s: its history holds %d events after eight enqueues, want 1: it was made more than once", id, len(evs))
+		}
+	}
+
+	// A worker claims one through one replica; an enqueue through the other answers the
+	// job as it is and does not make it SCHEDULED again.
+	got, ok, err := a.en.ClaimNextActivity("default", "gpu", "worker-1", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	id := got.Execution.WorkflowId
+	for _, p := range []*pod{b, a, b} {
+		wg.Add(1)
+		go func() { defer wg.Done(); start(p, id) }()
+	}
+	wg.Wait()
+	now, _, _ := b.en.DescribeActivity("default", id, id)
+	if now.Status != activityStateStarted || now.Identity != "worker-1" {
+		t.Fatalf("an enqueue reset a claimed job: %s held by %q", now.Status, now.Identity)
+	}
+}
