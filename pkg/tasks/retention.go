@@ -83,7 +83,9 @@ func (e *engine) runPurge(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
-			e.purgeOnce(time.Now())
+			if e.cl.lead("purge") {
+				e.purgeOnce(time.Now())
+			}
 		}
 	}
 }

@@ -90,7 +90,7 @@ func TestActivityFailureIsDurableWithNoSubscriber(t *testing.T) {
 	run := failNS(t, en, "default", "job-1", "JobWorkflow", "cron-q")
 	schedActivity(t, en, "default", "job-1", run, 0, "RunJobActivity", "cron-q", nil)
 
-	if err := en.completeWorkflowActivity("default", "job-1", run, 0, nil, rbacDenied(t)); err != nil {
+	if err := en.completeWorkflowActivity("default", "job-1", run, 0, 0, nil, rbacDenied(t)); err != nil {
 		t.Fatalf("completeWorkflowActivity: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestActivityFailureStreakOutlivesProcessRestart(t *testing.T) {
 		}
 		wf, _, _ := enA.DescribeWorkflow("default", wfID, "")
 		schedActivity(t, enA, "default", wfID, wf.Execution.RunId, 0, "RunJobActivity", "cron-q", nil)
-		if err := enA.completeWorkflowActivity("default", wfID, wf.Execution.RunId, 0, nil, rbacDenied(t)); err != nil {
+		if err := enA.completeWorkflowActivity("default", wfID, wf.Execution.RunId, 0, 0, nil, rbacDenied(t)); err != nil {
 			t.Fatalf("fail %s: %v", wfID, err)
 		}
 	}
@@ -173,7 +173,7 @@ func TestActivityFailureStreakOutlivesProcessRestart(t *testing.T) {
 	}
 	wf, _, _ := enB.DescribeWorkflow("default", "fire-4", "")
 	schedActivity(t, enB, "default", "fire-4", wf.Execution.RunId, 0, "RunJobActivity", "cron-q", nil)
-	if err := enB.completeWorkflowActivity("default", "fire-4", wf.Execution.RunId, 0, nil, rbacDenied(t)); err != nil {
+	if err := enB.completeWorkflowActivity("default", "fire-4", wf.Execution.RunId, 0, 0, nil, rbacDenied(t)); err != nil {
 		t.Fatalf("fail fire-4: %v", err)
 	}
 	if got := onlyStreak(t, enB, "default").ConsecutiveFailures; got != 4 {
@@ -216,7 +216,7 @@ func TestScheduleFiredActivityFailureNamesTheSchedule(t *testing.T) {
 
 	// Now break the layer below, where the real fault lived.
 	schedActivity(t, en, "default", wfID, run, 0, "RunJobActivity", "cron-q", nil)
-	if err := en.completeWorkflowActivity("default", wfID, run, 0, nil, rbacDenied(t)); err != nil {
+	if err := en.completeWorkflowActivity("default", wfID, run, 0, 0, nil, rbacDenied(t)); err != nil {
 		t.Fatalf("completeWorkflowActivity: %v", err)
 	}
 
@@ -240,7 +240,7 @@ func TestActivityFailureIsThrottled(t *testing.T) {
 	const fires = 3 * failReportThrottle
 	for i := 0; i < fires; i++ {
 		schedActivity(t, en, "default", "job-loud", run, i, "RunJobActivity", "cron-q", nil)
-		if err := en.completeWorkflowActivity("default", "job-loud", run, i, nil, rbacDenied(t)); err != nil {
+		if err := en.completeWorkflowActivity("default", "job-loud", run, i, 0, nil, rbacDenied(t)); err != nil {
 			t.Fatalf("fail #%d: %v", i+1, err)
 		}
 	}
@@ -277,7 +277,7 @@ func TestActivityFailurePersistentIsAlertable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if err := en.completeWorkflowActivity("default", "job-p", run, 0, nil, transient); err != nil {
+	if err := en.completeWorkflowActivity("default", "job-p", run, 0, 0, nil, transient); err != nil {
 		t.Fatalf("transient failure: %v", err)
 	}
 	warns := withMsg(logs(), msgActivityFailed)
@@ -303,7 +303,7 @@ func TestActivityFailurePersistentIsAlertable(t *testing.T) {
 	}
 
 	schedActivity(t, en, "default", "job-p", run, 1, "RunJobActivity", "cron-q", nil)
-	if err := en.completeWorkflowActivity("default", "job-p", run, 1, nil, rbacDenied(t)); err != nil {
+	if err := en.completeWorkflowActivity("default", "job-p", run, 1, 0, nil, rbacDenied(t)); err != nil {
 		t.Fatalf("persistent failure: %v", err)
 	}
 
@@ -336,13 +336,13 @@ func TestActivityRecoveryClearsStreak(t *testing.T) {
 	run := failNS(t, en, "default", "job-r", "JobWorkflow", "cron-q")
 
 	schedActivity(t, en, "default", "job-r", run, 0, "RunJobActivity", "cron-q", nil)
-	if err := en.completeWorkflowActivity("default", "job-r", run, 0, nil, rbacDenied(t)); err != nil {
+	if err := en.completeWorkflowActivity("default", "job-r", run, 0, 0, nil, rbacDenied(t)); err != nil {
 		t.Fatalf("fail: %v", err)
 	}
 	onlyStreak(t, en, "default") // must exist before we fix it
 
 	schedActivity(t, en, "default", "job-r", run, 1, "RunJobActivity", "cron-q", nil)
-	if err := en.completeWorkflowActivity("default", "job-r", run, 1, []byte(`"ok"`), nil); err != nil {
+	if err := en.completeWorkflowActivity("default", "job-r", run, 1, 0, []byte(`"ok"`), nil); err != nil {
 		t.Fatalf("succeed: %v", err)
 	}
 
@@ -475,7 +475,7 @@ func TestFailureReportingPreservesRetrySemantics(t *testing.T) {
 		t.Fatalf("encode: %v", err)
 	}
 	for i := 0; i < maxAttempts; i++ {
-		if err := en.completeWorkflowActivity("default", "job-s", run, 0, nil, retryable); err != nil {
+		if err := en.completeWorkflowActivity("default", "job-s", run, 0, 0, nil, retryable); err != nil {
 			t.Fatalf("attempt %d: %v", i+1, err)
 		}
 		// The retry is armed on a timer; wait for the re-dispatch so the next
@@ -534,7 +534,7 @@ func TestFailureStreaksAreOrgScoped(t *testing.T) {
 		en := root.As(Org(org))
 		run := failNS(t, en, "default", "job-"+org, "JobWorkflow", "cron-q")
 		schedActivity(t, en, "default", "job-"+org, run, 0, "RunJobActivity", "cron-q", nil)
-		if err := en.completeWorkflowActivity("default", "job-"+org, run, 0, nil, rbacDenied(t)); err != nil {
+		if err := en.completeWorkflowActivity("default", "job-"+org, run, 0, 0, nil, rbacDenied(t)); err != nil {
 			t.Fatalf("fail %s: %v", org, err)
 		}
 	}
@@ -545,7 +545,7 @@ func TestFailureStreaksAreOrgScoped(t *testing.T) {
 	}
 	wf, _, _ := acme.DescribeWorkflow("default", "job-acme-2", "")
 	schedActivity(t, acme, "default", "job-acme-2", wf.Execution.RunId, 0, "RunJobActivity", "cron-q", nil)
-	if err := acme.completeWorkflowActivity("default", "job-acme-2", wf.Execution.RunId, 0, nil, rbacDenied(t)); err != nil {
+	if err := acme.completeWorkflowActivity("default", "job-acme-2", wf.Execution.RunId, 0, 0, nil, rbacDenied(t)); err != nil {
 		t.Fatalf("fail acme again: %v", err)
 	}
 

@@ -22,6 +22,9 @@ func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, 
 		return nil, err
 	}
 	if requestID != "" {
+		// The lookup and the record that fills it are one step across replicas.
+		unlock := e.cl.lock(e.principal.String() + "|trigger|" + ns + "|" + id + "|" + requestID)
+		defer unlock()
 		var prev struct {
 			WorkflowId string `json:"workflowId"`
 			RunId      string `json:"runId"`
@@ -39,9 +42,10 @@ func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, 
 	if err != nil {
 		return nil, err
 	}
-	s.Info.ActionCount++
-	s.Info.UpdateTime = nowRFC3339()
-	if err := e.store.put(fmt.Sprintf("sc/%s/%s", ns, id), s); err != nil {
+	if err := e.editSchedule(ns, id, func(cur *Schedule) {
+		cur.Info.ActionCount++
+		cur.Info.UpdateTime = nowRFC3339()
+	}); err != nil {
 		return nil, err
 	}
 	if requestID != "" {
@@ -58,25 +62,29 @@ func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, 
 // Not a delete+recreate: ScheduleId, Namespace, Info.CreateTime, and
 // Info.ActionCount are preserved.
 func (e *engine) UpdateSchedule(ns, id string, in Schedule) (*Schedule, error) {
-	cur, ok, err := e.DescribeSchedule(ns, id)
-	if !ok {
+	if _, ok, err := e.DescribeSchedule(ns, id); !ok {
+		return nil, fmt.Errorf("schedule not found")
+	} else if err != nil {
+		return nil, err
+	}
+	var out *Schedule
+	if err := e.editSchedule(ns, id, func(cur *Schedule) {
+		cur.Spec = in.Spec
+		cur.Action = in.Action
+		cur.State = in.State
+		cur.Info.UpdateTime = nowRFC3339()
+		if next, ok := nextScheduleFire(*cur, time.Now().UTC()); ok {
+			cur.Info.NextActionTime = next.UTC().Format(time.RFC3339)
+		}
+		out = cur
+	}); err != nil {
+		return nil, err
+	}
+	if out == nil {
 		return nil, fmt.Errorf("schedule not found")
 	}
-	if err != nil {
-		return nil, err
-	}
-	cur.Spec = in.Spec
-	cur.Action = in.Action
-	cur.State = in.State
-	cur.Info.UpdateTime = nowRFC3339()
-	if next, ok := nextScheduleFire(*cur, time.Now().UTC()); ok {
-		cur.Info.NextActionTime = next.UTC().Format(time.RFC3339)
-	}
-	if err := e.store.put(fmt.Sprintf("sc/%s/%s", ns, id), *cur); err != nil {
-		return nil, err
-	}
-	e.broker.publish(Event{Kind: "schedule.updated", Namespace: ns, ScheduleID: id, Data: cur})
-	return cur, nil
+	e.broker.publish(Event{Kind: "schedule.updated", Namespace: ns, ScheduleID: id, Data: out})
+	return out, nil
 }
 
 // ScheduleMatchingTimes returns the next firing times in [from, to].

@@ -88,6 +88,7 @@ type pendingWorkflowTask struct {
 	runID        string
 	workflowType string
 	input        []byte
+	epoch        int64 // which hand-out of the run's decision this is (wfTask.Epoch)
 	scheduledAt  time.Time
 	workerPeer   string // set on delivery
 }
@@ -103,7 +104,8 @@ type pendingActivityTask struct {
 	input            []byte
 	workflowID       string
 	runID            string
-	seq              int // workflow command sequence number of this activity
+	seq              int   // workflow command sequence number of this activity
+	epoch            int64 // which hand-out of the activity this is (workflowActivity.Epoch)
 	startToCloseMs   int64
 	heartbeatMs      int64
 	scheduledAt      time.Time
@@ -333,7 +335,7 @@ func (d *dispatcher) drainLocked(sub *subscription) {
 
 // EnqueueWorkflowTask creates a workflow task, mints its token, and
 // either delivers it to a subscribed peer or queues it for later.
-func (d *dispatcher) EnqueueWorkflowTask(principal Principal, ns, queue, workflowID, runID, workflowType string, input []byte) {
+func (d *dispatcher) EnqueueWorkflowTask(principal Principal, ns, queue, workflowID, runID, workflowType string, epoch int64, input []byte) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -344,6 +346,7 @@ func (d *dispatcher) EnqueueWorkflowTask(principal Principal, ns, queue, workflo
 		workflowID:   workflowID,
 		runID:        runID,
 		workflowType: workflowType,
+		epoch:        epoch,
 		input:        input,
 		scheduledAt:  time.Now(),
 	}
@@ -367,7 +370,7 @@ func (d *dispatcher) EnqueueWorkflowTask(principal Principal, ns, queue, workflo
 // (ns, wf, run, seq) via ResolveActivityToken. activityID is deterministic
 // for (run, seq); the token is unique per dispatch so a re-dispatch (retry
 // / recovery) does not collide with a stale token.
-func (d *dispatcher) DispatchActivity(principal Principal, ns, queue, workflowID, runID string, seq int, activityID, activityType string, input []byte, startToCloseMs, heartbeatMs int64) []byte {
+func (d *dispatcher) DispatchActivity(principal Principal, ns, queue, workflowID, runID string, seq int, epoch int64, activityID, activityType string, input []byte, startToCloseMs, heartbeatMs int64) []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -381,6 +384,7 @@ func (d *dispatcher) DispatchActivity(principal Principal, ns, queue, workflowID
 		workflowID:     workflowID,
 		runID:          runID,
 		seq:            seq,
+		epoch:          epoch,
 		startToCloseMs: startToCloseMs,
 		heartbeatMs:    heartbeatMs,
 		scheduledAt:    time.Now(),

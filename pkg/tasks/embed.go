@@ -9,6 +9,7 @@ package tasks
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +68,28 @@ type EmbedConfig struct {
 	Router routing.Router
 	// NodeID is this process's stable identifier. "" → "tasks-embed".
 	NodeID string
+	// Database, when set, holds the engine's state in place of DataDir, in tables the
+	// engine makes in it: the rows, and the leases that let several replicas run
+	// ONE engine on them. The handle is the host's (a schema on a PostgreSQL that
+	// every replica reaches, or, for tests and a developer, a SQLite file) and is
+	// not closed by Stop.
+	//
+	// Every replica that is given the same database is one engine. A schedule fires
+	// once among them, whichever sweeps; a run's lock is held across them; each
+	// workflow task and each activity attempt is owned by the replica that handed it
+	// to a worker, and when that replica's membership lapses, or it leaves, the
+	// others take up what it owned, so work in flight survives a replica's death and
+	// a rolling update. DataDir, MasterKey (the database encrypts at rest, or does
+	// not, as its host decides), Replicator and Router are not used.
+	//
+	// What stays with the replica a call reached: the workers subscribed to it (a
+	// task is handed to a worker the owner holds, so every replica needs the workers
+	// of the workflows it may be asked to run) and the live event feed.
+	Database *sql.DB
+
+	// timing is the cadence of the sweeps and of the leases among replicas. The zero
+	// value is the production one; only the tests of several replicas set it.
+	timing *timing
 }
 
 // Embedded is the handle to a running in-process Tasks server.
@@ -77,7 +101,8 @@ type Embedded struct {
 	stop    chan struct{}
 	repl    replication.Replicator
 	router  routing.Router
-	migr    *migration.Coordinator
+	migr    *migration.Coordinator // nil when the state is a shared database: there is one store, and no shard to move
+	member  *replica               // nil when this engine owns its files
 }
 
 // Embed starts the Tasks server. Stop before exit.
@@ -102,7 +127,7 @@ func checkAddress(addr string) error {
 }
 
 func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
-	if cfg.DataDir == "" {
+	if cfg.DataDir == "" && cfg.Database == nil {
 		// Per-process scratch directory keeps tests / multiple
 		// Embed() callers from sharing state on disk. Production
 		// callers (cmd/tasksd) always pass a stable DataDir.
@@ -122,15 +147,25 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 		return nil, err
 	}
 
-	st, err := newStoreFromEnv(cfg.DataDir, cfg.MasterKey)
-	if err != nil {
-		return nil, fmt.Errorf("tasks.Embed: store: %w", err)
+	var st *store
+	if cfg.Database != nil {
+		var err error
+		if st, err = newSharedStore(ctx, cfg.Database); err != nil {
+			return nil, fmt.Errorf("tasks.Embed: store: %w", err)
+		}
+	} else {
+		var err error
+		if st, err = newStoreFromEnv(cfg.DataDir, cfg.MasterKey); err != nil {
+			return nil, fmt.Errorf("tasks.Embed: store: %w", err)
+		}
 	}
 	repl := cfg.Replicator
 	if repl == nil {
 		repl = replication.NewLocal()
 	}
-	st.mgr.WithReplicator(repl)
+	if st.mgr != nil {
+		st.mgr.WithReplicator(repl)
+	}
 	router := cfg.Router
 	if router == nil {
 		router = routing.NewHash([]byte("tasks-default"))
@@ -144,7 +179,26 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	// The background sweepers have no caller to return an error to, so the
 	// host's logger is the only way their failures reach anyone.
 	en.log = cfg.Logger
-	migr := migration.NewCoordinator(st.mgr, repl)
+	tm := defaultTiming
+	if cfg.timing != nil {
+		tm = *cfg.timing
+	}
+	en.sweep = tm.sweep
+	var migr *migration.Coordinator
+	var member *replica
+	if st.mgr != nil {
+		migr = migration.NewCoordinator(st.mgr, repl)
+	} else {
+		nodeID := cfg.NodeID
+		if nodeID == "" {
+			nodeID = "tasks-embed"
+		}
+		var err error
+		if member, err = joinCluster(ctx, st.shared, nodeID, cfg.Logger, tm); err != nil {
+			return nil, fmt.Errorf("tasks.Embed: join: %w", err)
+		}
+		en.cl = member
+	}
 
 	// Bootstrap the root tenant's default namespace so the UI has
 	// something to render on first boot. Every other namespace, in every
@@ -165,7 +219,7 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	// dispatcher's send closure can route delivery to whichever listener (the
 	// loopback one here, or a gated one added later by ServeGated) holds the
 	// subscribed worker's peer.
-	e := &Embedded{cfg: cfg, engine: en, repl: repl, router: router, migr: migr, nodes: []*zap.Node{node}}
+	e := &Embedded{cfg: cfg, engine: en, repl: repl, router: router, migr: migr, member: member, nodes: []*zap.Node{node}}
 
 	// Wire dispatcher → node.Send for server-push delivery, routed to the listener
 	// that owns the worker's subscription.
@@ -189,6 +243,9 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	}
 
 	if err := node.Start(); err != nil {
+		if member != nil {
+			member.leave()
+		}
 		return nil, fmt.Errorf("tasks.Embed: zap start: %w", err)
 	}
 
@@ -196,18 +253,38 @@ func Embed(ctx context.Context, cfg EmbedConfig) (*Embedded, error) {
 	// store. Re-dispatched activities and re-enqueued workflow tasks queue
 	// in the dispatcher until workers (re)subscribe, then drain. Recovery
 	// is idempotent — seq-keyed dispatch + replay dedup mean no lost and no
-	// double execution.
+	// double execution — and takes up only the work no live engine owns.
 	if err := en.Recover(); err != nil {
 		node.Stop()
+		if member != nil {
+			member.leave()
+		}
 		return nil, fmt.Errorf("tasks.Embed: recover: %w", err)
 	}
 
 	stop := make(chan struct{})
 	go en.runScheduler(stop)
 	go en.runPurge(stop)
+	if member != nil {
+		go member.beat(e.adopt)
+	}
 	e.stop = stop
 
 	return e, nil
+}
+
+// adopt takes up the work of the engines whose memberships lapsed: one replica
+// does, the one that leads it, and the lapsed memberships are cleared only once the
+// pass has finished, so a replica that dies in the middle leaves them for the next.
+func (e *Embedded) adopt(lapsed []string) {
+	if !e.engine.cl.lead("adopt") {
+		return
+	}
+	if err := e.engine.Recover(); err != nil {
+		e.cfg.Logger.Error("tasks: could not take up the work of engines that stopped; it is tried again", "lapsed", lapsed, "error", err)
+		return
+	}
+	e.member.retire(lapsed)
 }
 
 // wireSend builds a ZAP message for server-initiated push: the body is
@@ -377,6 +454,11 @@ func (e *Embedded) Stop(ctx context.Context) error {
 		close(e.stop)
 		e.stop = nil
 	}
+	if e.member != nil {
+		// Leave first, so the replicas that remain take up what this one owed within
+		// a beat and not at the end of its membership's term.
+		e.member.leave()
+	}
 	e.nodesMu.Lock()
 	nodes := e.nodes
 	e.nodes = nil
@@ -432,6 +514,19 @@ func (e *Embedded) clusterStatus(rq call) answer {
 		"shardCount": shardCount(e),
 		"openShards": shardCount(e),
 	}
+	if e.member != nil {
+		// One engine on a shared database: this replica is one member of it.
+		resp["store"] = "shared"
+		resp["member"] = e.member.id
+		if live, err := e.member.live(); err == nil {
+			ids := make([]string, 0, len(live))
+			for id := range live {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			resp["members"] = ids
+		}
+	}
 	if e.router != nil {
 		vs := e.router.Validators()
 		out := make([]string, len(vs))
@@ -474,6 +569,9 @@ func (e *Embedded) migrate(rq call, ns string) answer {
 	}
 	if ns == "" {
 		return plain(http.StatusBadRequest, "namespace required")
+	}
+	if e.migr == nil {
+		return plain(http.StatusNotImplemented, "the state is one shared database: there is no shard to move between nodes")
 	}
 	var req struct {
 		ToNode string `json:"toNode"`
@@ -2102,6 +2200,13 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 		}
 		unlock := oe.lockRun(t.ns, t.workflowID, t.runID)
 		defer unlock()
+		// A decision handed out again since this one (a signal or an activity's
+		// result asked for a newer, or the engine that held it was declared dead and
+		// its work taken up) supersedes it: the newer one replays a longer history and
+		// says what this would have, so these commands are not applied.
+		if oe.superseded(t.ns, t.workflowID, t.runID, t.epoch) {
+			return objectAck(0, "", 200)
+		}
 		for _, c := range env.Commands {
 			switch c.Kind {
 			case 0: // complete
@@ -2111,12 +2216,17 @@ func respondWorkflowHandler(en *engine) zap.Handler {
 			case 2: // scheduleActivity — idempotent per (run, seq)
 				_ = oe.applyScheduleActivity(t.ns, t.workflowID, t.runID, c.Seq, c.ActivityType, c.Input, c.TaskQueue, c.StartToCloseMs, c.HeartbeatMs, c.RetryPolicy)
 			case 3: // canceled — worker ack of a CANCELING handshake
-				_, _ = oe.AckCanceled(t.ns, t.workflowID, t.runID, string(c.Failure), "")
+				_, _ = oe.ackCanceled(t.ns, t.workflowID, t.runID, string(c.Failure), "")
 			case 4: // continueAsNew — close this run, start a successor
 				_ = oe.applyContinueAsNew(t.ns, t.workflowID, t.runID, c.Input, c.WorkflowType, c.TaskQueue)
 			case 5: // startChildWorkflow — detached (ABANDON), idempotent per (run, seq)
 				_ = oe.applyStartChild(t.ns, t.workflowID, t.runID, c.Seq, c.ChildWorkflowId, c.WorkflowType, c.TaskQueue, c.Input, c.SearchAttrs)
 			}
+		}
+		// Applied: nothing is owed unless something asked for a newer decision while
+		// the commands were applied (a child's start does), or the run closed.
+		if claim, held, _ := oe.getTask(t.ns, t.workflowID, t.runID); held && claim.Epoch == t.epoch {
+			_ = oe.store.put(taskKey(t.ns, t.workflowID, t.runID), wfTask{Epoch: t.epoch, Idle: true})
 		}
 		return objectAck(0, "", 200)
 	}
@@ -2129,7 +2239,7 @@ func respondActivityCompletedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.As(pt.principal).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, result, nil); err != nil {
+		if err := en.As(pt.principal).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, pt.epoch, result, nil); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)
@@ -2143,7 +2253,7 @@ func respondActivityFailedHandler(en *engine) zap.Handler {
 		if !ok {
 			return objectAck(0, "task token not found", 404)
 		}
-		if err := en.As(pt.principal).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, nil, failure); err != nil {
+		if err := en.As(pt.principal).completeWorkflowActivity(pt.ns, pt.workflowID, pt.runID, pt.seq, pt.epoch, nil, failure); err != nil {
 			return objectAck(0, err.Error(), 500)
 		}
 		return objectAck(0, "", 200)

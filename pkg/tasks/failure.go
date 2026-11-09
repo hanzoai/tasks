@@ -202,7 +202,7 @@ func (e *engine) recordFailure(id failureIdentity, retrying bool, errText string
 	// path serializes per namespace. Two runs of one broken cron fail
 	// concurrently all the time; an increment lost there is a streak length
 	// that reads low exactly when it matters.
-	unlock := e.runMu.lock(e.principal.String() + "|fail|" + key)
+	unlock := e.cl.lock(e.principal.String() + "|fail|" + key)
 	defer unlock()
 
 	now := time.Now().UTC()
@@ -287,7 +287,7 @@ func (e *engine) recordFailure(id failureIdentity, retrying bool, errText string
 // fixed from something whose next throttled line has not come round yet.
 func (e *engine) clearFailure(id failureIdentity) {
 	key := failKey(id.Namespace, id.fingerprint())
-	unlock := e.runMu.lock(e.principal.String() + "|fail|" + key)
+	unlock := e.cl.lock(e.principal.String() + "|fail|" + key)
 	defer unlock()
 
 	// Unconditional, so the throttle resets even when the row is already gone.

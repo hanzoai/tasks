@@ -26,12 +26,19 @@ import (
 //     of an activity and schedules a new workflow task so the worker
 //     replays with the longer history and advances.
 //   - retry+backoff — server-side, per RetryPolicy, on the same (run, seq).
-//   - Recover — boot-time crash-recovery that re-dispatches in-flight
-//     activities and re-enqueues workflow tasks from the durable store.
+//   - Recover — crash-recovery that re-dispatches the in-flight activities and
+//     re-enqueues the workflow tasks that no live engine owns. It runs when an
+//     engine starts and whenever another engine's membership lapses.
 //
-// Advancing a single run is serialized by a per-run mutex (lockRun) so the
-// read-check-then-write of a schedule/complete is atomic above the store's
-// single writer.
+// Advancing a single run is serialized by a per-run lock (lockRun), held by
+// every engine that shares the rows, so the read-check-then-write of a
+// schedule/complete is atomic above the store's single writer.
+//
+// Every piece of work in flight is owned by the engine that handed it to a worker,
+// and carries an epoch that rises each time it is handed out. The owner is how an
+// engine that dies is told from one that is merely busy (Recover takes up what a
+// dead engine owned); the epoch is how a worker's answer from before the work
+// changed hands is told from the answer to the hand-out that stands.
 
 // ── workflow-history activity lifecycle event types ─────────────────────
 const (
@@ -73,6 +80,11 @@ type workflowActivity struct {
 	StartToCloseMs int64                   `json:"startToCloseMs,omitempty"`
 	HeartbeatMs    int64                   `json:"heartbeatMs,omitempty"`
 	RetryPolicy    *client.RetryPolicyJSON `json:"retryPolicy,omitempty"`
+	// Owner is the engine holding this activity's task: the one that handed it to a
+	// worker, or that holds the retry's backoff. Epoch rises each time the task is
+	// handed out, so an answer carrying an older one is not the stand's.
+	Owner string `json:"owner,omitempty"`
+	Epoch int64  `json:"epoch,omitempty"`
 }
 
 func (a *workflowActivity) isTerminal() bool {
@@ -119,12 +131,13 @@ func (k *keyedMutex) lock(key string) func() {
 }
 
 // lockRun returns an unlock func serializing all advance operations for a
-// single run. Entry points (respondWorkflowHandler, completeWorkflow
-// Activity, recoverRun, the retry timer) acquire it; internal helpers
-// (applyScheduleActivity, dispatchActivityAttempt, scheduleWorkflowTask)
-// assume the caller holds it.
+// single run, across every engine that shares the rows. Entry points (the
+// public mutators, respondWorkflowHandler, completeWorkflowActivity, recoverRun,
+// the retry timer) acquire it; internal helpers (applyScheduleActivity,
+// dispatchActivityAttempt, scheduleWorkflowTask, terminalTransition,
+// appendHistory) assume the caller holds it.
 func (e *engine) lockRun(ns, wf, run string) func() {
-	return e.runMu.lock(e.principal.String() + "|" + ns + "|" + wf + "|" + run)
+	return e.cl.lock(e.principal.String() + "|" + ns + "|" + wf + "|" + run)
 }
 
 // ── activity record I/O ─────────────────────────────────────────────────
@@ -158,10 +171,43 @@ func (e *engine) workflowHistoryBytes(ns, wf, run string) ([]byte, error) {
 	return json.Marshal(events)
 }
 
-// scheduleWorkflowTask enqueues a workflow task carrying the run's full
-// history so the stateless worker replays and advances. No-op if the run
-// is already terminal. Caller need not hold the run lock at start (the run
-// has no other advancer yet); advance paths call it under the lock.
+// wfTask is the claim on a run's next decision, one row per open run
+// (wftask/<ns>/<workflowId>/<runId>).
+//
+// A decision is owed whenever something happens to a run that the workflow has
+// not yet seen: it started, an activity finished, a signal came. Owner is the
+// engine that handed the decision to a worker, and Epoch rises each time one is
+// handed out. A worker's answer is applied only while its epoch is the newest: an
+// older one was computed from a shorter history, by a worker whose engine may have
+// been declared dead and its work given to another, and the newer decision will
+// say what it would have. Idle says nothing is owed: the last decision was applied,
+// and the run waits for an event that will make one.
+type wfTask struct {
+	Owner string `json:"owner,omitempty"`
+	Epoch int64  `json:"epoch"`
+	Idle  bool   `json:"idle,omitempty"`
+}
+
+func taskKey(ns, wf, run string) string { return "wftask/" + ns + "/" + wf + "/" + run }
+
+func (e *engine) getTask(ns, wf, run string) (wfTask, bool, error) {
+	var t wfTask
+	ok, err := e.store.get(taskKey(ns, wf, run), &t)
+	return t, ok, err
+}
+
+// superseded reports whether the run's decision has been handed out again since
+// the one numbered epoch, which makes that one's answer stale.
+func (e *engine) superseded(ns, wf, run string, epoch int64) bool {
+	claim, held, _ := e.getTask(ns, wf, run)
+	return held && epoch < claim.Epoch
+}
+
+// scheduleWorkflowTask claims the run's next decision for this engine and enqueues
+// a workflow task carrying the run's full history so the stateless worker replays
+// and advances. No-op if the run is already terminal. The caller holds the run's
+// lock. The claim is written before the task is handed over, so an engine that
+// dies between the two leaves a claim a live engine will find and take.
 func (e *engine) scheduleWorkflowTask(ns, wf, run string) error {
 	wfe, ok, err := e.DescribeWorkflow(ns, wf, run)
 	if err != nil {
@@ -173,12 +219,20 @@ func (e *engine) scheduleWorkflowTask(ns, wf, run string) error {
 	if isTerminal(wfe.Status) {
 		return nil
 	}
+	cur, _, err := e.getTask(ns, wf, run)
+	if err != nil {
+		return err
+	}
+	claim := wfTask{Owner: e.cl.self(), Epoch: cur.Epoch + 1}
+	if err := e.store.put(taskKey(ns, wf, run), claim); err != nil {
+		return err
+	}
 	hist, err := e.workflowHistoryBytes(ns, wf, run)
 	if err != nil {
 		return err
 	}
 	if e.disp != nil {
-		e.disp.EnqueueWorkflowTask(e.principal, ns, wfe.TaskQueue, wf, run, wfe.Type.Name, hist)
+		e.disp.EnqueueWorkflowTask(e.principal, ns, wfe.TaskQueue, wf, run, wfe.Type.Name, claim.Epoch, hist)
 	}
 	return nil
 }
@@ -207,6 +261,7 @@ func (e *engine) applyScheduleActivity(ns, wf, run string, seq int, actType stri
 		Input:          append(json.RawMessage(nil), input...),
 		TaskQueue:      taskQueue,
 		Status:         wfActScheduled,
+		Owner:          e.cl.self(),
 		Attempt:        1,
 		StartToCloseMs: startToCloseMs,
 		HeartbeatMs:    heartbeatMs,
@@ -237,6 +292,8 @@ func (e *engine) applyScheduleActivity(ns, wf, run string, seq int, actType stri
 // resolves back to this record. Caller holds the run lock.
 func (e *engine) dispatchActivityAttempt(ns, wf, run string, rec *workflowActivity, appendStarted bool) error {
 	rec.Status = wfActStarted
+	rec.Owner = e.cl.self()
+	rec.Epoch++
 	if err := e.putWorkflowActivity(ns, wf, run, rec); err != nil {
 		return err
 	}
@@ -250,7 +307,7 @@ func (e *engine) dispatchActivityAttempt(ns, wf, run string, rec *workflowActivi
 		}
 	}
 	if e.disp != nil {
-		e.disp.DispatchActivity(e.principal, ns, rec.TaskQueue, wf, run, rec.Seq, rec.ActivityID, rec.ActivityType, rec.Input, rec.StartToCloseMs, rec.HeartbeatMs)
+		e.disp.DispatchActivity(e.principal, ns, rec.TaskQueue, wf, run, rec.Seq, rec.Epoch, rec.ActivityID, rec.ActivityType, rec.Input, rec.StartToCloseMs, rec.HeartbeatMs)
 	}
 	return nil
 }
@@ -263,8 +320,9 @@ func (e *engine) dispatchActivityAttempt(ns, wf, run string, rec *workflowActivi
 // advances. On a retryable failure with attempts remaining it re-dispatches
 // the SAME (run, seq) after backoff without advancing the workflow.
 // Idempotent against an already-terminal record (a duplicate Respond is
-// ignored). Acquires the run lock.
-func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, result, failure []byte) error {
+// ignored), and against an answer from an earlier hand-out of the task than the
+// one that stands (epoch; 0 is a caller that holds no token). Acquires the run lock.
+func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, epoch int64, result, failure []byte) error {
 	unlock := e.lockRun(ns, wf, run)
 	defer unlock()
 
@@ -277,6 +335,13 @@ func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, result, f
 	}
 	if rec.isTerminal() {
 		return nil // duplicate / already resolved
+	}
+	if epoch != 0 && epoch != rec.Epoch {
+		// Answered by a worker whose engine no longer holds this task: it was
+		// declared dead and the task handed to another (or handed out again after a
+		// retry), and the hand-out that stands will answer for itself. Counting this
+		// failure as an attempt would run the activity once more than its policy.
+		return nil
 	}
 	// One read serves two jobs: the terminal guard below, and the failure
 	// identity — the report has to name the SHAPE of the work (workflow type,
@@ -326,6 +391,7 @@ func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, result, f
 		e.recordFailure(failID, true, terr.Error())
 		rec.Attempt++
 		rec.Status = wfActScheduled
+		rec.Owner = e.cl.self()                                // this engine holds the backoff
 		rec.Failure = append(json.RawMessage(nil), failure...) // last failure (observability)
 		if err := e.putWorkflowActivity(ns, wf, run, rec); err != nil {
 			return err
@@ -355,9 +421,11 @@ func (e *engine) completeWorkflowActivity(ns, wf, run string, seq int, result, f
 }
 
 // scheduleActivityRetry re-dispatches (ns, run, seq) after delay. The timer
-// is in-memory; a crash before it fires is covered by the boot recovery
-// pass, which re-dispatches any non-terminal activity (losing the residual
-// backoff, which is acceptable — durable timers are Phase-2b).
+// is in-memory; the record names this engine as its owner, so a crash before it
+// fires is covered by Recover, which re-dispatches any non-terminal activity whose
+// owner is gone (losing the residual backoff, which is acceptable — durable timers
+// are Phase-2b). A timer that finds the record someone else's, because that engine
+// took it up while this one was thought dead, leaves it to them.
 func (e *engine) scheduleActivityRetry(ns, wf, run string, seq int, delay time.Duration) {
 	if delay < 0 {
 		delay = 0
@@ -366,7 +434,7 @@ func (e *engine) scheduleActivityRetry(ns, wf, run string, seq int, delay time.D
 		unlock := e.lockRun(ns, wf, run)
 		defer unlock()
 		rec, ok, _ := e.getWorkflowActivity(ns, wf, run, seq)
-		if !ok || rec.isTerminal() {
+		if !ok || rec.isTerminal() || rec.Status != wfActScheduled || rec.Owner != e.cl.self() {
 			return
 		}
 		_ = e.dispatchActivityAttempt(ns, wf, run, rec, true)
@@ -423,10 +491,17 @@ func (e *engine) openRun(ns string, ref ExecutionRef) error {
 
 // closeRun writes wf's terminal row, then drops the run from the open index.
 func (e *engine) closeRun(ns string, wf *WorkflowExecution) error {
-	if err := e.store.put(runKey(ns, wf.Execution.WorkflowId, wf.Execution.RunId), wf); err != nil {
+	wfID, run := wf.Execution.WorkflowId, wf.Execution.RunId
+	if err := e.store.put(runKey(ns, wfID, run), wf); err != nil {
 		return err
 	}
-	return e.store.del(openKey(ns, wf.Execution.WorkflowId, wf.Execution.RunId))
+	// A closed run owes no decision and has no cancel to sweep.
+	for _, key := range []string{taskKey(ns, wfID, run), cancelKey(ns, wfID, run)} {
+		if err := e.store.del(key); err != nil {
+			return err
+		}
+	}
+	return e.store.del(openKey(ns, wfID, run))
 }
 
 // runRow is the part of a run's row that says whether and when it closed.
@@ -488,41 +563,81 @@ func (e *engine) indexOpenRuns(ns string) error {
 	return e.store.put(openIndexKey(ns), nowRFC3339())
 }
 
-// Recover rebuilds in-flight dispatch state from the durable store after a
-// restart. For every non-terminal workflow it re-dispatches any activity
-// that is scheduled/started but not terminal (idempotent per (run, seq))
-// and re-enqueues a workflow task so the stateless worker replays and
-// advances. Because dispatch is seq-keyed and the decider dedups on replay,
-// recovery causes neither lost nor double execution: an already-terminal
-// activity is skipped (never re-run), a not-yet-terminal one is re-driven.
+// Recover takes up the work that no live engine owns: after a restart, when the
+// engine that handed it to a worker is gone, or when the rows were moved here from
+// files and carry no owner at all. For every open run it re-dispatches the
+// activities that are scheduled or started but not terminal and whose owner is
+// not alive (idempotent per (run, seq)), and re-enqueues a workflow task when the
+// run's decision is owed by an engine that is not alive. Work a live engine owns
+// is left to it, so an engine that starts beside running peers (a rolling update)
+// takes nothing from them.
 //
-// It finds those workflows through the open-run index above, so it
-// reads the runs still open and none of the ones that finished: its cost is
-// set by how much is in flight, not by how much history the shard holds.
+// Because dispatch is seq-keyed and the decider dedups on replay, taking up work
+// causes neither lost nor double execution: an already-terminal activity is
+// skipped (never re-run), a not-yet-terminal one is re-driven, and a worker's
+// answer to the hand-out it replaces is refused by its epoch.
+//
+// It finds those workflows through the open-run index above, so it reads the runs
+// still open and none of the ones that finished: its cost is set by how much is in
+// flight, not by how much history the store holds. It covers every tenant.
 func (e *engine) Recover() error {
-	namespaces, err := e.ListNamespaces()
+	alive, err := e.aliveFn()
 	if err != nil {
 		return err
 	}
-	for i := range namespaces {
-		ns := namespaces[i].NamespaceInfo.Name
-		if err := e.indexOpenRuns(ns); err != nil {
-			return err
-		}
-		open, err := listInto[ExecutionRef](e.store, openPrefix(ns))
+	tenants, err := e.store.tenants()
+	if err != nil {
+		return err
+	}
+	for _, p := range tenants {
+		oe := e.As(p)
+		namespaces, err := oe.ListNamespaces()
 		if err != nil {
 			return err
 		}
-		for _, ref := range open {
-			if err := e.recoverRun(ns, ref.WorkflowId, ref.RunId); err != nil {
+		for i := range namespaces {
+			ns := namespaces[i].NamespaceInfo.Name
+			if err := oe.indexOpenRuns(ns); err != nil {
 				return err
+			}
+			open, err := listInto[ExecutionRef](oe.store, openPrefix(ns))
+			if err != nil {
+				return err
+			}
+			for _, ref := range open {
+				if err := oe.recoverRun(ns, ref.WorkflowId, ref.RunId, alive); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
 }
 
-func (e *engine) recoverRun(ns, wf, run string) error {
+// aliveFn answers whether an engine is alive, from the engines alive when it was
+// made and, for an owner that is not among them, from a fresh reading taken at most
+// once a second: a pass over a large store takes long enough for an engine to join and
+// hand out work that the pass would otherwise take for a dead engine's.
+func (e *engine) aliveFn() (func(owner string) bool, error) {
+	live, err := e.cl.live()
+	if err != nil {
+		return nil, err
+	}
+	at := time.Now()
+	return func(owner string) bool {
+		if owner == "" {
+			return false
+		}
+		if !live[owner] && time.Since(at) > time.Second {
+			if fresh, err := e.cl.live(); err == nil {
+				live, at = fresh, time.Now()
+			}
+		}
+		return live[owner]
+	}, nil
+}
+
+func (e *engine) recoverRun(ns, wf, run string, alive func(owner string) bool) error {
 	unlock := e.lockRun(ns, wf, run)
 	defer unlock()
 	row, ok, err := e.DescribeWorkflow(ns, wf, run)
@@ -539,13 +654,20 @@ func (e *engine) recoverRun(ns, wf, run string) error {
 		return err
 	}
 	for k := range acts {
-		if acts[k].isTerminal() {
+		if acts[k].isTerminal() || alive(acts[k].Owner) {
 			continue
 		}
 		rec := acts[k]
 		if err := e.dispatchActivityAttempt(ns, wf, run, &rec, false); err != nil {
 			return err
 		}
+	}
+	task, claimed, err := e.getTask(ns, wf, run)
+	if err != nil {
+		return err
+	}
+	if claimed && (task.Idle || alive(task.Owner)) {
+		return nil
 	}
 	return e.scheduleWorkflowTask(ns, wf, run)
 }

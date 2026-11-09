@@ -157,7 +157,7 @@ func TestDurable_Recover_SkipsTerminal_RedispatchesInflight(t *testing.T) {
 	}
 	schedA(0)
 	schedA(1)
-	if err := enA.completeWorkflowActivity("default", "wf-1", run, 0, []byte(`"done"`), nil); err != nil {
+	if err := enA.completeWorkflowActivity("default", "wf-1", run, 0, 0, []byte(`"done"`), nil); err != nil {
 		t.Fatalf("complete seq0: %v", err)
 	}
 

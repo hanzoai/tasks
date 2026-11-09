@@ -56,7 +56,7 @@ func startRun(t *testing.T, en *engine, ns, wfID, requestID string) string {
 // finish completes run's activity and then the run itself.
 func finish(t *testing.T, en *engine, ns, wfID, run string) {
 	t.Helper()
-	if err := en.completeWorkflowActivity(ns, wfID, run, 0, []byte(`"done"`), nil); err != nil {
+	if err := en.completeWorkflowActivity(ns, wfID, run, 0, 0, []byte(`"done"`), nil); err != nil {
 		t.Fatalf("complete activity %s: %v", wfID, err)
 	}
 	unlock := en.lockRun(ns, wfID, run)

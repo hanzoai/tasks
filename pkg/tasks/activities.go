@@ -41,6 +41,9 @@ func (e *engine) StartActivity(ns, activityID, runID string, typ TypeRef, taskQu
 		return nil, fmt.Errorf("activityId required")
 	}
 	if requestID != "" {
+		// The lookup and the start that fills it are one step across replicas.
+		unlock := e.cl.lock(e.principal.String() + "|astart|" + ns + "|" + activityID + "|" + requestID)
+		defer unlock()
 		var prev activityIdempotency
 		if ok, _ := e.store.get(fmt.Sprintf("aidem/%s/%s/%s", ns, activityID, requestID), &prev); ok && prev.RunId != "" {
 			if a, ok2, _ := e.DescribeActivity(ns, activityID, prev.RunId); ok2 {
@@ -127,7 +130,7 @@ func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Du
 	if _, ok, _ := e.DescribeNamespace(ns); !ok {
 		return nil, false, fmt.Errorf("namespace %q not registered", ns)
 	}
-	unlock := e.runMu.lock(e.principal.String() + "|claim|" + ns)
+	unlock := e.cl.lock(e.principal.String() + "|claim|" + ns)
 	defer unlock()
 	if err := e.reapExpiredLeases(ns); err != nil {
 		return nil, false, err
@@ -151,12 +154,18 @@ func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Du
 			continue
 		}
 		wf, run := a.Execution.WorkflowId, a.Execution.RunId
+		unlockAct := e.lockActivity(ns, wf, run)
+		if cur, ok, _ := e.DescribeActivity(ns, wf, run); !ok || cur.Status != activityStateScheduled {
+			unlockAct() // changed hands since the list was read
+			continue
+		}
 		now := time.Now().UTC()
 		a.Status = activityStateStarted
 		a.Identity = identity
 		a.LastHeartbeatTime = now.Format(time.RFC3339)
 		a.LeaseExpiry = now.Add(activityLeaseTTL(&a, lease)).Format(time.RFC3339)
 		if err := e.store.put(actKey(ns, wf, run), a); err != nil {
+			unlockAct()
 			return nil, false, err
 		}
 		if _, err := e.appendActivityHistory(ns, wf, run, "ACTIVITY_TASK_STARTED", map[string]any{
@@ -164,8 +173,10 @@ func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Du
 			"attempt":     a.Attempt,
 			"leaseExpiry": a.LeaseExpiry,
 		}); err != nil {
+			unlockAct()
 			return nil, false, err
 		}
+		unlockAct()
 		out, _, _ := e.DescribeActivity(ns, wf, run)
 		e.emit(Event{Kind: "activity.started", Namespace: ns, WorkflowID: wf, RunID: run, Data: out})
 		return out, true, nil
@@ -199,22 +210,41 @@ func (e *engine) reapExpiredLeases(ns string) error {
 			_ = e.FailActivity(ns, wf, run, "lease expired: worker unresponsive", "reaper")
 			continue
 		}
-		a.Status = activityStateScheduled
-		a.Attempt++
-		a.Identity = ""
-		a.LeaseExpiry = ""
-		if err := e.store.put(actKey(ns, wf, run), a); err != nil {
+		if err := e.reapOne(ns, wf, run, now); err != nil {
 			return err
 		}
-		if _, err := e.appendActivityHistory(ns, wf, run, "ACTIVITY_TASK_TIMED_OUT", map[string]any{
-			"reason":  "lease expired",
-			"attempt": a.Attempt,
-		}); err != nil {
-			return err
-		}
-		out, _, _ := e.DescribeActivity(ns, wf, run)
-		e.emit(Event{Kind: "activity.timedout", Namespace: ns, WorkflowID: wf, RunID: run, Data: out})
 	}
+	return nil
+}
+
+// reapOne returns one activity whose lease elapsed to SCHEDULED, on the record as it
+// is under the activity's lock: a heartbeat that landed since the list was read has
+// extended the lease, and the activity is left with its worker.
+func (e *engine) reapOne(ns, wf, run string, now time.Time) error {
+	unlock := e.lockActivity(ns, wf, run)
+	defer unlock()
+	a, ok, err := e.DescribeActivity(ns, wf, run)
+	if err != nil || !ok || a.Status != activityStateStarted || a.LeaseExpiry == "" {
+		return err
+	}
+	if exp, perr := time.Parse(time.RFC3339, a.LeaseExpiry); perr != nil || !now.After(exp) {
+		return nil
+	}
+	a.Status = activityStateScheduled
+	a.Attempt++
+	a.Identity = ""
+	a.LeaseExpiry = ""
+	if err := e.store.put(actKey(ns, wf, run), *a); err != nil {
+		return err
+	}
+	if _, err := e.appendActivityHistory(ns, wf, run, "ACTIVITY_TASK_TIMED_OUT", map[string]any{
+		"reason":  "lease expired",
+		"attempt": a.Attempt,
+	}); err != nil {
+		return err
+	}
+	out, _, _ := e.DescribeActivity(ns, wf, run)
+	e.emit(Event{Kind: "activity.timedout", Namespace: ns, WorkflowID: wf, RunID: run, Data: out})
 	return nil
 }
 
@@ -294,6 +324,8 @@ func (e *engine) FailActivity(ns, activityID, runID, cause, identity string) err
 
 // HeartbeatActivity bumps LastHeartbeatTime. Rejects if terminal.
 func (e *engine) HeartbeatActivity(ns, activityID, runID string, details any) error {
+	unlock := e.lockActivity(ns, activityID, runID)
+	defer unlock()
 	a, ok, err := e.DescribeActivity(ns, activityID, runID)
 	if !ok {
 		return fmt.Errorf("activity not found")
@@ -376,11 +408,20 @@ func actKey(ns, activityID, runID string) string {
 	return fmt.Sprintf("act/%s/%s/%s", ns, activityID, runID)
 }
 
+// lockActivity serializes the replicas that change one standalone activity: a
+// claim, a heartbeat, an answer and the reaper each read the record, change it and
+// write it whole.
+func (e *engine) lockActivity(ns, activityID, runID string) func() {
+	return e.cl.lock(e.principal.String() + "|act|" + ns + "|" + activityID + "|" + runID)
+}
+
 // activityTerminal applies a terminal transition to a standalone
 // activity record. Idempotent against terminal states (returns nil).
 // resultField/cause carry the optional bookkeeping for the activity row
 // itself (CompleteActivity sets Result, FailActivity sets FailureCause).
 func (e *engine) activityTerminal(ns, activityID, runID, status, eventType, evKind string, attrs map[string]any, resultField, cause string) error {
+	unlock := e.lockActivity(ns, activityID, runID)
+	defer unlock()
 	a, ok, err := e.DescribeActivity(ns, activityID, runID)
 	if !ok {
 		return fmt.Errorf("activity not found")

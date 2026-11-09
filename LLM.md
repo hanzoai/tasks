@@ -591,11 +591,69 @@ a decision (started, or a result landed with no following
 `fireAt`. Because dispatch is `seq`-keyed and the decider dedups on
 replay, recovery causes no lost and no double execution.
 
-**Multi-replica (later)**: the SQLite store already replicates via
-`replication/` (quasar). Add a **per-(ns, run) dispatch lease** in the
-replicated `meta` table so exactly one replica owns advancing a given
-run at a time (mirror the exactly-once lease pattern used elsewhere in
-the fleet). Until then tasksd runs single-writer (replicas=1).
+**Multi-replica: done (v1.53.7), see "Several replicas, one engine" below.**
+
+### Several replicas, one engine (`EmbedConfig.Database`, v1.53.7)
+
+An engine that owns shard files is one process. Given a `*sql.DB` (`EmbedConfig.Database`:
+a schema on PostgreSQL that every replica reaches, or a SQLite file for a test) it keeps its
+state there instead, and every replica given the same database is ONE engine: its rows,
+its schedules, its runs and their history are shared, and a replica that dies does not take
+work with it.
+
+- **Rows**: `store.Shared`, `tasks_kv(kind, principal, key, value, upd)`, primary key
+  `(kind, principal, key)`. The key already carries its namespace, so there is no namespace
+  column; the kind (`wf`, `sc`, `wfh`, ...) is a column so the one scan that crosses tenants,
+  every schedule of every org, is a range over one kind. SQL is the shared dialect (`$n`,
+  `ON CONFLICT`, integer times); `BYTEA`/`COLLATE "C"` against `BLOB` are read off the handle's
+  driver package, and this module links no PostgreSQL driver outside its tests. A scan reads
+  its page before it calls back, so a callback may query on a one-connection SQLite handle.
+  The handle is the host's; `Stop` does not close it.
+- **Time and who holds what is `tasks_lease(name, holder, expires)` in the DATABASE's clock**:
+  membership (`member/<id>`, renewed every 5 s, term 15 s), leadership (`lead/sweep`,
+  `lead/purge`, `lead/adopt`), and the locks (`lock/<key>`, term 20 s). A lock is a lease
+  taken for a handful of statements, so it holds no connection while held (a pool of four
+  cannot afford a held connection per critical section) and a holder that dies frees it by
+  expiry; a replica that waits retries with a jittered backoff, and waits behind a process-local
+  mutex first, so contention inside a process never asks the database.
+- **Every mutation of a run takes the run's lock**, in every replica: `lockRun`, now also taken by
+  Cancel, Terminate, AckCanceled, Reset, UpdateWorkflowMetadata and by a start (idempotent starts
+  take `start|ns|wf|req` first: lock order is idempotency key, then run). Standalone activities
+  lock per activity (claim, heartbeat, answer, reap); schedules lock per schedule (`editSchedule`).
+- **Work in flight has an owner and an epoch.** `workflowActivity.Owner/Epoch` and the run's
+  decision claim `wftask/<ns>/<wf>/<run>` (`wfTask{Owner, Epoch, Idle}`) name the replica that
+  handed the work to a worker, and the epoch rises each hand-out. An answer is applied only at
+  the epoch that stands: a worker whose replica was declared dead and replaced answers with an
+  older epoch and is refused (a refused FAILURE is not counted as an attempt). Idle says nothing
+  is owed. The claim is written BEFORE the task is handed over.
+- **Recover takes up what no live replica owns.** At start, and whenever a member's term lapses
+  (`beat` finds it; a replica that leaves expires its own lease, so a rolling update is adopted
+  within one beat, a kill within term + beat), one replica (`lead/adopt`) walks every tenant's open
+  runs and re-dispatches the activities whose owner is not alive and re-enqueues a decision whose
+  claim is held by a dead owner, missing, or from before owners existed (rows moved from files).
+  Liveness is re-read at most once a second during a pass, so a replica that joins mid-pass is not
+  taken for dead. A lapsed membership is cleared only after the pass finishes.
+- **A schedule fires once.** The sweep runs on the replica that leads `lead/sweep`, and the fire is
+  idempotent regardless: the run is `<type>-<hash of tenant, schedule, tick>` started under request
+  id `tick:<tick>`, so a leader that stalled past its term and its successor fire the same tick into
+  one run, and ActionCount counts only a fire that made a run. Cancel marks are rows
+  (`wfcancel/...`), swept by the leader.
+- **What stays with the replica a call reached**: the workers subscribed to it (a task is handed
+  to a worker its owner holds, so every replica needs the workers of the workflows it may run;
+  a worker that dials one replica's cluster port is served only that replica's tasks), the SSE feed,
+  the worker registry, and the retry backoff timer (the activity record names
+  this replica as owner; if it dies the backoff is lost and the attempt is handed out at once).
+- **From files**: `MoveFiles(ctx, db, dir, master)` copies every row of every shard under `dir` into
+  the database in batches, holds each tenant's row count and checksum to the files', and records it
+  (`tasks_meta.moved`). The files are left. The moved rows carry no owners, so the first Recover on
+  them takes up all in-flight work, exactly as after a restart. `FilesIn(dir)` and `Moved(ctx, db)` ask
+  without side effects. It is for the window in which one process still owns the files.
+- Tests (`TASKS_TEST_SQL_DSN` for the PostgreSQL leg; cloud's `scripts/postgres.sh` exports
+  `CLOUD_TEST_SQL_DSN`): `shared_test.go` (two engines on two pools: schedule fires once, lock
+  exclusion, lease expiry, idempotent start, activity dispatched once, epoch fencing, every tenant
+  recovered, cancel swept by another replica), `shared_e2e_test.go` (real workers: a workflow survives
+  its replica being killed or leaving, no activity runs twice under cross-replica signals, a schedule
+  fires once per tick), `move_test.go`.
 
 ### History event vocabulary (add to the existing family)
 
@@ -619,7 +677,7 @@ persisted in the `history` table alongside the existing `kv` records.
 - **Phase 2b:** durable timers (`StartTimer`/`TimerFired` + timer wheel),
   signals/cancel folded into replay, child workflows (retire the 0x006D
   501), query consistency against replayed state.
-- **Phase 2c:** multi-replica dispatch lease over the replicated store.
+- **Phase 2c:** several replicas on one engine: done, "Several replicas, one engine".
 
 ### Scope discipline (agent orchestration, not Temporal parity)
 

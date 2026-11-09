@@ -5,12 +5,12 @@ package tasks
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hanzoai/tasks/pkg/sdk/temporal"
@@ -22,39 +22,15 @@ import (
 // the sweeper auto-acks it to CANCELED. Mutable for tests.
 var cancelTimeout = 60 * time.Second
 
-// cancelTracker records when each (ns, wfID, runID) entered CANCELING.
-type cancelTracker struct {
-	mu sync.Mutex
-	at map[string]time.Time
+// cancelMark records when a run entered CANCELING. It is a row of the run's
+// tenant, wfcancel/<ns>/<workflowId>/<runId>, and not a map in a process: the
+// replica that took the cancel may not be the one that sweeps it, or may be gone.
+type cancelMark struct {
+	Execution ExecutionRef `json:"execution"`
+	At        string       `json:"at"`
 }
 
-func newCancelTracker() *cancelTracker { return &cancelTracker{at: map[string]time.Time{}} }
-
-func (c *cancelTracker) mark(ns, wfID, runID string) {
-	c.mu.Lock()
-	c.at[wfKey(ns, wfID, runID)] = time.Now()
-	c.mu.Unlock()
-}
-
-func (c *cancelTracker) clear(ns, wfID, runID string) {
-	c.mu.Lock()
-	delete(c.at, wfKey(ns, wfID, runID))
-	c.mu.Unlock()
-}
-
-// expired returns the keys older than cancelTimeout. Caller must hold no lock.
-func (c *cancelTracker) expired() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cutoff := time.Now().Add(-cancelTimeout)
-	out := []string{}
-	for k, t := range c.at {
-		if t.Before(cutoff) {
-			out = append(out, k)
-		}
-	}
-	return out
-}
+func cancelKey(ns, wf, run string) string { return "wfcancel/" + ns + "/" + wf + "/" + run }
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
@@ -70,13 +46,16 @@ func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 // be inspectable end-to-end and for higher-level callers to depend on
 // the API while the worker SDK runtime lands.
 type engine struct {
-	store      *store
-	broker     *broker
-	disp       *dispatcher
-	cancelling *cancelTracker
-	workers    *workerRegistry
-	runMu      *keyedMutex // serializes advancing a single (org, ns, wf, run)
-	principal  Principal   // zero = root tenant (embedded/dev). Its org is stamped on every emitted Event.
+	store   *store
+	broker  *broker
+	disp    *dispatcher
+	workers *workerRegistry
+	// cl is what this engine shares with the others that run on the same rows: the
+	// locks that serialize advancing a single (org, ns, wf, run), who is alive, and
+	// who leads a sweep. Solo for a process that owns its files.
+	cl        cluster
+	sweep     time.Duration // how often the scheduler ticks
+	principal Principal     // zero = root tenant (embedded/dev). Its org is stamped on every emitted Event.
 	// log reports what the background sweepers cannot return to a caller.
 	// Always non-nil (newEngine defaults it, As carries it, Embed overrides
 	// it with EmbedConfig.Logger), so no call site needs a guard.
@@ -91,7 +70,7 @@ type engine struct {
 }
 
 func newEngine(s *store) *engine {
-	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), cancelling: newCancelTracker(), workers: newWorkerRegistry(), runMu: newKeyedMutex(), log: slog.Default(), fails: newFailTracker(failReportThrottle)}
+	return &engine{store: s, broker: newBroker(), disp: newDispatcher(), workers: newWorkerRegistry(), cl: newSolo(), sweep: defaultTiming.sweep, log: slog.Default(), fails: newFailTracker(failReportThrottle)}
 }
 
 // As returns an engine view scoped to the tenant p. Reads and writes route
@@ -104,7 +83,7 @@ func (e *engine) As(p Principal) *engine {
 	if p == e.principal {
 		return e
 	}
-	return &engine{store: e.store.as(p), broker: e.broker, disp: e.disp, cancelling: e.cancelling, workers: e.workers, runMu: e.runMu, principal: p, log: e.log, fails: e.fails}
+	return &engine{store: e.store.as(p), broker: e.broker, disp: e.disp, workers: e.workers, cl: e.cl, sweep: e.sweep, principal: p, log: e.log, fails: e.fails}
 }
 
 // emit publishes an event tagged with the engine's org so per-org SSE
@@ -214,19 +193,31 @@ func (e *engine) startWorkflowWithRequestID(ns, workflowId, runId string, typ Ty
 // fieldValue). conflictPolicy governs a live execution already existing
 // under workflowId (see resolveWorkflowIdConflict).
 func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, requestID string, searchAttrs map[string]any, memo any, conflictPolicy string) (*WorkflowExecution, error) {
+	wf, _, err := e.startWorkflowOnce(ns, workflowId, runId, typ, taskQueue, input, requestID, searchAttrs, memo, conflictPolicy)
+	return wf, err
+}
+
+// startWorkflowOnce is startWorkflowFull that also says whether this call made the
+// run. It did not when requestID had already started one, or the conflict policy
+// handed back the run that was there.
+func (e *engine) startWorkflowOnce(ns, workflowId, runId string, typ TypeRef, taskQueue string, input any, requestID string, searchAttrs map[string]any, memo any, conflictPolicy string) (*WorkflowExecution, bool, error) {
 	if _, err := e.namespace(ns); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if typ.Name == "" {
-		return nil, fmt.Errorf("workflow type required")
+		return nil, false, fmt.Errorf("workflow type required")
 	}
 	if workflowId == "" {
 		workflowId = strings.ToLower(typ.Name) + "-" + newRunId()[:8]
 	}
 	if requestID != "" {
+		// The check and the start that fills it are one step, across replicas: two that
+		// start the same (workflowId, requestID) at once get one run, not two.
+		unlock := e.cl.lock(e.principal.String() + "|start|" + ns + "|" + workflowId + "|" + requestID)
+		defer unlock()
 		if existingRun, ok, _ := e.lookupIdempotency(ns, workflowId, requestID); ok {
 			if wf, ok2, _ := e.DescribeWorkflow(ns, workflowId, existingRun); ok2 {
-				return wf, nil
+				return wf, false, nil
 			}
 		}
 	}
@@ -235,9 +226,9 @@ func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, ta
 	// run is created. Default (empty) preserves the historical behaviour
 	// (a new run is created under the same workflowId).
 	if existing, handled, err := e.resolveWorkflowIdConflict(ns, workflowId, conflictPolicy); err != nil {
-		return nil, err
+		return nil, false, err
 	} else if handled {
-		return existing, nil
+		return existing, false, nil
 	}
 	if runId == "" {
 		runId = newRunId()
@@ -245,6 +236,10 @@ func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, ta
 	if taskQueue == "" {
 		taskQueue = "default"
 	}
+	// The run is visible to every replica from the open index on; whoever signals
+	// it next waits for it to be whole.
+	unlockRun := e.lockRun(ns, workflowId, runId)
+	defer unlockRun()
 	startTime := nowRFC3339()
 	wf := WorkflowExecution{
 		Execution:   ExecutionRef{WorkflowId: workflowId, RunId: runId},
@@ -257,10 +252,10 @@ func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, ta
 		Memo:        memo,
 	}
 	if err := e.openRun(ns, wf.Execution); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := e.store.put(runKey(ns, workflowId, runId), wf); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if requestID != "" {
 		_ = e.store.put(fmt.Sprintf("idem/%s/%s/%s", ns, workflowId, requestID), runId)
@@ -270,7 +265,7 @@ func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, ta
 		"taskQueue":    taskQueue,
 		"input":        input,
 	}); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// Reload to surface bumped HistoryLen.
 	if reloaded, ok, _ := e.DescribeWorkflow(ns, workflowId, runId); ok {
@@ -279,7 +274,7 @@ func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, ta
 	// Deliver the first workflow task carrying the run's full history
 	// (WORKFLOW_EXECUTION_STARTED); the worker replays it from event 0.
 	if err := e.scheduleWorkflowTask(ns, workflowId, runId); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	e.emit(Event{
 		Kind:       "workflow.started",
@@ -288,7 +283,7 @@ func (e *engine) startWorkflowFull(ns, workflowId, runId string, typ TypeRef, ta
 		RunID:      runId,
 		Data:       wf,
 	})
-	return &wf, nil
+	return &wf, true, nil
 }
 
 // resolveWorkflowIdConflict applies the workflow-id reuse policy against a
@@ -460,6 +455,17 @@ func (e *engine) CancelWorkflow(ns, workflowId, runId string) (*WorkflowExecutio
 	return e.CancelWorkflowWithReason(ns, workflowId, runId, "", "")
 }
 
+// lockedRun locks the run a caller names, which may be only a workflowId (the
+// latest run), and returns its concrete runId with the unlock. A run that does not
+// exist is locked under the id the caller gave, so the lock is the caller's to
+// release either way.
+func (e *engine) lockedRun(ns, workflowId, runId string) (string, func()) {
+	if wf, ok, _ := e.DescribeWorkflow(ns, workflowId, runId); ok {
+		workflowId, runId = wf.Execution.WorkflowId, wf.Execution.RunId
+	}
+	return runId, e.lockRun(ns, workflowId, runId)
+}
+
 // CancelWorkflowWithReason records WORKFLOW_EXECUTION_CANCEL_REQUESTED
 // and transitions the workflow to CANCELING. If a worker is subscribed
 // to the workflow's task queue, OpcodeDeliverCancelRequest is pushed
@@ -468,6 +474,8 @@ func (e *engine) CancelWorkflow(ns, workflowId, runId string) (*WorkflowExecutio
 // is auto-acked synchronously to CANCELED so the API converges in
 // the absence of a cooperating worker.
 func (e *engine) CancelWorkflowWithReason(ns, workflowId, runId, reason, identity string) (*WorkflowExecution, error) {
+	runId, unlock := e.lockedRun(ns, workflowId, runId)
+	defer unlock()
 	wf, ok, err := e.DescribeWorkflow(ns, workflowId, runId)
 	if !ok {
 		return nil, fmt.Errorf("workflow %s/%s/%s not found", ns, workflowId, runId)
@@ -505,8 +513,10 @@ func (e *engine) CancelWorkflowWithReason(ns, workflowId, runId, reason, identit
 	if err := e.store.put(fmt.Sprintf("wf/%s/%s/%s", ns, wf.Execution.WorkflowId, wf.Execution.RunId), wf); err != nil {
 		return nil, err
 	}
-	if e.cancelling != nil {
-		e.cancelling.mark(ns, wf.Execution.WorkflowId, wf.Execution.RunId)
+	// The mark is a row, so the sweep that acks a cancel nobody answers is the
+	// deployment's and not this process's.
+	if err := e.store.put(cancelKey(ns, wf.Execution.WorkflowId, wf.Execution.RunId), cancelMark{Execution: wf.Execution, At: nowRFC3339()}); err != nil {
+		return nil, err
 	}
 	e.disp.PushCancelRequest(ns, wf.TaskQueue, wf.Execution.WorkflowId, wf.Execution.RunId, reason, identity)
 	e.emit(Event{
@@ -520,34 +530,54 @@ func (e *engine) CancelWorkflowWithReason(ns, workflowId, runId, reason, identit
 }
 
 // AckCanceled finalizes a CANCELING workflow → CANCELED. Idempotent
-// against terminal states; called from the respond-workflow-task ack
-// path and from the cancel sweeper.
+// against terminal states; called from the cancel sweeper. The respond-workflow-task
+// ack path holds the run's lock already and calls ackCanceled.
 func (e *engine) AckCanceled(ns, workflowID, runID, reason, identity string) (*WorkflowExecution, error) {
-	if e.cancelling != nil {
-		e.cancelling.clear(ns, workflowID, runID)
-	}
-	return e.terminalTransition(ns, workflowID, runID, "WORKFLOW_EXECUTION_STATUS_CANCELED", "workflow.canceled", "WORKFLOW_EXECUTION_CANCELED", map[string]any{
+	runID, unlock := e.lockedRun(ns, workflowID, runID)
+	defer unlock()
+	return e.ackCanceled(ns, workflowID, runID, reason, identity)
+}
+
+// ackCanceled is AckCanceled for a caller that holds the run's lock.
+func (e *engine) ackCanceled(ns, workflowID, runID, reason, identity string) (*WorkflowExecution, error) {
+	wf, err := e.terminalTransition(ns, workflowID, runID, "WORKFLOW_EXECUTION_STATUS_CANCELED", "workflow.canceled", "WORKFLOW_EXECUTION_CANCELED", map[string]any{
 		"reason":   reason,
 		"identity": identity,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return wf, e.store.del(cancelKey(ns, workflowID, runID))
 }
 
 // sweepCanceling auto-acks workflows that have been CANCELING longer
-// than cancelTimeout. Called periodically by runScheduler.
-func (e *engine) sweepCanceling() {
-	if e.cancelling == nil {
-		return
+// than cancelTimeout, in every tenant. Called periodically by runScheduler, by the
+// engine that leads the sweep.
+func (e *engine) sweepCanceling() error {
+	type due struct {
+		p           Principal
+		ns, wf, run string
 	}
-	for _, k := range e.cancelling.expired() {
-		parts := strings.SplitN(k, "|", 3)
-		if len(parts) != 3 {
-			e.cancelling.mu.Lock()
-			delete(e.cancelling.at, k)
-			e.cancelling.mu.Unlock()
-			continue
+	var dues []due
+	cutoff := time.Now().Add(-cancelTimeout)
+	if err := e.store.listEveryTenant("wfcancel/", func(p Principal, key string, body []byte) error {
+		var m cancelMark
+		if unmarshal(body, &m) != nil || !parseTime(m.At, time.Time{}).Before(cutoff) {
+			return nil
 		}
-		_, _ = e.AckCanceled(parts[0], parts[1], parts[2], "sweep:cancel-timeout", "engine")
+		_, ns, _, ok := storepkg.NsFromKey(key)
+		if !ok {
+			return nil
+		}
+		dues = append(dues, due{p, ns, m.Execution.WorkflowId, m.Execution.RunId})
+		return nil
+	}); err != nil {
+		return err
 	}
+	for _, d := range dues {
+		_, _ = e.As(d.p).AckCanceled(d.ns, d.wf, d.run, "sweep:cancel-timeout", "engine")
+	}
+	return nil
 }
 
 func (e *engine) TerminateWorkflow(ns, workflowId, runId string) (*WorkflowExecution, error) {
@@ -555,6 +585,8 @@ func (e *engine) TerminateWorkflow(ns, workflowId, runId string) (*WorkflowExecu
 }
 
 func (e *engine) TerminateWorkflowWithReason(ns, workflowId, runId, reason, identity string) (*WorkflowExecution, error) {
+	runId, unlock := e.lockedRun(ns, workflowId, runId)
+	defer unlock()
 	return e.terminalTransition(ns, workflowId, runId, "WORKFLOW_EXECUTION_STATUS_TERMINATED", "workflow.terminated", "WORKFLOW_EXECUTION_TERMINATED", map[string]any{
 		"reason":   reason,
 		"identity": identity,
@@ -777,6 +809,8 @@ func (e *engine) QueryWorkflowCtx(ctx context.Context, ns, workflowID, runID, qu
 // run starting from a synthetic START event and the truncated history,
 // and links the runs via wf.ResetPoints (stored as a memo key).
 func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reason, identity string) (*WorkflowExecution, error) {
+	runID, unlockSrc := e.lockedRun(ns, workflowID, runID)
+	defer unlockSrc()
 	src, ok, err := e.DescribeWorkflow(ns, workflowID, runID)
 	if !ok {
 		return nil, fmt.Errorf("workflow not found")
@@ -792,6 +826,8 @@ func (e *engine) ResetWorkflow(ns, workflowID, runID string, eventID int64, reas
 		return nil, err
 	}
 	newRun := newRunId()
+	unlockNew := e.lockRun(ns, src.Execution.WorkflowId, newRun)
+	defer unlockNew()
 	newWf := WorkflowExecution{
 		Execution: ExecutionRef{WorkflowId: src.Execution.WorkflowId, RunId: newRun},
 		Type:      src.Type,
@@ -1344,14 +1380,14 @@ func (e *engine) DeleteSchedule(ns, id string) error {
 }
 
 func (e *engine) PauseSchedule(ns, id string, paused bool, note string) error {
-	s, ok, err := e.DescribeSchedule(ns, id)
-	if !ok || err != nil {
+	if _, ok, err := e.DescribeSchedule(ns, id); !ok || err != nil {
 		return fmt.Errorf("schedule not found")
 	}
-	s.State.Paused = paused
-	s.State.Note = note
-	s.Info.UpdateTime = nowRFC3339()
-	return e.store.put(fmt.Sprintf("sc/%s/%s", ns, id), s)
+	return e.editSchedule(ns, id, func(cur *Schedule) {
+		cur.State.Paused = paused
+		cur.State.Note = note
+		cur.Info.UpdateTime = nowRFC3339()
+	})
 }
 
 // ── search attributes ───────────────────────────────────────────────
@@ -1453,6 +1489,8 @@ func (e *engine) UpdateNamespaceMetadata(name string, p NamespaceMetadataPatch) 
 // ── workflow user metadata ──────────────────────────────────────────
 
 func (e *engine) UpdateWorkflowMetadata(ns, workflowID, runID string, m WorkflowUserMetadata) (*WorkflowExecution, error) {
+	runID, unlock := e.lockedRun(ns, workflowID, runID)
+	defer unlock()
 	wf, ok, err := e.DescribeWorkflow(ns, workflowID, runID)
 	if !ok {
 		return nil, fmt.Errorf("workflow not found")
@@ -1699,18 +1737,26 @@ func (e *engine) reportFire(p Principal, s Schedule, fault error) {
 	}
 }
 
-// runScheduler ticks every 5s and fires due schedules through StartWorkflow.
+// runScheduler ticks every e.sweep and fires due schedules through StartWorkflow.
 // Cron specs are parsed via robfig/cron with seconds-optional 5/6-field
 // syntax; first invalid spec is skipped without aborting the sweep.
+//
+// One engine sweeps at a time: among replicas, the one that leads "sweep". The
+// leadership is what keeps the others from reading every tenant's schedules every
+// tick to find that the leader has fired them; it is not what keeps a schedule from
+// firing twice, which is the fire itself (see sweepSchedules), because a leader that
+// stalls past its term overlaps its successor.
 func (e *engine) runScheduler(stop <-chan struct{}) {
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(e.sweep)
 	defer t.Stop()
 	for {
 		select {
 		case <-stop:
 			return
 		case <-t.C:
-			e.sweepOnce()
+			if e.cl.lead("sweep") {
+				e.sweepOnce()
+			}
 		}
 	}
 }
@@ -1731,9 +1777,20 @@ func (e *engine) sweepOnce() {
 	} else {
 		e.fails.ok(sweepAllKey)
 	}
-	e.sweepCanceling()
+	if err := e.sweepCanceling(); err != nil {
+		if n, report := e.fails.fail(sweepCancelKey); report {
+			e.log.Error(msgSweepCancelFailed, "consecutiveFailures", n, "error", err)
+		}
+	} else {
+		e.fails.ok(sweepCancelKey)
+	}
 	e.sweepLeases()
 }
+
+// sweepCancelKey tracks whole cancel-sweep failures under the same throttle.
+var sweepCancelKey = scheduleKey(Principal{}, "", "cancel")
+
+const msgSweepCancelFailed = "tasks: cancel sweep failed, no stuck cancel was acked this tick"
 
 // sweepLeases reaps expired activity leases across every namespace the
 // (unscoped) engine can see, so a claimed activity stranded by a worker that
@@ -1748,7 +1805,7 @@ func (e *engine) sweepLeases() {
 	}
 	for _, ns := range namespaces {
 		name := ns.NamespaceInfo.Name
-		unlock := e.runMu.lock(e.principal.String() + "|claim|" + name)
+		unlock := e.cl.lock(e.principal.String() + "|claim|" + name)
 		_ = e.reapExpiredLeases(name)
 		unlock()
 	}
@@ -1795,8 +1852,14 @@ func (e *engine) sweepSchedules() error {
 		// times while the ACTIVITY it started failed every time — and without
 		// this attribute the failure report one layer down can only say "some
 		// JobWorkflow is broken", never "the nightly backup has not run".
-		wf, startErr := oe.startWorkflowFull(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "",
-			map[string]any{searchAttrScheduleID: s.ScheduleId, searchAttrScheduledStart: d.tick.UTC().Format(time.RFC3339)}, nil, "")
+		//
+		// The run is named by the tick it is for, and started under a request id
+		// that is that tick, so the same tick fired twice (a leader that stalled past
+		// its term, a successor reading the schedule before the first fire
+		// re-anchored it) is one run: the second start finds the first.
+		tick := d.tick.UTC().Format(time.RFC3339)
+		wf, created, startErr := oe.startWorkflowOnce(s.Namespace, scheduledWorkflowID(d.principal, s, tick), "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "tick:"+tick,
+			map[string]any{searchAttrScheduleID: s.ScheduleId, searchAttrScheduledStart: tick}, nil, "")
 		fault := startErr
 		if fault == nil {
 			fault = e.unreached(s.Namespace, wf.TaskQueue)
@@ -1813,16 +1876,44 @@ func (e *engine) sweepSchedules() error {
 			// the strength of a report.
 			continue
 		}
-		s.Info.ActionCount++
-		s.Info.UpdateTime = now.Format(time.RFC3339)
-		if n2, ok2 := nextScheduleFire(s, now); ok2 {
-			s.Info.NextActionTime = n2.UTC().Format(time.RFC3339)
-		}
-		if err := oe.store.put(fmt.Sprintf("sc/%s/%s", s.Namespace, s.ScheduleId), s); err != nil {
+		// Re-anchored under the schedule's lock, on the row as it is now: a pause
+		// or an edit that landed while the run started is kept, and a fire that
+		// found its run already made does not count it twice.
+		if err := oe.editSchedule(s.Namespace, s.ScheduleId, func(cur *Schedule) {
+			if created {
+				cur.Info.ActionCount++
+			}
+			cur.Info.UpdateTime = now.Format(time.RFC3339)
+			if n2, ok2 := nextScheduleFire(*cur, now); ok2 {
+				cur.Info.NextActionTime = n2.UTC().Format(time.RFC3339)
+			}
+		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// scheduledWorkflowID names the run a schedule's tick starts: the workflow type, as
+// an unnamed start names it, and eight hex digits that are a function of the
+// tenant, the schedule and the tick and nothing else.
+func scheduledWorkflowID(p Principal, s Schedule, tick string) string {
+	sum := sha256.Sum256([]byte(p.String() + "|" + s.Namespace + "|" + s.ScheduleId + "|" + tick))
+	return strings.ToLower(s.Action.WorkflowType.Name) + "-" + hex.EncodeToString(sum[:4])
+}
+
+// editSchedule applies fn to the schedule's row under the schedule's lock, so the
+// replicas that touch one schedule (a fire, a pause, an edit, a trigger) each change
+// the row as the last left it. A schedule deleted meanwhile is left deleted.
+func (e *engine) editSchedule(ns, id string, fn func(*Schedule)) error {
+	unlock := e.cl.lock(e.principal.String() + "|schedule|" + ns + "|" + id)
+	defer unlock()
+	cur, ok, err := e.DescribeSchedule(ns, id)
+	if err != nil || !ok {
+		return err
+	}
+	fn(cur)
+	return e.store.put(fmt.Sprintf("sc/%s/%s", ns, id), cur)
 }
 
 // anchorTime returns the timestamp from which the next cron firing
