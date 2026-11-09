@@ -14,6 +14,7 @@ require (
 	github.com/hanzoai/cek v0.2.1
 	github.com/hanzoai/namespace v1.2.0
 	github.com/hanzoai/sqlite v0.5.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/luxfi/consensus v1.36.3
 	github.com/luxfi/log v1.5.0
 	github.com/luxfi/zap v1.2.7
@@ -37,6 +38,9 @@ require (
 	github.com/hanzoai/csqlite v0.1.0 // indirect
 	github.com/hanzoai/sqlcipher v0.1.1 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/luxfi/accel v1.2.4 // indirect
 	github.com/luxfi/bft v0.1.5 // indirect

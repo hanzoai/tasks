@@ -489,3 +489,21 @@ func (m *Manager) RootDir() string { return m.rootDir }
 
 // db is a typed alias for the open *sql.DB so tests don't need to import database/sql.
 type db = sql.DB
+
+// HasShards reports whether dir holds any shard file: a directory that has never
+// been opened, or only ever by a deployment that has since moved its rows into a
+// shared database and cleared it, has none.
+func HasShards(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(filepath.Join(dir, orgsRoot), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // a directory that is not there holds nothing
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), shardSuffix) && !strings.HasPrefix(d.Name(), "-") {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
+}
