@@ -209,6 +209,7 @@ var contents = []row{
 	{post, "activities/:id/:run/cancel"},
 	{post, "activities/:id/:run/complete"},
 	{post, "activities/:id/:run/fail"},
+	{post, "activities/:id/:run/release"},
 	{post, "activities/:id/:run/heartbeat"},
 	{get, "activities/:id/:run/history"},
 }

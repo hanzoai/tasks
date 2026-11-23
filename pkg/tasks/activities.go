@@ -3,8 +3,10 @@
 package tasks
 
 import (
+	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -34,11 +36,19 @@ func (e *engine) StartActivity(ns, activityID, runID string, typ TypeRef, taskQu
 	if _, ok, _ := e.DescribeNamespace(ns); !ok {
 		return nil, fmt.Errorf("namespace %q not registered", ns)
 	}
+	a, _, err := e.startActivityOnce(ns, "", activityID, runID, typ, taskQueue, input, retry, scheduleToClose, scheduleToStart, startToClose, heartbeat, identity, requestID)
+	return a, err
+}
+
+// startActivityOnce is StartActivity that also reports whether this call
+// created the activity (false when requestID hit an existing record) and
+// optionally stamps the originating scheduleId.
+func (e *engine) startActivityOnce(ns, scheduleID, activityID, runID string, typ TypeRef, taskQueue string, input any, retry *RetryPolicy, scheduleToClose, scheduleToStart, startToClose, heartbeat string, identity, requestID string) (*StandaloneActivity, bool, error) {
 	if typ.Name == "" {
-		return nil, fmt.Errorf("activity type required")
+		return nil, false, fmt.Errorf("activity type required")
 	}
 	if activityID == "" {
-		return nil, fmt.Errorf("activityId required")
+		return nil, false, fmt.Errorf("activityId required")
 	}
 	if requestID != "" {
 		// The lookup and the start that fills it are one step across replicas.
@@ -47,7 +57,7 @@ func (e *engine) StartActivity(ns, activityID, runID string, typ TypeRef, taskQu
 		var prev activityIdempotency
 		if ok, _ := e.store.get(fmt.Sprintf("aidem/%s/%s/%s", ns, activityID, requestID), &prev); ok && prev.RunId != "" {
 			if a, ok2, _ := e.DescribeActivity(ns, activityID, prev.RunId); ok2 {
-				return a, nil
+				return a, false, nil
 			}
 		}
 	}
@@ -76,9 +86,10 @@ func (e *engine) StartActivity(ns, activityID, runID string, typ TypeRef, taskQu
 		ScheduleToStartTimeout: scheduleToStart,
 		StartToCloseTimeout:    startToClose,
 		HeartbeatTimeout:       heartbeat,
+		ScheduleId:             scheduleID,
 	}
 	if err := e.store.put(actKey(ns, activityID, runID), a); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if requestID != "" {
 		_ = e.store.put(fmt.Sprintf("aidem/%s/%s/%s", ns, activityID, requestID), activityIdempotency{RunId: runID})
@@ -89,11 +100,11 @@ func (e *engine) StartActivity(ns, activityID, runID string, typ TypeRef, taskQu
 		"input":        input,
 		"identity":     identity,
 	}); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out, _, _ := e.DescribeActivity(ns, activityID, runID)
 	e.emit(Event{Kind: "activity.scheduled", Namespace: ns, WorkflowID: activityID, RunID: runID, Data: out})
-	return out, nil
+	return out, true, nil
 }
 
 // defaultLeaseTTL bounds how long a claimed activity may go without a
@@ -145,6 +156,7 @@ func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Du
 		}
 		return rows[i].StartTime < rows[j].StartTime
 	})
+	now := time.Now().UTC()
 	for i := range rows {
 		a := rows[i]
 		if a.Status != activityStateScheduled {
@@ -153,17 +165,23 @@ func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Du
 		if taskQueue != "" && a.TaskQueue != taskQueue {
 			continue
 		}
-		wf, run := a.Execution.WorkflowId, a.Execution.RunId
-		unlockAct := e.lockActivity(ns, wf, run)
-		if cur, ok, _ := e.DescribeActivity(ns, wf, run); !ok || cur.Status != activityStateScheduled {
-			unlockAct() // changed hands since the list was read
+		if activityDeferredUntilAfter(&a, now) {
 			continue
 		}
-		now := time.Now().UTC()
+		wf, run := a.Execution.WorkflowId, a.Execution.RunId
+		unlockAct := e.lockActivity(ns, wf, run)
+		cur, ok, _ := e.DescribeActivity(ns, wf, run)
+		if !ok || cur.Status != activityStateScheduled || activityDeferredUntilAfter(cur, now) {
+			unlockAct() // changed hands or deferred since the list was read
+			continue
+		}
+		a = *cur
+		nowClaim := time.Now().UTC()
 		a.Status = activityStateStarted
 		a.Identity = identity
-		a.LastHeartbeatTime = now.Format(time.RFC3339)
-		a.LeaseExpiry = now.Add(activityLeaseTTL(&a, lease)).Format(time.RFC3339)
+		a.NotBefore = ""
+		a.LastHeartbeatTime = nowClaim.Format(time.RFC3339)
+		a.LeaseExpiry = nowClaim.Add(activityLeaseTTL(&a, lease)).Format(time.RFC3339)
 		if err := e.store.put(actKey(ns, wf, run), a); err != nil {
 			unlockAct()
 			return nil, false, err
@@ -182,6 +200,114 @@ func (e *engine) ClaimNextActivity(ns, taskQueue, identity string, lease time.Du
 		return out, true, nil
 	}
 	return nil, false, nil
+}
+
+func activityDeferredUntilAfter(a *StandaloneActivity, now time.Time) bool {
+	if a == nil || a.NotBefore == "" {
+		return false
+	}
+	nb, err := time.Parse(time.RFC3339, a.NotBefore)
+	if err != nil {
+		return false
+	}
+	return now.Before(nb)
+}
+
+func formatNotBefore(now time.Time, d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	target := now.UTC().Add(d)
+	if d < time.Second {
+		return target.Format(time.RFC3339Nano)
+	}
+	return target.Format(time.RFC3339)
+}
+
+// ClaimNextActivityWait claims immediately when work is ready; otherwise, when
+// wait > 0 (clamped to 60s), subscribes to the event broker ahead of the check
+// so zero schedule/release events can slip between the scan and the wait. Also
+// wakes when the earliest deferred/retry NotBefore on taskQueue matures.
+func (e *engine) ClaimNextActivityWait(ctx context.Context, ns, taskQueue, identity string, lease, wait time.Duration) (*StandaloneActivity, bool, error) {
+	if wait <= 0 {
+		return e.ClaimNextActivity(ns, taskQueue, identity, lease)
+	}
+	if wait > 60*time.Second {
+		wait = 60 * time.Second
+	}
+	subID, ch := e.broker.subscribe()
+	defer e.broker.unsubscribe(subID)
+
+	a, ok, err := e.ClaimNextActivity(ns, taskQueue, identity, lease)
+	if err != nil || ok {
+		return a, ok, err
+	}
+
+	deadline := time.Now().Add(wait)
+	for {
+		rem := time.Until(deadline)
+		if rem <= 0 {
+			return nil, false, nil
+		}
+		wake := rem
+		if nextReady := e.nextDeferredWake(ns, taskQueue); nextReady > 0 && nextReady < wake {
+			wake = nextReady
+		}
+		timer := time.NewTimer(wake)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, false, nil
+		case <-timer.C:
+		case ev, open := <-ch:
+			timer.Stop()
+			if !open {
+				return nil, false, nil
+			}
+			if ev.OrgID != e.principal.Org || ev.Namespace != ns {
+				continue
+			}
+			switch ev.Kind {
+			case "activity.scheduled", "activity.deferred", "activity.timedout", "activity.retrying":
+			default:
+				continue
+			}
+		}
+		a, ok, err = e.ClaimNextActivity(ns, taskQueue, identity, lease)
+		if err != nil || ok {
+			return a, ok, err
+		}
+	}
+}
+
+func (e *engine) nextDeferredWake(ns, taskQueue string) time.Duration {
+	rows, err := listInto[StandaloneActivity](e.store, fmt.Sprintf("act/%s/", ns))
+	if err != nil {
+		return 0
+	}
+	now := time.Now().UTC()
+	var best time.Duration
+	for i := range rows {
+		a := &rows[i]
+		if a.Status != activityStateScheduled || a.NotBefore == "" {
+			continue
+		}
+		if taskQueue != "" && a.TaskQueue != taskQueue {
+			continue
+		}
+		nb, err := time.Parse(time.RFC3339, a.NotBefore)
+		if err != nil {
+			continue
+		}
+		d := nb.Sub(now)
+		if d <= 0 {
+			return time.Millisecond
+		}
+		if best == 0 || d < best {
+			best = d
+		}
+	}
+	return best
 }
 
 // reapExpiredLeases returns each STARTED activity in ns whose lease elapsed
@@ -314,12 +440,146 @@ func (e *engine) CompleteActivity(ns, activityID, runID string, result any, iden
 	}, "result", "")
 }
 
-// FailActivity transitions the activity to FAILED with a cause.
+// ReleaseActivity returns a STARTED activity to SCHEDULED without consuming an
+// error attempt, so a worker that discovers it is busy or lacks a capability
+// yields the task cleanly (optionally deferred until now+delay).
+func (e *engine) ReleaseActivity(ns, activityID, runID, reason, identity string, delay time.Duration) error {
+	unlock := e.lockActivity(ns, activityID, runID)
+	defer unlock()
+	a, ok, err := e.DescribeActivity(ns, activityID, runID)
+	if !ok {
+		return fmt.Errorf("activity not found")
+	}
+	if err != nil {
+		return err
+	}
+	if isActivityTerminal(a.Status) {
+		return fmt.Errorf("activity terminal: status=%s", a.Status)
+	}
+	if a.Status != activityStateStarted {
+		return fmt.Errorf("activity conflict: status=%s", a.Status)
+	}
+	if identity != "" && a.Identity != "" && a.Identity != identity {
+		return fmt.Errorf("activity conflict: claimed by %q, cannot release as %q", a.Identity, identity)
+	}
+	now := time.Now().UTC()
+	a.Status = activityStateScheduled
+	a.Identity = ""
+	a.LeaseExpiry = ""
+	a.DeferCount++
+	a.LastBusyReason = reason
+	a.NotBefore = formatNotBefore(now, delay)
+	if err := e.store.put(actKey(ns, activityID, runID), *a); err != nil {
+		return err
+	}
+	if _, err := e.appendActivityHistory(ns, activityID, runID, "ACTIVITY_TASK_DEFERRED", map[string]any{
+		"reason":     reason,
+		"identity":   identity,
+		"deferCount": a.DeferCount,
+		"notBefore":  a.NotBefore,
+	}); err != nil {
+		return err
+	}
+	out, _, _ := e.DescribeActivity(ns, activityID, runID)
+	e.emit(Event{Kind: "activity.deferred", Namespace: ns, WorkflowID: activityID, RunID: runID, Data: out})
+	return nil
+}
+
+// FailActivity transitions the activity to FAILED with a cause when retries
+// are absent, exhausted, or non-retryable; when RetryPolicy has remaining
+// attempts it requeues the activity in SCHEDULED with exponential backoff.
 func (e *engine) FailActivity(ns, activityID, runID, cause, identity string) error {
-	return e.activityTerminal(ns, activityID, runID, activityStateFailed, "ACTIVITY_TASK_FAILED", "activity.failed", map[string]any{
+	unlock := e.lockActivity(ns, activityID, runID)
+	defer unlock()
+	a, ok, err := e.DescribeActivity(ns, activityID, runID)
+	if !ok {
+		return fmt.Errorf("activity not found")
+	}
+	if err != nil {
+		return err
+	}
+	if isActivityTerminal(a.Status) {
+		return fmt.Errorf("activity terminal: status=%s", a.Status)
+	}
+	if a.MaximumAttempts > 0 && a.Attempt < a.MaximumAttempts && !isNonRetryableCause(cause, a.RetryPolicy) {
+		e.recordFailure(standaloneFailureIdentity(ns, a), true, cause)
+		backoff := standaloneRetryBackoff(a.RetryPolicy, a.Attempt)
+		now := time.Now().UTC()
+		a.Attempt++
+		a.Status = activityStateScheduled
+		a.Identity = ""
+		a.LeaseExpiry = ""
+		a.FailureCause = cause
+		a.NotBefore = formatNotBefore(now, backoff)
+		if err := e.store.put(actKey(ns, activityID, runID), *a); err != nil {
+			return err
+		}
+		if _, err := e.appendActivityHistory(ns, activityID, runID, "ACTIVITY_TASK_RETRY_SCHEDULED", map[string]any{
+			"cause":     cause,
+			"identity":  identity,
+			"attempt":   a.Attempt,
+			"notBefore": a.NotBefore,
+		}); err != nil {
+			return err
+		}
+		out, _, _ := e.DescribeActivity(ns, activityID, runID)
+		e.emit(Event{Kind: "activity.retrying", Namespace: ns, WorkflowID: activityID, RunID: runID, Data: out})
+		return nil
+	}
+	return e.activityTerminalLocked(ns, activityID, runID, a, activityStateFailed, "ACTIVITY_TASK_FAILED", "activity.failed", map[string]any{
 		"cause":    cause,
 		"identity": identity,
 	}, "", cause)
+}
+
+func standaloneRetryBackoff(rp *RetryPolicy, attempt int) time.Duration {
+	initDur := 5 * time.Second
+	coeff := 2.0
+	maxDur := 2 * time.Minute
+	if rp != nil {
+		if rp.InitialInterval != "" {
+			if d, err := time.ParseDuration(rp.InitialInterval); err == nil && d > 0 {
+				initDur = d
+			}
+		}
+		if rp.BackoffCoefficient >= 1.0 {
+			coeff = rp.BackoffCoefficient
+		}
+		if rp.MaximumInterval != "" {
+			if d, err := time.ParseDuration(rp.MaximumInterval); err == nil && d > 0 {
+				maxDur = d
+			}
+		}
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	cur := float64(initDur)
+	for i := 1; i < attempt; i++ {
+		cur *= coeff
+		if cur >= float64(maxDur) {
+			return maxDur
+		}
+	}
+	if cur > float64(maxDur) {
+		return maxDur
+	}
+	return time.Duration(cur)
+}
+
+func isNonRetryableCause(cause string, rp *RetryPolicy) bool {
+	if rp == nil || len(rp.NonRetryableErrorTypes) == 0 {
+		return false
+	}
+	for _, et := range rp.NonRetryableErrorTypes {
+		if et == "" {
+			continue
+		}
+		if cause == et || strings.HasPrefix(cause, et+":") || strings.HasPrefix(cause, et+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // HeartbeatActivity bumps LastHeartbeatTime. Rejects if terminal.
@@ -432,6 +692,10 @@ func (e *engine) activityTerminal(ns, activityID, runID, status, eventType, evKi
 	if isActivityTerminal(a.Status) {
 		return fmt.Errorf("activity terminal: status=%s", a.Status)
 	}
+	return e.activityTerminalLocked(ns, activityID, runID, a, status, eventType, evKind, attrs, resultField, cause)
+}
+
+func (e *engine) activityTerminalLocked(ns, activityID, runID string, a *StandaloneActivity, status, eventType, evKind string, attrs map[string]any, resultField, cause string) error {
 	a.Status = status
 	a.CloseTime = nowRFC3339()
 	if resultField == "result" {

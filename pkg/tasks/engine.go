@@ -1727,14 +1727,19 @@ func (e *engine) reportFire(p Principal, s Schedule, fault error) {
 		return
 	}
 	if n, report := e.fails.fail(key); report {
-		e.log.Error(msgActionFailed,
+		args := []any{
 			"org", p.Org,
 			"namespace", s.Namespace,
 			"scheduleId", s.ScheduleId,
 			"workflowType", s.Action.WorkflowType.Name,
 			"taskQueue", s.Action.TaskQueue,
 			"consecutiveFailures", n,
-			"error", fault)
+			"error", fault,
+		}
+		if s.Action.ActivityType.Name != "" {
+			args = append(args, "activityType", s.Action.ActivityType.Name)
+		}
+		e.log.Error(msgActionFailed, args...)
 	}
 }
 
@@ -1848,31 +1853,65 @@ func (e *engine) sweepSchedules() error {
 	for _, d := range dues {
 		s := d.s
 		oe := e.As(d.principal)
+		isActivity := s.Action.ActivityType.Name != "" && s.Action.WorkflowType.Name == ""
 		// Among replicas, the one that can hand the run to a worker fires it. A
 		// replica whose worker for this namespace and queue is not up (an app starts
 		// one the first time a request needs it) leaves the tick to one that has it,
 		// until the tick is overdue by more than a few sweeps: then no replica has
 		// one, and it fires anyway so the run exists and the fire is reported as
-		// unreached, as it is when an engine is alone.
-		if e.cl.shared() && !e.serves(s.Namespace, s.Action.TaskQueue, kindWorkflow) && now.Sub(d.tick) < 3*e.sweep {
+		// unreached, as it is when an engine is alone. Pull-claimed standalone
+		// activities have no push subscription on any replica, so they fire
+		// immediately via their replica-locked idempotency key.
+		if !isActivity && e.cl.shared() && !e.serves(s.Namespace, s.Action.TaskQueue, kindWorkflow) && now.Sub(d.tick) < 3*e.sweep {
 			continue
 		}
-		// Stamp the originating schedule on the run. The 11-day incident's
-		// fault was one layer below this call — StartWorkflow succeeded 4489
-		// times while the ACTIVITY it started failed every time — and without
-		// this attribute the failure report one layer down can only say "some
-		// JobWorkflow is broken", never "the nightly backup has not run".
-		//
-		// The run is named by the tick it is for, and started under a request id
-		// that is that tick, so the same tick fired twice (a leader that stalled past
-		// its term, a successor reading the schedule before the first fire
-		// re-anchored it) is one run: the second start finds the first.
 		tick := d.tick.UTC().Format(time.RFC3339)
-		wf, created, startErr := oe.startWorkflowOnce(s.Namespace, scheduledWorkflowID(d.principal, s, tick), "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "tick:"+tick,
-			map[string]any{searchAttrScheduleID: s.ScheduleId, searchAttrScheduledStart: tick}, nil, "")
-		fault := startErr
-		if fault == nil {
-			fault = e.unreached(s.Namespace, wf.TaskQueue)
+		var (
+			created  bool
+			startErr error
+			fault    error
+		)
+		if isActivity {
+			if _, nsErr := oe.namespace(s.Namespace); nsErr != nil {
+				startErr = nsErr
+			} else {
+				actID := fmt.Sprintf("%s-%d", s.ScheduleId, d.tick.UTC().Unix())
+				_, created, startErr = oe.startActivityOnce(
+					s.Namespace,
+					s.ScheduleId,
+					actID,
+					"",
+					s.Action.ActivityType,
+					s.Action.TaskQueue,
+					s.Action.Input,
+					s.Action.RetryPolicy,
+					s.Action.ScheduleToCloseTimeout,
+					"",
+					s.Action.StartToCloseTimeout,
+					s.Action.HeartbeatTimeout,
+					"",
+					"tick:"+tick,
+				)
+			}
+			fault = startErr
+		} else {
+			// Stamp the originating schedule on the run. The 11-day incident's
+			// fault was one layer below this call — StartWorkflow succeeded 4489
+			// times while the ACTIVITY it started failed every time — and without
+			// this attribute the failure report one layer down can only say "some
+			// JobWorkflow is broken", never "the nightly backup has not run".
+			//
+			// The run is named by the tick it is for, and started under a request id
+			// that is that tick, so the same tick fired twice (a leader that stalled past
+			// its term, a successor reading the schedule before the first fire
+			// re-anchored it) is one run: the second start finds the first.
+			var wf *WorkflowExecution
+			wf, created, startErr = oe.startWorkflowOnce(s.Namespace, scheduledWorkflowID(d.principal, s, tick), "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "tick:"+tick,
+				map[string]any{searchAttrScheduleID: s.ScheduleId, searchAttrScheduledStart: tick}, nil, "")
+			fault = startErr
+			if fault == nil {
+				fault = e.unreached(s.Namespace, wf.TaskQueue)
+			}
 		}
 		e.reportFire(d.principal, s, fault)
 		if startErr != nil {

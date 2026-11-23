@@ -401,6 +401,7 @@ func standaloneFailureIdentity(ns string, a *StandaloneActivity) failureIdentity
 		Namespace:    ns,
 		ActivityType: a.Type.Name,
 		TaskQueue:    a.TaskQueue,
+		ScheduleId:   a.ScheduleId,
 		WorkflowId:   a.Execution.WorkflowId,
 		RunId:        a.Execution.RunId,
 		Attempt:      a.Attempt,
