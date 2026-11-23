@@ -63,25 +63,53 @@ func OpenShared(ctx context.Context, db *sql.DB) (*Shared, error) {
 		return nil, errors.New("store.OpenShared: a database is required")
 	}
 	s := &Shared{db: db, pg: postgres(db)}
-	tx, err := db.BeginTx(ctx, nil)
+	for attempt := 0; ; attempt++ {
+		err := s.migrate(ctx)
+		if err == nil {
+			return s, nil
+		}
+		if s.pg || attempt >= 25 || ctx.Err() != nil || !isSQLiteBusy(err) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("store.OpenShared: %w", ctx.Err())
+		case <-time.After(time.Duration(10+attempt*5) * time.Millisecond):
+		}
+	}
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked") ||
+		strings.Contains(msg, "sqlite_busy") ||
+		strings.Contains(msg, "sqlite_locked")
+}
+
+func (s *Shared) migrate(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store.OpenShared: %w", err)
+		return fmt.Errorf("store.OpenShared: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if s.pg {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_schema() || ':tasks:migrate', 0))`); err != nil {
-			return nil, fmt.Errorf("store.OpenShared: lock: %w", err)
+			return fmt.Errorf("store.OpenShared: lock: %w", err)
 		}
 	}
 	for _, ddl := range s.schema() {
 		if _, err := tx.ExecContext(ctx, ddl); err != nil {
-			return nil, fmt.Errorf("store.OpenShared: %w", err)
+			return fmt.Errorf("store.OpenShared: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store.OpenShared: %w", err)
+		return fmt.Errorf("store.OpenShared: %w", err)
 	}
-	return s, nil
+	return nil
 }
 
 // postgres reads the engine off the handle's driver. The package it is built in
