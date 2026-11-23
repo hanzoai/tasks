@@ -10,9 +10,10 @@ import (
 )
 
 // TriggerSchedule fires a synthetic action for the schedule, bumping
-// info.actionCount and starting a workflow per the schedule's action.
+// info.actionCount and starting a workflow (or standalone activity when
+// Action.ActivityType is configured) per the schedule's action.
 // Idempotent on requestID: a second call with the same (ns, id, reqID)
-// returns the prior workflow without firing again.
+// returns the prior execution without firing again.
 func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, error) {
 	s, ok, err := e.DescribeSchedule(ns, id)
 	if !ok {
@@ -21,6 +22,7 @@ func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, 
 	if err != nil {
 		return nil, err
 	}
+	isActivity := s.Action.ActivityType.Name != "" && s.Action.WorkflowType.Name == ""
 	if requestID != "" {
 		// The lookup and the record that fills it are one step across replicas.
 		unlock := e.cl.lock(e.principal.String() + "|trigger|" + ns + "|" + id + "|" + requestID)
@@ -30,17 +32,53 @@ func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, 
 			RunId      string `json:"runId"`
 		}
 		if ok, _ := e.store.get(fmt.Sprintf("sctrig/%s/%s/%s", ns, id, requestID), &prev); ok && prev.RunId != "" {
-			if wf, ok2, _ := e.DescribeWorkflow(ns, prev.WorkflowId, prev.RunId); ok2 {
+			if isActivity {
+				if a, ok2, _ := e.DescribeActivity(ns, prev.WorkflowId, prev.RunId); ok2 {
+					return standaloneActivityExecution(a), nil
+				}
+			} else if wf, ok2, _ := e.DescribeWorkflow(ns, prev.WorkflowId, prev.RunId); ok2 {
 				return wf, nil
 			}
 		}
 	}
-	// Same schedule stamp the sweeper applies — a manual trigger produces a
-	// run of the same schedule and must be traceable to it identically.
-	wf, err := e.startWorkflowFull(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "",
-		map[string]any{searchAttrScheduleID: s.ScheduleId}, nil, "")
-	if err != nil {
-		return nil, err
+	var wf *WorkflowExecution
+	if isActivity {
+		if _, err := e.namespace(s.Namespace); err != nil {
+			return nil, err
+		}
+		actID := fmt.Sprintf("%s-trig-%s", s.ScheduleId, newRunId()[:8])
+		if requestID != "" && validIdent(s.ScheduleId+"-"+requestID) {
+			actID = s.ScheduleId + "-" + requestID
+		}
+		a, _, err := e.startActivityOnce(
+			s.Namespace,
+			s.ScheduleId,
+			actID,
+			"",
+			s.Action.ActivityType,
+			s.Action.TaskQueue,
+			s.Action.Input,
+			s.Action.RetryPolicy,
+			s.Action.ScheduleToCloseTimeout,
+			"",
+			s.Action.StartToCloseTimeout,
+			s.Action.HeartbeatTimeout,
+			"",
+			requestID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		wf = standaloneActivityExecution(a)
+	} else {
+		// Same schedule stamp the sweeper applies — a manual trigger produces a
+		// run of the same schedule and must be traceable to it identically.
+		var startErr error
+		wf, startErr = e.startWorkflowFull(s.Namespace, "", "", s.Action.WorkflowType, s.Action.TaskQueue, s.Action.Input, "",
+			map[string]any{searchAttrScheduleID: s.ScheduleId}, nil, "")
+		if startErr != nil {
+			return nil, startErr
+		}
 	}
 	if err := e.editSchedule(ns, id, func(cur *Schedule) {
 		cur.Info.ActionCount++
@@ -56,6 +94,21 @@ func (e *engine) TriggerSchedule(ns, id, requestID string) (*WorkflowExecution, 
 	}
 	e.broker.publish(Event{Kind: "schedule.triggered", Namespace: ns, ScheduleID: id, Data: wf})
 	return wf, nil
+}
+
+func standaloneActivityExecution(a *StandaloneActivity) *WorkflowExecution {
+	return &WorkflowExecution{
+		Execution:   a.Execution,
+		Type:        a.Type,
+		StartTime:   a.StartTime,
+		CloseTime:   a.CloseTime,
+		Status:      a.Status,
+		TaskQueue:   a.TaskQueue,
+		Input:       a.Input,
+		Result:      a.Result,
+		HistoryLen:  a.HistoryLength,
+		SearchAttrs: map[string]any{searchAttrScheduleID: a.ScheduleId},
+	}
 }
 
 // UpdateSchedule replaces spec/action/state on an existing schedule.

@@ -42,6 +42,7 @@ func TestSurfaceAnswersWhatTheMuxAnswers(t *testing.T) {
 		{http.MethodGet, "/v1/tasks/nope"},
 		{http.MethodGet, "/v1/tasks"},
 		{http.MethodPost, "/v1/tasks/namespaces/default/activities/claim"},
+		{http.MethodPost, "/v1/tasks/namespaces/default/activities/job/run/release"},
 		{http.MethodGet, "/v1/tasks/namespaces//workflows"},
 		{http.MethodGet, "/v1/tasks/namespaces/default/workflows/../x"},
 	} {

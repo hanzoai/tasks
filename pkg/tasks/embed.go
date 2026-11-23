@@ -1609,9 +1609,17 @@ func handleActivities(rq call, en *engine, ns string, sub []string) answer {
 			TaskQueue    string `json:"taskQueue"`
 			Identity     string `json:"identity"`
 			LeaseSeconds int    `json:"leaseSeconds"`
+			WaitSeconds  int    `json:"waitSeconds"`
 		}
 		_ = rq.decode(&req)
-		a, ok, err := en.ClaimNextActivity(ns, req.TaskQueue, req.Identity, time.Duration(req.LeaseSeconds)*time.Second)
+		a, ok, err := en.ClaimNextActivityWait(
+			rq.ctx,
+			ns,
+			req.TaskQueue,
+			req.Identity,
+			time.Duration(req.LeaseSeconds)*time.Second,
+			time.Duration(req.WaitSeconds)*time.Second,
+		)
 		if err != nil {
 			return fault(400, err.Error())
 		}
@@ -1652,6 +1660,15 @@ func handleActivities(rq call, en *engine, ns string, sub []string) answer {
 		_ = rq.decode(&req)
 		err := en.FailActivity(ns, sub[0], sub[1], req.Cause, req.Identity)
 		return activityResult(en, ns, sub[0], sub[1], err)
+	case len(sub) == 3 && sub[2] == "release" && rq.method == http.MethodPost:
+		var req struct {
+			Reason       string `json:"reason"`
+			Identity     string `json:"identity"`
+			DelaySeconds int    `json:"delaySeconds"`
+		}
+		_ = rq.decode(&req)
+		err := en.ReleaseActivity(ns, sub[0], sub[1], req.Reason, req.Identity, time.Duration(req.DelaySeconds)*time.Second)
+		return activityResult(en, ns, sub[0], sub[1], err)
 	case len(sub) == 3 && sub[2] == "heartbeat" && rq.method == http.MethodPost:
 		var req struct {
 			Details any `json:"details"`
@@ -1680,7 +1697,7 @@ func activityResult(en *engine, ns, activityID, runID string, err error) answer 
 		if strings.Contains(err.Error(), "not found") {
 			return fault(404, err.Error())
 		}
-		if strings.Contains(err.Error(), "terminal") {
+		if strings.Contains(err.Error(), "terminal") || strings.Contains(err.Error(), "conflict") {
 			return fault(409, err.Error())
 		}
 		return fault(400, err.Error())
@@ -1852,15 +1869,19 @@ func zapHandlers(rootEn *engine, defaultNS string, validator *edge.Verifier, req
 	}
 	// scheduleSDK marshals an engine Schedule into the SDK shape.
 	scheduleSDK := func(s *Schedule) map[string]any {
+		act := map[string]any{
+			"workflow_type": s.Action.WorkflowType.Name,
+			"task_queue":    s.Action.TaskQueue,
+		}
+		if s.Action.ActivityType.Name != "" {
+			act["activity_type"] = s.Action.ActivityType.Name
+		}
 		return map[string]any{
 			"id": s.ScheduleId,
 			"spec": map[string]any{
 				"cron": s.Spec.CronString,
 			},
-			"action": map[string]any{
-				"workflow_type": s.Action.WorkflowType.Name,
-				"task_queue":    s.Action.TaskQueue,
-			},
+			"action": act,
 			"paused": s.State.Paused,
 		}
 	}
@@ -2465,8 +2486,27 @@ func scheduleFromSDK(req map[string]any, defaultNS string) Schedule {
 	}
 	if action, ok := sched["action"].(map[string]any); ok {
 		s.Action.WorkflowType.Name, _ = action["workflow_type"].(string)
+		s.Action.ActivityType.Name, _ = action["activity_type"].(string)
+		if s.Action.ActivityType.Name == "" {
+			if at, ok := action["activityType"].(map[string]any); ok {
+				s.Action.ActivityType.Name, _ = at["name"].(string)
+			}
+		}
 		s.Action.TaskQueue, _ = action["task_queue"].(string)
+		if s.Action.TaskQueue == "" {
+			s.Action.TaskQueue, _ = action["taskQueue"].(string)
+		}
 		s.Action.Input = action["input"]
+		s.Action.ScheduleToCloseTimeout, _ = action["schedule_to_close_timeout"].(string)
+		s.Action.StartToCloseTimeout, _ = action["start_to_close_timeout"].(string)
+		s.Action.HeartbeatTimeout, _ = action["heartbeat_timeout"].(string)
+		if rpRaw, ok := action["retry_policy"]; ok && rpRaw != nil {
+			raw, _ := json.Marshal(rpRaw)
+			var rp RetryPolicy
+			if json.Unmarshal(raw, &rp) == nil {
+				s.Action.RetryPolicy = &rp
+			}
+		}
 	}
 	if p, ok := sched["paused"].(bool); ok {
 		s.State.Paused = p

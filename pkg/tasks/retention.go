@@ -280,6 +280,17 @@ func (e *engine) purgeActivityRun(ns string, ref ExecutionRef, cutoff time.Time)
 	}); err != nil {
 		return false, err
 	}
+	if a.ScheduleId != "" {
+		if err := e.store.list(fmt.Sprintf("sctrig/%s/%s/", ns, a.ScheduleId), func(key string, body []byte) error {
+			var r ExecutionRef
+			if json.Unmarshal(body, &r) == nil && r.WorkflowId == id && r.RunId == run {
+				keys = append(keys, key)
+			}
+			return nil
+		}); err != nil {
+			return false, err
+		}
+	}
 	return true, e.delAll(append(keys, actKey(ns, id, run)))
 }
 

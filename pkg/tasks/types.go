@@ -88,9 +88,14 @@ type ScheduleSpec struct {
 }
 
 type ScheduleAction struct {
-	WorkflowType TypeRef `json:"workflowType"`
-	TaskQueue    string  `json:"taskQueue"`
-	Input        any     `json:"input,omitempty"`
+	WorkflowType           TypeRef      `json:"workflowType"`
+	ActivityType           TypeRef      `json:"activityType,omitempty"`
+	TaskQueue              string       `json:"taskQueue"`
+	Input                  any          `json:"input,omitempty"`
+	RetryPolicy            *RetryPolicy `json:"retryPolicy,omitempty"`
+	ScheduleToCloseTimeout string       `json:"scheduleToCloseTimeout,omitempty"`
+	StartToCloseTimeout    string       `json:"startToCloseTimeout,omitempty"`
+	HeartbeatTimeout       string       `json:"heartbeatTimeout,omitempty"`
 }
 
 type ScheduleState struct {
@@ -171,8 +176,12 @@ type StandaloneActivity struct {
 	// (ClaimNextActivity), refreshed on each heartbeat, and cleared when the
 	// lease is reaped. Empty ⇒ the activity is not lease-managed (e.g. a
 	// presence record heartbeated but never claimed) and the reaper ignores it.
-	LeaseExpiry   string `json:"leaseExpiry,omitempty"`
-	HistoryLength int64  `json:"historyLength,omitempty"`
+	LeaseExpiry    string `json:"leaseExpiry,omitempty"`
+	NotBefore      string `json:"notBefore,omitempty"`
+	DeferCount     int    `json:"deferCount,omitempty"`
+	LastBusyReason string `json:"lastBusyReason,omitempty"`
+	ScheduleId     string `json:"scheduleId,omitempty"`
+	HistoryLength  int64  `json:"historyLength,omitempty"`
 }
 
 // RetryPolicy — schedule retry knobs for an activity.

@@ -283,3 +283,69 @@ func TestAScheduledFireCarriesItsTick(t *testing.T) {
 		t.Fatalf("one fire and one trigger: %d carry a tick, %d carry none", fired, triggered)
 	}
 }
+
+// TestScheduleActivityActionFiresAndTriggers proves ScheduleAction.ActivityType
+// enqueues pull-claimable StandaloneActivity rows on both cron sweep and manual
+// TriggerSchedule (idempotent on requestId), without emitting a false unreached
+// workflow-worker error.
+func TestScheduleActivityActionFiresAndTriggers(t *testing.T) {
+	en := newEngine(newStore())
+	logs := captureLogs(en)
+	rp := &RetryPolicy{InitialInterval: "1s", BackoffCoefficient: 2.0, MaximumAttempts: 3}
+	if err := en.CreateSchedule(Schedule{
+		ScheduleId: "nightly-bench",
+		Namespace:  "gpu-jobs",
+		Spec:       ScheduleSpec{CronString: []string{"* * * * *"}},
+		Action: ScheduleAction{
+			ActivityType:           TypeRef{Name: "research.bench"},
+			TaskQueue:              "gpu:dgx-hanzod",
+			Input:                  map[string]any{"benchmark": "hanzo-do", "command": "echo ok"},
+			RetryPolicy:            rp,
+			ScheduleToCloseTimeout: "600s",
+			StartToCloseTimeout:    "300s",
+			HeartbeatTimeout:       "45s",
+		},
+	}); err != nil {
+		t.Fatalf("CreateSchedule: %v", err)
+	}
+	backdate(t, en, "gpu-jobs", "nightly-bench", 5*time.Minute)
+
+	if err := en.sweepSchedules(); err != nil {
+		t.Fatalf("sweepSchedules: %v", err)
+	}
+	// Pull-claimed activities have no push workflow subscriber — must NOT report unreached!
+	if fails := withMsg(logs(), msgActionFailed); len(fails) != 0 {
+		t.Fatalf("unexpected msgActionFailed on activity schedule: %v", fails)
+	}
+
+	claimed, ok, err := en.ClaimNextActivity("gpu-jobs", "gpu:dgx-hanzod", "dgx-hanzod", 30*time.Second)
+	if err != nil || !ok {
+		t.Fatalf("ClaimNextActivity: ok=%v err=%v", ok, err)
+	}
+	if !strings.HasPrefix(claimed.Execution.WorkflowId, "nightly-bench-") {
+		t.Fatalf("activityId=%q, want prefix nightly-bench-", claimed.Execution.WorkflowId)
+	}
+	if claimed.Type.Name != "research.bench" || claimed.MaximumAttempts != 3 || claimed.HeartbeatTimeout != "45s" {
+		t.Fatalf("claimed activity metadata mismatch: %+v", claimed)
+	}
+	if claimed.ScheduleId != "nightly-bench" {
+		t.Fatalf("scheduleId=%q want nightly-bench", claimed.ScheduleId)
+	}
+
+	// TriggerSchedule with idempotent requestId returns the same StandaloneActivity execution.
+	trig1, err := en.TriggerSchedule("gpu-jobs", "nightly-bench", "manual-1")
+	if err != nil {
+		t.Fatalf("TriggerSchedule 1: %v", err)
+	}
+	trig2, err := en.TriggerSchedule("gpu-jobs", "nightly-bench", "manual-1")
+	if err != nil {
+		t.Fatalf("TriggerSchedule 2: %v", err)
+	}
+	if trig1.Execution != trig2.Execution {
+		t.Fatalf("TriggerSchedule idempotency broke: %+v vs %+v", trig1.Execution, trig2.Execution)
+	}
+	s, _, _ := en.DescribeSchedule("gpu-jobs", "nightly-bench")
+	if s.Info.ActionCount != 2 {
+		t.Fatalf("actionCount=%d want 2 (1 sweep + 1 idempotent trigger)", s.Info.ActionCount)
+	}
+}

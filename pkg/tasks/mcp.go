@@ -132,8 +132,10 @@ func mcpTools() []map[string]any {
 			"schedule_id":   str("Schedule ID."),
 			"cron":          str("Cron expression, e.g. \"0 3 * * *\"."),
 			"workflow_type": str("Workflow type to start on each tick."),
+			"activity_type": str("Standalone activity type to enqueue on each tick (for pull-claimed linked machines)."),
 			"task_queue":    str("Task queue."),
-		}, "namespace", "schedule_id", "workflow_type"),
+			"input":         obj("Optional action input payload — arbitrary JSON."),
+		}, "namespace", "schedule_id"),
 		tool("pause_schedule", "Pause or unpause a schedule.", map[string]any{
 			"namespace":   str("Namespace name."),
 			"schedule_id": str("Schedule ID."),
@@ -238,7 +240,9 @@ func (e *Embedded) mcpToolCall(rq call, req mcpRequest) answer {
 			Spec:       ScheduleSpec{CronString: []string{str("cron")}},
 			Action: ScheduleAction{
 				WorkflowType: TypeRef{Name: str("workflow_type")},
+				ActivityType: TypeRef{Name: str("activity_type")},
 				TaskQueue:    str("task_queue"),
+				Input:        a["input"],
 			},
 		}
 		if err := en.CreateSchedule(s); err != nil {
